@@ -1,0 +1,13 @@
+[project]
+name = "evonets"
+version = "0.1.0"
+description = "Vita artificiale e neuroevoluzione 2D con vincoli energetici"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0", "pygame-ce>=2.5.6"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
