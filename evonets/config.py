@@ -20,8 +20,13 @@ class Config:
     ang_drag: float = 6.0  # 1/s
     wall_restitution: float = 0.3
 
-    # Energia: unica riserva dell'agente, a zero si muore.
+    # Energia: unica riserva dell'agente, a zero si muore. Non si ricarica, quindi
+    # è anche la durata della vita: energy_init / metabolism_basal secondi da
+    # fermo, meno se ci si muove o si attraversa il veleno.
     energy_init: float = 100.0
+    metabolism_basal: float = 5.0  # energia/s solo per esistere
+    metabolism_move: float = 5.0  # energia/s in più a spinta piena (avanti o indietro)
+    metabolism_turn: float = 1.0  # energia/s in più a sterzata piena
 
     # Campo visivo
     vision_rays: int = 9
@@ -61,6 +66,8 @@ TUNABLES = (
     "turn_accel",
     "ang_drag",
     "wall_restitution",
+    "metabolism_basal",
+    "metabolism_move",
     "hazard_speed",
     "hazard_drain",
     "hazard_falloff",

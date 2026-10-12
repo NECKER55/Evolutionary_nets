@@ -91,11 +91,19 @@ class World:
         np.clip(self.pos, lo, hi, out=self.pos)
         self.bump = ((self.pos <= lo) | (self.pos >= hi)).any(axis=1)
 
-        # Pericoli: drenano energia, tanto più quanto si è vicini al centro
+        # Energia: la consumano il metabolismo e i pericoli, tanto più quanto si
+        # è vicini al loro centro
         self.hazards.step(dt)
         toxicity = self.hazards.intensity(self.pos) * active
         self.pain = np.minimum(toxicity, 1.0)
-        self.energy = np.maximum(self.energy - cfg.hazard_drain * toxicity * dt, 0.0)
+        # Metabolismo: si paga lo sforzo comandato, non la velocità raggiunta.
+        effort = (
+            cfg.metabolism_basal
+            + cfg.metabolism_move * np.abs(act[:, 0])
+            + cfg.metabolism_turn * np.abs(turn)
+        ) * active
+        spent = (effort + cfg.hazard_drain * toxicity) * dt
+        self.energy = np.maximum(self.energy - spent, 0.0)
         self.alive &= self.energy > 0.0
 
         self.done |= self.task.completed(self) & self.alive

@@ -63,8 +63,52 @@ def test_hazards_stay_inside_arena_and_spawn_is_safe():
         assert (w.hazards.pos + rad <= size + 1e-9).all()
 
 
+NO_METABOLISM = dict(metabolism_basal=0.0, metabolism_move=0.0, metabolism_turn=0.0)
+
+
 def one_static_hazard(**kw) -> Config:
-    return Config(n_hazards=1, hazard_speed=0.0, hazard_pulse=0.0, **kw)
+    """Un solo pericolo fermo e metabolismo spento, per isolare l'effetto del veleno."""
+    return Config(n_hazards=1, hazard_speed=0.0, hazard_pulse=0.0, **NO_METABOLISM, **kw)
+
+
+def test_resting_agent_lives_energy_over_basal_seconds():
+    cfg = no_hazards()
+    w = World(cfg, 1)
+    w.task.target = np.array([-500.0, -500.0])
+    lifetime = round(cfg.energy_init / cfg.metabolism_basal / cfg.dt)
+    for _ in range(lifetime - 2):
+        w.step(np.zeros((1, 2)))
+    assert w.alive[0]
+    for _ in range(4):
+        w.step(np.zeros((1, 2)))
+    assert not w.alive[0]
+
+
+def test_effort_costs_energy_in_both_directions():
+    cfg = no_hazards(arena_w=10_000.0, arena_h=10_000.0)
+    w = World(cfg, 4)
+    w.pos[:] = 5_000.0
+    w.task.target = np.array([-500.0, -500.0])
+    w.step(np.array([[0.0, 0.0], [1.0, 0.0], [-1.0, 0.0], [0.0, 1.0]]))
+    lost = (cfg.energy_init - w.energy) / cfg.dt
+    assert np.allclose(lost, [
+        cfg.metabolism_basal,
+        cfg.metabolism_basal + cfg.metabolism_move,
+        cfg.metabolism_basal + cfg.metabolism_move,
+        cfg.metabolism_basal + cfg.metabolism_turn,
+    ])
+
+
+def test_agent_that_completed_the_task_stops_paying():
+    cfg = no_hazards()
+    w = World(cfg, 1)
+    w.pos[0] = w.task.target
+    w.step(np.zeros((1, 2)))
+    assert w.done[0]
+    e = w.energy[0]
+    for _ in range(600):
+        w.step(np.ones((1, 2)))
+    assert w.energy[0] == e and w.alive[0]
 
 
 def test_hazard_drain_grows_from_edge_to_center():
