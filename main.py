@@ -1,8 +1,9 @@
-"""Arena, sensi e reti casuali: ogni agente è guidato dalla propria rete.
+"""Evoluzione di reti che guidano agenti in un'arena 2D.
 
-    uv run main.py                 # viewer interattivo
-    uv run main.py --evolve 100    # 100 generazioni senza grafica, con statistiche
-    uv run main.py --bench         # throughput della simulazione senza grafica
+    uv run main.py                          # evoluzione dal vivo nel viewer
+    uv run main.py --load runs/pop.npz      # riprende da un salvataggio
+    uv run main.py --evolve 300             # 300 generazioni senza grafica, poi salva
+    uv run main.py --bench                  # throughput della simulazione senza grafica
 """
 
 import argparse
@@ -16,6 +17,7 @@ from evonets.evo import Evolution
 from evonets.net import NeuralController
 
 SPEEDS = (1, 2, 4, 8, 16)
+TURBO_BUDGET = 0.08  # s di calcolo per fotogramma in modalità turbo
 
 
 def bench(cfg: Config, n_agents: int, steps: int, seed: int) -> None:
@@ -33,8 +35,16 @@ def bench(cfg: Config, n_agents: int, steps: int, seed: int) -> None:
     )
 
 
-def evolve(cfg: Config, generations: int, seed: int) -> None:
-    evo = Evolution(cfg, seed)
+def start(cfg: Config, seed: int, load: str | None) -> Evolution:
+    if load:
+        evo = Evolution.load(cfg, load)
+        print(f"ripreso {load}: generazione {evo.generation}, {cfg.population} individui")
+        return evo
+    return Evolution(cfg, seed)
+
+
+def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str) -> None:
+    evo = start(cfg, seed, load)
     print(f"{cfg.population} individui, compito: {evo.world.task.name}")
     print(" gen  completato  sopravv.  neuroni  collegam.  vita(s)  evento")
     t0 = time.perf_counter()
@@ -46,21 +56,24 @@ def evolve(cfg: Config, generations: int, seed: int) -> None:
             f"{'' if s['event'] == 'normale' else s['event']}"
         )
     el = time.perf_counter() - t0
-    print(f"{generations} generazioni in {el:.0f}s ({el / generations:.2f}s l'una)")
+    evo.save(save)
+    print(f"{generations} generazioni in {el:.0f}s ({el / generations:.2f}s l'una), salvato in {save}")
 
 
-def view(cfg: Config, n_agents: int, seed: int) -> None:
+def view(cfg: Config, seed: int, load: str | None, save: str) -> None:
     import pygame
 
     from evonets.viz.render import DIM, PLAYER, TEXT, Renderer
 
     pygame.init()
-    world = World(cfg, n_agents, seed)
-    ctrl = NeuralController(cfg, n_agents, seed)
+    evo = start(cfg, seed, load)
+    world = evo.world
     renderer = Renderer(world)
     clock = pygame.time.Clock()
-    focus, manual, paused, show_rays = 0, False, False, True
-    speed_i, tun_i, pop_seed = 0, 0, seed
+    focus = int(np.argmax(evo.age))
+    manual = paused = turbo = show_consts = False
+    show_rays = True
+    speed_i, tun_i, saved_at = 0, 0, None
     running = True
 
     while running:
@@ -75,28 +88,25 @@ def view(cfg: Config, n_agents: int, seed: int) -> None:
                     running = False
                 elif ev.key == pygame.K_SPACE:
                     paused = not paused
+                elif ev.key == pygame.K_t:
+                    turbo = not turbo
                 elif ev.key == pygame.K_v:
                     show_rays = not show_rays
                 elif ev.key == pygame.K_m:
                     manual = not manual
-                elif ev.key == pygame.K_r:
-                    world.reset()
-                    ctrl.reset()
-                elif ev.key == pygame.K_n:  # nuova disposizione di pericoli e spawn
-                    world.seed += 1
-                    world.reset()
-                    ctrl.reset()
-                elif ev.key == pygame.K_g:  # nuova popolazione di reti casuali
-                    pop_seed += 1
-                    ctrl = NeuralController(cfg, n_agents, pop_seed)
-                    world.reset()
+                elif ev.key == pygame.K_c:
+                    show_consts = not show_consts
+                elif ev.key == pygame.K_s:
+                    evo.save(save)
+                    saved_at = evo.generation
                 elif ev.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS):
                     speed_i = min(speed_i + 1, len(SPEEDS) - 1)
                 elif ev.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
                     speed_i = max(speed_i - 1, 0)
-                elif ev.key == pygame.K_TAB:
+                elif show_consts and ev.key == pygame.K_TAB:
                     tun_i = (tun_i + 1) % len(TUNABLES)
-                elif ev.key in (pygame.K_LEFTBRACKET, pygame.K_RIGHTBRACKET, pygame.K_COMMA, pygame.K_PERIOD):
+                elif show_consts and ev.key in (pygame.K_LEFTBRACKET, pygame.K_RIGHTBRACKET,
+                                                pygame.K_COMMA, pygame.K_PERIOD):
                     up = ev.key in (pygame.K_RIGHTBRACKET, pygame.K_PERIOD)
                     name = TUNABLES[tun_i]
                     setattr(cfg, name, round(getattr(cfg, name) * (1.1 if up else 1 / 1.1), 4))
@@ -109,12 +119,23 @@ def view(cfg: Config, n_agents: int, seed: int) -> None:
             ],
             dtype=float,
         )
+
+        def advance() -> None:
+            nonlocal focus
+            if evo.finished:
+                evo.next_generation()
+                focus = int(np.argmax(evo.age))  # il sopravvissuto più anziano, se c'è
+            else:
+                evo.step((focus, hand) if manual else None)
+
         if not paused:
-            for _ in range(SPEEDS[speed_i]):
-                actions = ctrl.act(world).copy()
-                if manual:
-                    actions[focus] = hand
-                world.step(actions)
+            if turbo:
+                deadline = time.perf_counter() + TURBO_BUDGET
+                while time.perf_counter() < deadline:
+                    advance()
+            else:
+                for _ in range(SPEEDS[speed_i]):
+                    advance()
 
         if world.done[focus]:
             status = "COMPITO COMPLETATO"
@@ -122,24 +143,38 @@ def view(cfg: Config, n_agents: int, seed: int) -> None:
             status = "vivo"
         else:
             status = "MORTO"
+        pace = "TURBO" if turbo else f"x{SPEEDS[speed_i]}"
         hud = [
-            (f"t={world.t:6.1f}s  x{SPEEDS[speed_i]}  {clock.get_fps():4.0f} fps"
-             f"{'  PAUSA' if paused else ''}", TEXT),
-            (f"compito: {world.task.name}   completato {int(world.done.sum())}/{world.n}   "
-             f"morti {int((~world.alive).sum())}", TEXT),
-            (f"agente {focus} ({'guidi tu' if manual else 'guida la rete'}): {status}", PLAYER),
+            (f"generazione {evo.generation}   t={world.t:5.1f}s   {pace}   {clock.get_fps():3.0f} fps"
+             f"{'   PAUSA' if paused else ''}", TEXT),
+            (f"compito: {world.task.name}", TEXT),
+            (f"completato {int(world.done.sum())}/{world.n}   morti {int((~world.alive).sum())}   "
+             f"sopravvissuti in gara {int((evo.age > 0).sum())}", TEXT),
+        ]
+        if evo.history:
+            h = evo.history[-1]
+            note = "" if h["event"] == "normale" else f"   [{h['event']}]"
+            hud.append((f"gen. precedente: {h['completed']}/{world.n} completati, "
+                        f"{h['neurons']:.1f} neuroni e {h['links']:.0f} collegamenti in media{note}", DIM))
+        hud += [
+            ("", TEXT),
+            (f"agente {focus} ({'guidi tu' if manual else 'guida la rete'}), "
+             f"età {evo.age[focus]}: {status}", PLAYER),
             (f"energia {world.energy[focus]:5.1f}   v={world.speed[focus]:5.1f} u/s   "
              f"w={world.ang_vel[focus]:+5.2f} rad/s", PLAYER),
             ("", TEXT),
         ]
-        for i, name in enumerate(TUNABLES):
-            mark = ">" if i == tun_i else " "
-            hud.append((f"{mark} {name:17s} {getattr(cfg, name):8.3f}", TEXT if i == tun_i else DIM))
-        hud.append(("", TEXT))
-        hud.append(("clic segui un agente | M guida manuale (WASD/frecce) | V raggi", DIM))
-        hud.append(("G nuove reti | N nuova arena | R reset | Spazio pausa | +/- velocita'", DIM))
-        hud.append(("Tab e ,/. (o [ ]) regola una costante | Esc esci", DIM))
-        renderer.draw(focus, hud, ctrl, show_rays)
+        if show_consts:
+            for i, name in enumerate(TUNABLES):
+                mark = ">" if i == tun_i else " "
+                hud.append((f"{mark} {name:17s} {getattr(cfg, name):8.3f}", TEXT if i == tun_i else DIM))
+            hud.append(("Tab scegli | , . (o [ ]) regola | C chiudi", DIM))
+        else:
+            hud.append(("+/- velocita' | T turbo | Spazio pausa | S salva | C costanti | Esc esci", DIM))
+            hud.append(("clic segui un agente | M guida manuale (WASD/frecce) | V raggi", DIM))
+        if saved_at is not None:
+            hud.append((f"salvata la generazione {saved_at} in {save}"[:100], DIM))
+        renderer.draw(focus, hud, evo.ctrl, show_rays, evo.age, evo.history)
         clock.tick(60)
 
     pygame.quit()
@@ -147,21 +182,25 @@ def view(cfg: Config, n_agents: int, seed: int) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--agents", type=int, default=None, help="numero di agenti (default: 20, 1000 in --bench)")
+    ap.add_argument("--agents", type=int, default=None, help="individui (default: 200; 1000 in --bench)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--evolve", type=int, metavar="G", help="fa evolvere G generazioni senza grafica")
+    ap.add_argument("--load", metavar="FILE", help="riprende da una popolazione salvata")
+    ap.add_argument("--save", metavar="FILE", default="runs/pop.npz",
+                    help="dove salvare (tasto S nel viewer, fine di --evolve)")
     ap.add_argument("--bench", action="store_true", help="misura il throughput senza grafica")
     ap.add_argument("--steps", type=int, default=5000, help="step per --bench")
     args = ap.parse_args()
     cfg = Config()
-    if args.evolve:
-        if args.agents:
-            cfg.population = args.agents
-        evolve(cfg, args.evolve, args.seed)
-    elif args.bench:
+    if args.bench:
         bench(cfg, args.agents or 1000, args.steps, args.seed)
+        return
+    if args.agents:
+        cfg.population = args.agents
+    if args.evolve:
+        evolve(cfg, args.evolve, args.seed, args.load, args.save)
     else:
-        view(cfg, args.agents or 20, args.seed)
+        view(cfg, args.seed, args.load, args.save)
 
 
 if __name__ == "__main__":

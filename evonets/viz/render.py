@@ -24,6 +24,7 @@ EXCITE = (255, 160, 50)
 INHIBIT = (70, 150, 255)
 IDLE = (52, 56, 70)
 PANEL_W = 440
+GRAPH_H = 190
 BODY_SHORT = ("avanti", "traverso", "rotaz.", "energia", "dolore", "urto")
 RINGS = 10
 
@@ -39,7 +40,8 @@ class Renderer:
         self.screen = pygame.display.set_mode((size[0] + PANEL_W, size[1]))
         pygame.display.set_caption("Evolutionary nets")
         self.overlay = pygame.Surface(size, pygame.SRCALPHA)
-        self.net_layer = pygame.Surface(self.panel.size, pygame.SRCALPHA)
+        self.net_h = self.panel.h - GRAPH_H  # sopra la rete, sotto il grafico
+        self.net_layer = pygame.Surface((PANEL_W, self.net_h), pygame.SRCALPHA)
         self.font = pygame.font.SysFont("monospace", 15)
         self.small = pygame.font.SysFont("monospace", 11)
 
@@ -81,10 +83,13 @@ class Renderer:
                 if close > 0.0:
                     pygame.draw.circle(self.screen, color, self._px(o + d * (1.0 - close) * rng), 4)
 
-    def _draw_agents(self, player: int | None) -> None:
+    def _draw_agents(self, player: int | None, ages=None) -> None:
         w = self.world
         rad = max(2, int(w.cfg.agent_radius * self.scale))
         for i in range(w.n):
+            if ages is not None and ages[i] > 0 and w.alive[i]:
+                # Anello: è un sopravvissuto delle generazioni precedenti.
+                pygame.draw.circle(self.screen, TEXT, self._px(w.pos[i]), rad + 3, 1)
             if i == player:
                 continue
             self._draw_agent(i, self._tint(MOCK, i), rad)
@@ -115,10 +120,14 @@ class Renderer:
         pygame.draw.line(self.screen, color, c, self._px(nose), 2)
 
     def _draw_hud(self, lines: list[tuple[str, tuple]]) -> None:
-        y = 8
-        for text, color in lines:
-            self.screen.blit(self.font.render(text, True, color), (10, y))
-            y += 18
+        # Fondo scuro semitrasparente: il testo resta leggibile sopra gli agenti.
+        images = [self.font.render(text, True, color) for text, color in lines]
+        width = min(max(img.get_width() for img in images) + 20, self.arena.w)
+        back = pygame.Surface((width, 18 * len(images) + 12), pygame.SRCALPHA)
+        back.fill((*BG, 190))
+        self.screen.blit(back, (0, 0))
+        for k, img in enumerate(images):
+            self.screen.blit(img, (10, 8 + 18 * k))
 
     @staticmethod
     def _signal(value: float):
@@ -132,14 +141,16 @@ class Renderer:
         a sinistra (raggruppati per raggio, poi il corpo), interni in cerchio,
         uscite a destra."""
         n_ch, n_vis = len(CHANNELS), brains.n_in - len(BODY)
-        h_px = self.panel.h
+        h_px = self.net_h
         pos, y = {}, 44.0
-        step = (h_px - 60.0 - 4.0 * (n_vis // n_ch) - 12.0) / brains.n_in
+        body_step = 12.0  # i sensi del corpo hanno un'etichetta ciascuno
+        n_body = brains.n_in - n_vis
+        step = (h_px - 60.0 - 3.0 * (n_vis // n_ch) - 12.0 - body_step * n_body) / n_vis
         for k in range(brains.n_in):
             if k and k <= n_vis and k % n_ch == 0:
-                y += 4.0 if k < n_vis else 12.0
+                y += 3.0 if k < n_vis else 12.0
             pos[k] = (78, int(y))
-            y += step
+            y += step if k < n_vis else body_step
         hidden = np.flatnonzero(brains.active[i])
         cx, cy, rad = 250, h_px // 2 + 10, 105
         for j, hid in enumerate(hidden):
@@ -172,15 +183,15 @@ class Renderer:
 
         n_ch, n_vis = len(CHANNELS), brains.n_in - len(BODY)
         for k, p in pos.items():
-            pygame.draw.circle(layer, self._signal(values[k]), p, 5)
+            pygame.draw.circle(layer, self._signal(values[k]), p, 4)
             if k < n_vis:  # il bordo dice che tipo di cosa guarda quel neurone
-                pygame.draw.circle(layer, HIT[k % n_ch], p, 5, 1)
+                pygame.draw.circle(layer, HIT[k % n_ch], p, 4, 1)
                 if k % n_ch == 0:
                     layer.blit(self.small.render(f"raggio {k // n_ch + 1}", True, DIM), (8, p[1] - 4))
             elif k < brains.n_in:
                 layer.blit(self.small.render(BODY_SHORT[k - n_vis], True, DIM), (8, p[1] - 6))
             else:
-                pygame.draw.circle(layer, TEXT, p, 5, 1)
+                pygame.draw.circle(layer, TEXT, p, 4, 1)
         for o, name in enumerate(("spinta", "sterzo")):
             p = pos[brains.n_in + brains.n_hidden + o]
             v = brains.state[i, brains.n_hidden + o]
@@ -191,7 +202,7 @@ class Renderer:
         layer.blit(self.small.render(head, True, TEXT), (8, 8))
         for x, title in ((60, "sensi"), (228, "interni"), (PANEL_W - 88, "motori")):
             layer.blit(self.small.render(title, True, DIM), (x, 24))
-        legend_y = self.panel.h - 16
+        legend_y = self.net_h - 16
         x = 8
         for text, color in (("eccita", EXCITE), ("inibisce", INHIBIT)) + tuple(zip(CHANNELS, HIT)):
             img = self.small.render(text, True, color)
@@ -199,8 +210,39 @@ class Renderer:
             x += img.get_width() + 8
         self.screen.blit(layer, self.panel.topleft)
 
-    def draw(self, focus: int, hud: list[tuple[str, tuple]], ctrl=None, show_rays: bool = True) -> None:
-        """`ctrl` (un NeuralController) abilita raggi e pannello della rete."""
+    def _draw_graph(self, history: list[dict]) -> None:
+        """Percentuale di successi per generazione: linea sottile = valore di
+        ogni generazione, linea spessa = media delle ultime 10."""
+        box = pygame.Rect(self.panel.x + 44, self.net_h + 30, PANEL_W - 64, GRAPH_H - 58)
+        pygame.draw.line(self.screen, BORDER, (self.panel.x, self.net_h), (self.panel.right, self.net_h), 1)
+        title = "successi (%) - sottile: ogni gen., spessa: media di 10"
+        self.screen.blit(self.small.render(title, True, DIM), (self.panel.x + 8, self.net_h + 8))
+        for pct in (0, 50, 100):
+            y = box.bottom - box.h * pct // 100
+            pygame.draw.line(self.screen, IDLE, (box.x, y), (box.right, y), 1)
+            self.screen.blit(self.small.render(f"{pct:3d}", True, DIM), (self.panel.x + 14, y - 6))
+        if not history:
+            return
+        pct = np.array([h["completed"] for h in history]) * 100.0 / self.world.n
+        csum = np.cumsum(np.insert(pct, 0, 0.0))
+        k = np.arange(1, len(pct) + 1)
+        start = np.maximum(k - 10, 0)
+        avg = (csum[k] - csum[start]) / (k - start)
+        xs = box.x + (k - 1) * box.w / max(len(pct) - 1, 1)
+        for values, color, width in ((pct, WALL, 1), (avg, TARGET, 2)):
+            pts = [(int(x), int(box.bottom - box.h * v / 100.0)) for x, v in zip(xs, values)]
+            if len(pts) > 1:
+                pygame.draw.lines(self.screen, color, False, pts, width)
+            else:
+                pygame.draw.circle(self.screen, color, pts[0], 2)
+        self.screen.blit(self.small.render("gen. 0", True, DIM), (box.x, box.bottom + 6))
+        last = self.small.render(f"gen. {history[-1]['generation']}: {pct[-1]:.0f}%  media {avg[-1]:.0f}%", True, TEXT)
+        self.screen.blit(last, (box.right - last.get_width(), box.bottom + 6))
+
+    def draw(self, focus: int, hud: list[tuple[str, tuple]], ctrl=None, show_rays: bool = True,
+             ages=None, history=None) -> None:
+        """`ctrl` (un NeuralController) abilita raggi e pannello della rete;
+        `ages` segna i sopravvissuti, `history` disegna il grafico dei successi."""
         self.screen.fill(BG)
         pygame.draw.rect(self.screen, ARENA, self.arena)
         self._draw_hazards()
@@ -208,10 +250,12 @@ class Renderer:
         obs = ctrl.senses.observe(self.world) if ctrl is not None else None
         if ctrl is not None and show_rays and self.world.alive[focus]:
             self._draw_vision(focus, ctrl.senses.vision, ctrl.senses.rays)
-        self._draw_agents(focus)
+        self._draw_agents(focus, ages)
         pygame.draw.rect(self.screen, BG, self.panel)
         pygame.draw.rect(self.screen, BORDER, self.arena, 2)
         if ctrl is not None:
             self._draw_net(ctrl.brains, focus, obs[focus])
+        if history is not None:
+            self._draw_graph(history)
         self._draw_hud(hud)
         pygame.display.flip()

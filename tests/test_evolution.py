@@ -135,3 +135,40 @@ def test_life_max_caps_a_generation_when_metabolism_is_off():
             n_hazards=0, life_max=2.0)
     s = e.run_generation()
     assert 2.0 <= s["duration"] < 2.1
+
+
+def test_save_and_load_resume_exactly_where_evolution_stopped(tmp_path):
+    a = evo(seed=4)
+    for _ in range(3):
+        a.run_generation()
+    path = tmp_path / "sub" / "pop.npz"
+    a.save(path)
+    b = Evolution.load(Config(net_hidden_max=6), path)
+    assert b.cfg.population == 30 and b.generation == 3 and b.history == a.history
+    # Dal salvataggio in poi le due evoluzioni vedono le stesse arene e si
+    # comportano allo stesso modo (il sorteggio dei figli riparte, quindi si
+    # confronta la generazione in corso, non le successive).
+    while not a.finished:
+        a.step()
+        b.step()
+    assert np.array_equal(a.world.done, b.world.done) and np.array_equal(a.world.pos, b.world.pos)
+
+
+def test_load_refuses_networks_of_a_different_shape(tmp_path):
+    a = evo()
+    a.save(tmp_path / "pop.npz")
+    try:
+        Evolution.load(Config(net_hidden_max=9), tmp_path / "pop.npz")
+    except ValueError as err:
+        assert "forma" in str(err)
+    else:
+        raise AssertionError("doveva rifiutare il salvataggio")
+
+
+def test_manual_override_replaces_only_that_agents_commands():
+    a, b = evo(seed=5, n_hazards=0), evo(seed=5, n_hazards=0)
+    for _ in range(30):
+        a.step()
+        b.step((3, np.array([1.0, 1.0])))
+    same = np.isclose(a.world.pos, b.world.pos).all(axis=1)
+    assert not same[3] and same[np.arange(30) != 3].all()
