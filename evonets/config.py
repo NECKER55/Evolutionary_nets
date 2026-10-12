@@ -41,6 +41,16 @@ class Config:
     net_conn_prob: float = 0.15
     net_weight_std: float = 1.0
 
+    # Riproduzione. Il genoma è una fila di blocchi, uno per neurone interno o
+    # motore: il blocco contiene se il neurone esiste, la sua soglia e tutti i
+    # suoi collegamenti in ingresso con i pesi.
+    crossover_rate: float = 0.5  # quota di figli con due genitori (gli altri: copia)
+    mut_weight_prob: float = 0.1  # probabilità che un singolo peso o soglia venga ritoccato
+    mut_weight_std: float = 0.3  # ampiezza del ritocco
+    mut_conn_add: float = 0.002  # probabilità che un collegamento assente compaia
+    mut_conn_del: float = 0.01  # probabilità che un collegamento presente sparisca
+    mut_neuron_toggle: float = 0.01  # probabilità che un neurone interno si accenda o si spenga
+
     # Compito
     target_radius: float = 3.0
 
