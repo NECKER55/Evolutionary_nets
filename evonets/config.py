@@ -41,6 +41,16 @@ class Config:
     net_conn_prob: float = 0.15
     net_weight_std: float = 1.0
 
+    # Generazioni. Una generazione finisce quando tutti sono morti o hanno
+    # completato il compito. Si riproduce solo chi lo ha completato.
+    population: int = 200
+    life_max: float = 60.0  # s, tetto di sicurezza se il metabolismo è spento
+    max_age: int = 5  # generazioni che un individuo può vivere al massimo
+    # Con un solo genitore, o nessuno (si riparte dagli ultimi genitori noti),
+    # questa quota di figli nasce con mutazioni più forti.
+    rescue_share: float = 0.5
+    rescue_strength: float = 3.0
+
     # Riproduzione. Il genoma è una fila di blocchi, uno per neurone interno o
     # motore: il blocco contiene se il neurone esiste, la sua soglia e tutti i
     # suoi collegamenti in ingresso con i pesi.

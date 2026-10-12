@@ -1,6 +1,7 @@
 """Arena, sensi e reti casuali: ogni agente è guidato dalla propria rete.
 
     uv run main.py                 # viewer interattivo
+    uv run main.py --evolve 100    # 100 generazioni senza grafica, con statistiche
     uv run main.py --bench         # throughput della simulazione senza grafica
 """
 
@@ -11,6 +12,7 @@ import numpy as np
 
 from evonets import Config, World
 from evonets.config import TUNABLES
+from evonets.evo import Evolution
 from evonets.net import NeuralController
 
 SPEEDS = (1, 2, 4, 8, 16)
@@ -29,6 +31,22 @@ def bench(cfg: Config, n_agents: int, steps: int, seed: int) -> None:
         f"({steps * cfg.dt / el:,.0f}x tempo reale), "
         f"completato: {int(world.done.sum())}, morti: {int((~world.alive).sum())}"
     )
+
+
+def evolve(cfg: Config, generations: int, seed: int) -> None:
+    evo = Evolution(cfg, seed)
+    print(f"{cfg.population} individui, compito: {evo.world.task.name}")
+    print(" gen  completato  sopravv.  neuroni  collegam.  vita(s)  evento")
+    t0 = time.perf_counter()
+    for _ in range(generations):
+        s = evo.run_generation()
+        print(
+            f"{s['generation']:4d}  {s['completed']:4d} {s['completed'] / cfg.population:5.0%}  "
+            f"{s['survivors']:8d}  {s['neurons']:7.1f}  {s['links']:9.1f}  {s['duration']:7.1f}  "
+            f"{'' if s['event'] == 'normale' else s['event']}"
+        )
+    el = time.perf_counter() - t0
+    print(f"{generations} generazioni in {el:.0f}s ({el / generations:.2f}s l'una)")
 
 
 def view(cfg: Config, n_agents: int, seed: int) -> None:
@@ -131,11 +149,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--agents", type=int, default=None, help="numero di agenti (default: 20, 1000 in --bench)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--evolve", type=int, metavar="G", help="fa evolvere G generazioni senza grafica")
     ap.add_argument("--bench", action="store_true", help="misura il throughput senza grafica")
     ap.add_argument("--steps", type=int, default=5000, help="step per --bench")
     args = ap.parse_args()
     cfg = Config()
-    if args.bench:
+    if args.evolve:
+        if args.agents:
+            cfg.population = args.agents
+        evolve(cfg, args.evolve, args.seed)
+    elif args.bench:
         bench(cfg, args.agents or 1000, args.steps, args.seed)
     else:
         view(cfg, args.agents or 20, args.seed)
