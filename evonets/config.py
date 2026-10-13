@@ -6,8 +6,8 @@ class Config:
     """Tutte le costanti fisiche in un posto solo. Unità: u (lunghezza), s (tempo)."""
 
     # Arena
-    arena_w: float = 100.0
-    arena_h: float = 70.0
+    arena_w: float = 200.0
+    arena_h: float = 140.0
     dt: float = 1.0 / 60.0
 
     # Agente (spinta + rotazione). Velocità limite ≈ thrust_accel / lin_drag.
@@ -24,9 +24,9 @@ class Config:
     # è anche la durata della vita: energy_init / metabolism_basal secondi da
     # fermo, meno se ci si muove o si attraversa il veleno.
     energy_init: float = 100.0
-    metabolism_basal: float = 5.0  # energia/s solo per esistere
-    metabolism_move: float = 5.0  # energia/s in più a spinta piena (avanti o indietro)
-    metabolism_turn: float = 1.0  # energia/s in più a sterzata piena
+    metabolism_basal: float = 2.5  # energia/s solo per esistere
+    metabolism_move: float = 2.5  # energia/s in più a spinta piena (avanti o indietro)
+    metabolism_turn: float = 0.5  # energia/s in più a sterzata piena
 
     # Campo visivo
     vision_rays: int = 9
@@ -37,15 +37,29 @@ class Config:
     # qualsiasi direzione (anelli compresi). Alla nascita ogni individuo ne ha
     # attivi un numero casuale e ogni collegamento possibile esiste con
     # probabilità net_conn_prob.
+    # "rate" = neuroni continui (tanh), ogni collegamento col suo segno;
+    # "spike-ei" = a impulsi, ogni neurone interno è tutto eccitatorio o tutto
+    # inibitorio.
+    net_type: str = "rate"
     net_hidden_max: int = 32
     net_conn_prob: float = 0.15
     net_weight_std: float = 1.0
+    # Solo "spike-ei": passi di rete per ogni passo di fisica, e guadagno della
+    # corrente in ingresso ai neuroni interni.
+    spike_substeps: int = 4
+    spike_gain: float = 3.0
+    # Quota di neuroni interni inibitori alla nascita, e se
+    # anche i sensi possono soltanto eccitare (False = liberi di fare entrambe le cose).
+    spike_inhibitory_share: float = 0.2
+    sensors_excitatory_only: bool = False
 
     # Generazioni. Una generazione finisce quando tutti sono morti o hanno
     # completato il compito. Si riproduce solo chi lo ha completato.
     population: int = 200
     life_max: float = 60.0  # s, tetto di sicurezza se il metabolismo è spento
-    max_age: int = 5  # generazioni che un individuo può vivere al massimo
+    # Generazioni che un individuo può vivere al massimo; 0 = nessun limite: un
+    # genitore resta finché continua a completare il compito.
+    max_age: int = 0
     # Con un solo genitore, o nessuno (si riparte dagli ultimi genitori noti),
     # questa quota di figli nasce con mutazioni più forti.
     rescue_share: float = 0.5
@@ -68,9 +82,9 @@ class Config:
     # (zero) al centro (hazard_drain) come profondità ** hazard_falloff.
     hazard_drain: float = 60.0  # energia/s al centro
     hazard_falloff: float = 2.0  # >1 = bordi miti e nucleo severo
-    n_hazards: int = 5
-    hazard_radius_min: float = 4.0
-    hazard_radius_max: float = 8.0
+    n_hazards: int = 12
+    hazard_radius_min: float = 5.0
+    hazard_radius_max: float = 12.0
     hazard_omega_min: float = 0.2  # rad/s
     hazard_omega_max: float = 0.8
     hazard_pulse: float = 0.15  # ampiezza relativa della pulsazione del raggio

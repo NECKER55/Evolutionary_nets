@@ -189,4 +189,6 @@ def test_hazard_speed_change_does_not_teleport():
     before = w.hazards.pos.copy()
     cfg.hazard_speed = 3.0
     w.hazards.step(cfg.dt)
-    assert np.abs(w.hazards.pos - before).max() < 1.0
+    # Si muovono al più alla nuova velocità, senza salti.
+    fastest = (w.hazards.amp * w.hazards.omega).max() * cfg.hazard_speed * cfg.dt
+    assert 0.0 < np.abs(w.hazards.pos - before).max() <= fastest * 1.001

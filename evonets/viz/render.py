@@ -30,10 +30,10 @@ RINGS = 10
 
 
 class Renderer:
-    def __init__(self, world: World, scale: float = 10.0):
+    def __init__(self, world: World, arena_px: int = 1000):
         self.world = world
-        self.scale = scale
         cfg = world.cfg
+        self.scale = scale = arena_px / cfg.arena_w  # pixel per unità: l'arena occupa sempre la stessa larghezza
         size = (int(cfg.arena_w * scale), int(cfg.arena_h * scale))
         self.arena = pygame.Rect(0, 0, *size)
         self.panel = pygame.Rect(size[0], 0, PANEL_W, size[1])
@@ -157,7 +157,8 @@ class Renderer:
             a = 2.0 * np.pi * j / len(hidden) - np.pi / 2.0
             pos[brains.n_in + hid] = (int(cx + rad * np.cos(a)), int(cy + rad * np.sin(a)))
         for o in range(brains.n_out):
-            pos[brains.n_in + brains.n_hidden + o] = (PANEL_W - 70, cy - 50 + 100 * o)
+            gap = 100 if brains.n_out <= 2 else 62
+            pos[brains.n_in + brains.n_hidden + o] = (PANEL_W - 70, int(cy + (o - (brains.n_out - 1) / 2) * gap))
         return pos
 
     def _draw_net(self, brains, i: int, obs: np.ndarray) -> None:
@@ -191,14 +192,22 @@ class Renderer:
             elif k < brains.n_in:
                 layer.blit(self.small.render(BODY_SHORT[k - n_vis], True, DIM), (8, p[1] - 6))
             else:
-                pygame.draw.circle(layer, TEXT, p, 4, 1)
-        for o, name in enumerate(("spinta", "sterzo")):
+                # Con i tipi fissi il bordo dice se il neurone eccita o inibisce.
+                rim, hid = TEXT, k - brains.n_in
+                if hasattr(brains, "inhibitory") and hid < brains.n_hidden:
+                    rim = INHIBIT if brains.inhibitory[i, hid] else EXCITE
+                pygame.draw.circle(layer, rim, p, 5 if rim is not TEXT else 4, 1)
+        for o, name in enumerate(brains.OUT_LABELS):
             p = pos[brains.n_in + brains.n_hidden + o]
             v = brains.state[i, brains.n_hidden + o]
-            layer.blit(self.small.render(f"{name} {v:+.2f}", True, TEXT), (p[0] - 26, p[1] + 10))
+            layer.blit(self.small.render(f"{name} {v:+.2f}", True, TEXT), (p[0] - 34, p[1] + 10))
 
         n_hidden = int(brains.active[i].sum())
-        head = f"rete dell'agente {i}: {n_hidden} neuroni interni, {len(links)} collegamenti"
+        kind = {"rate": "continua", "spike-ei": "a impulsi E/I"}[brains.KIND]
+        head = f"agente {i}, rete {kind}: {n_hidden} neuroni, {len(links)} collegamenti"
+        if hasattr(brains, "inhibitory"):
+            n_inh = int((brains.inhibitory[i] & brains.active[i]).sum())
+            head = f"agente {i}, rete {kind}: {n_hidden - n_inh} ecc. + {n_inh} inib., {len(links)} colleg."
         layer.blit(self.small.render(head, True, TEXT), (8, 8))
         for x, title in ((60, "sensi"), (228, "interni"), (PANEL_W - 88, "motori")):
             layer.blit(self.small.render(title, True, DIM), (x, 24))

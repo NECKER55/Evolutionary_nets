@@ -2,6 +2,90 @@
 
 Idee e direzioni non ancora in programma. Non descrivono il codice attuale.
 
+## Percorso futuro: reti che imparano durante la vita
+
+Obiettivo dichiarato: arrivare, se possibile, a una rete che impara *online*,
+cioè mentre vive, e non solo di generazione in generazione. Oggi i pesi sono
+fissi dalla nascita alla morte.
+
+### Il punto chiave: l'evoluzione deve avere un motivo per inventare l'apprendimento
+
+Se ogni vita presenta lo stesso problema (trova il cerchio azzurro, evita il
+verde), la soluzione più economica è scriverla nei pesi alla nascita. Un agente
+che deve imparare perde tempo rispetto a uno che nasce già capace, quindi la
+selezione lo scarta. Si può dare alla rete tutta la plasticità che si vuole:
+resterà inutilizzata.
+
+Perché imparare convenga servono tre condizioni, e riguardano il mondo, non la
+rete:
+
+- **Qualcosa che i geni non possono prevedere.** Esempio: a ogni vita si
+  sorteggia quale "colore" è cibo e quale è veleno. Chi nasce con una regola
+  fissa sbaglia metà delle volte; vince solo chi assaggia e si adatta.
+- **Più occasioni nella stessa vita.** Oggi chi tocca il bersaglio ha finito:
+  non c'è una seconda volta in cui usare ciò che ha capito. Servono bersagli
+  ripetuti, per esempio cibo che ricarica energia e ricompare altrove.
+- **Un segnale di "bene" e "male".** Il dolore c'è già; manca il corrispettivo
+  positivo, che arriverebbe col cibo che ricarica.
+
+Senza queste, il resto è lavoro sprecato. Con queste, anche una rete semplice
+può sviluppare apprendimento.
+
+### Quanto dettaglio biologico serve nei neuroni a impulsi
+
+Il dettaglio serve dove tocca l'apprendimento, non dove rende il neurone più
+"vero". In ordine di utilità:
+
+| Dettaglio | A cosa serve | Giudizio |
+|---|---|---|
+| Collegamenti che cambiano forza in base a chi scatta prima di chi | è il meccanismo di apprendimento vero e proprio | indispensabile |
+| Segnale diffuso di ricompensa e punizione (l'analogo della dopamina) che dice ai collegamenti quando cambiare | senza, la rete cambia ma non sa in che direzione | indispensabile |
+| Geni che descrivono la *regola* di apprendimento, non i pesi | è ciò che l'evoluzione deve poter regolare | indispensabile |
+| Autoregolazione dell'attività (un neurone troppo attivo si calma, uno muto si sensibilizza) | impedisce alla rete che impara di esplodere o spegnersi | quasi necessario |
+| Costo energetico per ogni impulso | spinge verso reti parsimoniose; in natura il cervello consuma circa un quinto dell'energia del corpo, da noi pensare è gratis | utile ed economico |
+| Pausa obbligata dopo l'impulso, affaticamento | dinamiche più ricche | facoltativo |
+| Ritardi sui collegamenti | senso del tempo più fine | facoltativo |
+
+Cosa **non** vale la pena: canali ionici, forma dettagliata dell'impulso,
+neuroni con più compartimenti, varietà di sostanze chimiche. Moltiplicano il
+costo di calcolo (le reti a impulsi costano già circa il doppio di quelle
+continue) e non aggiungono capacità di apprendere. Il neurone attuale è al
+livello di dettaglio giusto: tutto ciò che conta si può aggiungere sopra.
+
+### Il ruolo delle reti continue (`rate`)
+
+Tenerle come termine di paragone anche per l'apprendimento. Le stesse regole
+("i collegamenti tra neuroni attivi insieme si rinforzano, modulati dalla
+ricompensa") funzionano anche sui neuroni continui, sono più semplici e meglio
+studiate. Se un giorno `spike-ei` impara e `rate` no, o viceversa, è un
+risultato vero.
+
+### Ordine consigliato
+
+1. Cambiare il mondo perché imparare convenga: cibo che ricarica e ricompare, e
+   un elemento sorteggiato a ogni vita.
+2. Aggiungere il segnale di ricompensa come senso.
+3. Aggiungere la plasticità con regola evolvibile, prima su `rate` e poi su
+   `spike-ei`.
+4. Solo dopo, i dettagli di contorno della tabella.
+
+È un cambio di direzione rispetto ai compiti 2 e 3 del piano iniziale (spingere
+l'oggetto, consegna): le due strade sono compatibili ma vanno messe in ordine.
+
+### Cose da ricordare quando si riprende
+
+- **Si combina col genoma a regole di crescita** descritto più sotto: il genoma
+  descriverebbe come la rete cresce *e* come impara.
+- **Confronti tra tipi di rete: servono più prove.** Finora ogni tipo è stato
+  provato una volta sola, con un solo seme. Prima di trarre conclusioni conviene
+  ripetere ogni configurazione con almeno 5 semi e guardare media e variabilità.
+- **Osservazione da verificare:** nelle reti a impulsi la quota di neuroni
+  inibitori è salita da sola dal 20% iniziale a circa il 36–38% in 150
+  generazioni (mappa piccola, una prova). Non è chiaro se sia un vantaggio reale
+  o una deriva casuale.
+- **Interruttore non ancora provato in evoluzione:** `sensors_excitatory_only`
+  (sensi solo eccitatori). Sulle reti casuali non cambia i successi iniziali.
+
 ## Percorso futuro: un genoma che descrive regole di crescita
 
 ### L'idea
@@ -100,10 +184,6 @@ nell'ordine degli ingressi.
 - **Due copie di ogni gene con dominanza** (come nei genomi diploidi): protegge
   varianti nascoste e rallenta la perdita di varietà. Complessità notevole per
   un beneficio incerto qui.
-- **Plasticità**: pesi che cambiano durante la vita secondo regole a loro volta
-  evolute. Si combina bene col genoma indiretto (il genoma descrive come la rete
-  cresce *e* come impara).
-- **Neuroni di tipo fisso eccitatorio o inibitorio**: un gene per neurone decide
-  il tipo; da confrontare coi pesi con segno attuali.
+- **Plasticità**: vedi la sezione "reti che imparano durante la vita" sopra.
 - **Corpo evolvibile**: numero, apertura e portata dei raggi nel genoma, con un
   costo energetico per ogni sensore.
