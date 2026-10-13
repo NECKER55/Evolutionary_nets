@@ -20,8 +20,9 @@ class Evolution:
 
     Una generazione vive nell'arena finché tutti sono morti o hanno completato
     il compito. Poi:
-      - chi ha completato è genitore e, se non ha raggiunto `max_age`, passa
-        identico alla generazione successiva;
+      - chi ha completato è genitore e passa identico alla generazione
+        successiva, dove dovrà completare di nuovo per restare (`max_age`, se
+        impostato, aggiunge un limite di età);
       - i posti restanti vanno ai figli, con genitori sorteggiati alla pari;
       - con un solo genitore, una quota dei figli nasce con mutazioni più forti;
       - senza genitori si riparte dagli ultimi genitori noti (tutti figli, una
@@ -74,12 +75,14 @@ class Evolution:
             "links": float(brains.links.sum(axis=(1, 2)).mean()),
             "oldest": int(self.age.max()),
         }
+        if hasattr(brains, "inhibitory"):  # quota di inibitori tra i neuroni interni esistenti
+            stats["inhibitory"] = float(brains.inhibitory[brains.active].mean()) if brains.active.any() else 0.0
 
         genome = brains.genome
         if len(winners):
             parents = genome.take(winners)
             self.last_parents = parents
-            keep = winners[self.age[winners] + 1 < cfg.max_age]
+            keep = winners if cfg.max_age <= 0 else winners[self.age[winners] + 1 < cfg.max_age]
             survivors, survivor_age = genome.take(keep), self.age[keep] + 1
             stats["event"] = NORMAL if len(winners) > 1 else ONE_PARENT
         else:
@@ -113,20 +116,29 @@ class Evolution:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         g = self.ctrl.brains.genome
-        data = dict(weights=g.weights, bias=g.bias, conn=g.conn, active=g.active, age=self.age,
+        data = dict(weights=g.weights, traits=g.traits, conn=g.conn, active=g.active, age=self.age,
+                    net_type=self.cfg.net_type,
                     generation=self.generation, world_seed=self.world.seed,
                     history=json.dumps(self.history))
         if self.last_parents is not None:
             lp = self.last_parents
-            data.update(lp_weights=lp.weights, lp_bias=lp.bias, lp_conn=lp.conn, lp_active=lp.active)
+            data.update(lp_weights=lp.weights, lp_traits=lp.traits, lp_conn=lp.conn, lp_active=lp.active)
         np.savez_compressed(path, **data)
 
     @classmethod
     def load(cls, cfg: Config, path) -> "Evolution":
-        """Riprende da un salvataggio. La popolazione ha la dimensione salvata;
-        la forma delle reti deve coincidere con la configurazione attuale."""
+        """Riprende da un salvataggio. Dimensione della popolazione e tipo di
+        rete sono quelli salvati; la forma delle reti deve coincidere con la
+        configurazione attuale."""
         d = np.load(path)
+
+        def traits(prefix=""):  # i salvataggi più vecchi avevano solo la soglia
+            if prefix + "traits" in d:
+                return d[prefix + "traits"]
+            return d[prefix + "bias"][:, :, None]
+
         cfg.population = len(d["weights"])
+        cfg.net_type = str(d["net_type"]) if "net_type" in d else "rate"
         evo = cls(cfg, int(d["world_seed"]))
         expected = evo.ctrl.brains.weights.shape[1:]
         if d["weights"].shape[1:] != expected:
@@ -134,10 +146,10 @@ class Evolution:
                 f"{path}: reti di forma {d['weights'].shape[1:]}, ma la configurazione attuale "
                 f"prevede {expected} (sono cambiati i raggi, i sensi o net_hidden_max?)"
             )
-        evo.ctrl.brains.set_genome(Genome(d["weights"], d["bias"], d["conn"], d["active"]))
+        evo.ctrl.brains.set_genome(Genome(d["weights"], traits(), d["conn"], d["active"]))
         evo.age = d["age"]
         evo.generation = int(d["generation"])
         evo.history = json.loads(str(d["history"]))
         if "lp_weights" in d:
-            evo.last_parents = Genome(d["lp_weights"], d["lp_bias"], d["lp_conn"], d["lp_active"])
+            evo.last_parents = Genome(d["lp_weights"], traits("lp_"), d["lp_conn"], d["lp_active"])
         return evo

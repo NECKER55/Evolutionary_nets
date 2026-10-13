@@ -4,7 +4,7 @@ from evonets import Config
 from evonets.evo import Evolution
 from evonets.evo.evolution import NORMAL, ONE_PARENT, RANDOM, RESTART
 
-FIELDS = ("weights", "bias", "conn", "active")
+FIELDS = ("weights", "traits", "conn", "active")
 NO_MUTATION = dict(mut_weight_prob=0.0, mut_conn_add=0.0, mut_conn_del=0.0, mut_neuron_toggle=0.0)
 
 
@@ -106,7 +106,21 @@ def test_two_parents_get_no_stronger_variations():
     assert d[2:].max() < 3 * np.median(d[2:])  # un solo livello di mutazione
 
 
-def test_individual_dies_of_old_age_but_still_reproduces_that_last_time():
+def test_by_default_a_parent_lives_as_long_as_it_keeps_completing_the_task():
+    e = evo(crossover_rate=0.0)
+    champion = individual(e.ctrl.brains.genome, 5)
+    where = 5
+    for generation in range(1, 9):
+        assert finish(e, [where])["survivors"] == 1
+        where = 0  # i sopravvissuti stanno in testa
+        assert equal(individual(e.ctrl.brains.genome, 0), champion)
+        assert e.age[0] == generation
+    finish(e, [3])  # stavolta fallisce: sparisce, resta solo chi ha completato
+    assert not equal(individual(e.ctrl.brains.genome, 0), champion)
+    assert e.age[0] == 1 and (e.age[1:] == 0).all()
+
+
+def test_with_an_age_limit_an_individual_dies_of_old_age_but_reproduces_that_last_time():
     e = evo(crossover_rate=0.0, max_age=3, **NO_MUTATION)
     champion = individual(e.ctrl.brains.genome, 5)
     assert finish(e, [5])["survivors"] == 1  # seconda vita

@@ -1,6 +1,9 @@
 import numpy as np
 
-from .brain import Brains
+from .brain import Brains, SpikingBrains
+
+# tipo di rete -> (classe, numero di neuroni motori)
+NET_TYPES = {"rate": (Brains, 2), "spike-ei": (SpikingBrains, 4)}
 from .sensors import Senses
 
 
@@ -28,11 +31,15 @@ class RandomWalkController:
 
 
 class NeuralController:
-    """Una rete per agente: sensi -> rete -> (spinta, sterzata)."""
+    """Una rete per agente: sensi -> rete -> (spinta, sterzata).
+    Il tipo di rete è scelto da `cfg.net_type`."""
 
     def __init__(self, cfg, n: int, seed: int = 0):
         self.senses = Senses(cfg)
-        self.brains = Brains(cfg, n, self.senses.size, 2, seed)
+        if cfg.net_type not in NET_TYPES:
+            raise ValueError(f"net_type sconosciuto: {cfg.net_type!r} (validi: {', '.join(NET_TYPES)})")
+        kind, n_motors = NET_TYPES[cfg.net_type]
+        self.brains = kind(cfg, n, self.senses.size, n_motors, seed)
 
     def reset(self) -> None:
         self.brains.reset_state()

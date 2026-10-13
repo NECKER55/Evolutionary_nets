@@ -6,7 +6,7 @@ from evonets.net import Brains
 
 N_IN, N_OUT = 10, 2
 NO_MUTATION = dict(mut_weight_prob=0.0, mut_conn_add=0.0, mut_conn_del=0.0, mut_neuron_toggle=0.0)
-FIELDS = ("weights", "bias", "conn", "active")
+FIELDS = ("weights", "traits", "conn", "active")
 
 
 def population(n=40, seed=0, **kw):
@@ -35,11 +35,11 @@ def test_crossover_takes_each_neuron_block_whole_from_one_parent():
     h = parents.active.shape[1]
     from_mother = from_father = 0
     for k in range(30):
-        for block in range(parents.bias.shape[1]):
+        for block in range(parents.traits.shape[1]):
             def is_from(p):
                 ok = (np.array_equal(kids.weights[k, block], parents.weights[p, block])
                       and np.array_equal(kids.conn[k, block], parents.conn[p, block])
-                      and kids.bias[k, block] == parents.bias[p, block])
+                      and np.array_equal(kids.traits[k, block], parents.traits[p, block]))
                 return ok and (block >= h or kids.active[k, block] == parents.active[p, block])
             m, f = is_from(0), is_from(1)
             assert m or f  # mai un miscuglio dentro lo stesso neurone
@@ -68,7 +68,7 @@ def test_mutation_is_small_and_touches_every_kind_of_gene():
     changed_w = (g.weights != before.weights).mean()
     assert 0.08 < changed_w < 0.12  # ~mut_weight_prob
     assert np.abs(g.weights - before.weights).max() < 6 * cfg.mut_weight_std
-    assert (g.bias != before.bias).any()
+    assert (g.traits != before.traits).any()
     flipped = g.conn != before.conn
     assert (flipped & ~before.conn).any() and (flipped & before.conn).any()  # compaiono e spariscono
     assert flipped.mean() < 0.01
