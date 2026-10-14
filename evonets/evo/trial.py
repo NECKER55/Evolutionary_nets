@@ -12,20 +12,24 @@ TRIAL_SEED = 1_000_000
 
 
 class Trial:
-    """Mette alla prova una sola rete: `arenas` arene, in ciascuna `clones`
-    copie identiche della rete partono da punti diversi. Misura quante volte
-    completa il compito e in quanto tempo.
+    """Mette alla prova una o più reti (`genomes`, una per riga): `arenas`
+    arene, in ciascuna `clones` copie identiche di ogni rete partono da punti
+    diversi. Misura quante volte ciascuna completa il compito e in quanto tempo.
 
     Si avanza a pezzi (`run(budget)`), così l'interfaccia resta reattiva.
     """
 
-    def __init__(self, cfg, genome: Genome, arenas: int = 20, clones: int = 50, seed: int = TRIAL_SEED):
+    def __init__(self, cfg, genomes: Genome, arenas: int = 20, clones: int = 50, seed: int = TRIAL_SEED):
         self.cfg, self.arenas, self.clones, self.seed = cfg, arenas, clones, seed
-        self.world = World(cfg, clones, seed)
-        self.ctrl = NeuralController(cfg, clones)
-        self.ctrl.brains.set_genome(genome.take([0] * clones))
-        self.done_at = np.full(clones, np.nan)  # quando ciascuna copia ha completato
-        self.completed: list[int] = []  # per arena: copie che hanno completato
+        self.k = len(genomes)
+        self.owner = np.repeat(np.arange(self.k), clones)  # di quale rete è ogni copia
+        n = len(self.owner)
+        self.world = World(cfg, n, seed)
+        self.ctrl = NeuralController(cfg, n)
+        self.ctrl.brains.set_genome(genomes.take(self.owner))
+        self.done_at = np.full(n, np.nan)  # quando ciascuna copia ha completato
+        self.completed: list[int] = []  # per arena: copie che hanno completato (tutte le reti)
+        self.wins = np.zeros(self.k, dtype=int)  # per rete: copie che hanno completato, in tutto
         self.times: list[float] = []  # tempi di completamento, di tutte le arene
 
     @property
@@ -40,6 +44,7 @@ class Trial:
         if (w.alive & ~w.done).any() and w.t < self.cfg.life_max:
             return
         self.completed.append(int(w.done.sum()))
+        self.wins += np.bincount(self.owner[w.done], minlength=self.k)
         self.times += list(self.done_at[w.done])
         if not self.finished:
             w.seed = self.seed + len(self.completed)
@@ -55,5 +60,9 @@ class Trial:
 
     @property
     def rate(self) -> float:
-        """Quota di prove completate finora."""
-        return sum(self.completed) / max(len(self.completed) * self.clones, 1)
+        """Quota di prove completate finora, da tutte le reti insieme."""
+        return sum(self.completed) / max(len(self.completed) * self.clones * self.k, 1)
+
+    def rates(self) -> np.ndarray:
+        """Quota di prove completate finora, rete per rete."""
+        return self.wins / max(len(self.completed) * self.clones, 1)

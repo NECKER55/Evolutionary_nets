@@ -45,4 +45,15 @@ class NeuralController:
         self.brains.reset_state()
 
     def act(self, world) -> np.ndarray:
-        return self.brains.step(self.senses.observe(world))
+        """Comandi di tutti gli agenti. Si calcolano solo per chi è ancora in
+        gara: per i morti e per chi ha completato la fisica ignora i comandi,
+        quindi danno 0 e la loro rete resta ferma. Il risultato della corsa non
+        cambia, il calcolo si alleggerisce man mano che la gara si sfoltisce."""
+        racing = world.alive & ~world.done
+        if racing.all():
+            return self.brains.step(self.senses.observe(world))
+        actions = np.zeros((world.n, 2))
+        rows = np.flatnonzero(racing)
+        if len(rows):
+            actions[rows] = self.brains.step_some(self.senses.observe(world, rows), rows)
+        return actions

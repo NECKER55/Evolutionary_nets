@@ -80,3 +80,23 @@ def test_neural_controller_drives_the_world():
     for _ in range(200):
         w.step(ctrl.act(w))
     assert (np.linalg.norm(w.pos - start, axis=1) > 1.0).any()
+
+
+def test_networks_are_computed_only_for_who_is_racing_with_identical_results():
+    """Morti e arrivati non vengono più calcolati: per chi è in gara i comandi
+    devono restare identici, bit per bit, al calcolo di tutta la popolazione."""
+    for net in ("rate", "spike-ei"):
+        cfg = Config(net_type=net)
+        world = World(cfg, 40, seed=1)
+        fast, full = NeuralController(cfg, 40, seed=2), NeuralController(cfg, 40, seed=2)
+        for t in range(120):
+            if t == 30:
+                world.alive[::3] = False  # alcuni muoiono, altri arrivano
+            if t == 60:
+                world.done[1::5] &= world.alive[1::5]
+            racing = world.alive & ~world.done
+            a = fast.act(world)
+            b = full.brains.step(full.senses.observe(world))
+            assert np.array_equal(a[racing], b[racing])
+            assert (a[~racing] == 0.0).all()
+            world.step(b)

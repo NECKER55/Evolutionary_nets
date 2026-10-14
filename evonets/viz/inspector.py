@@ -22,7 +22,9 @@ from .render import BG, BORDER, DEAD, DIM, EXCITE, HIT, IDLE, INHIBIT, MOCK, PLA
 ROW = 20
 LINE = 16
 EXPORT_DIR = Path("runs") / "genomi"
-POPULATION, CHAMPIONS = "population", "champions"
+POPULATION, SURVIVORS, CHAMPIONS = "population", "survivors", "champions"
+SOURCES = (CHAMPIONS, SURVIVORS, POPULATION)
+TAB_LABELS = {CHAMPIONS: "1 campioni", SURVIVORS: "2 sopravv.", POPULATION: "3 tutti"}
 
 
 def bezier(a, b, lift: float, n: int = 16) -> list[tuple[int, int]]:
@@ -33,17 +35,37 @@ def bezier(a, b, lift: float, n: int = 16) -> list[tuple[int, int]]:
     return [(int(x), int(y)) for x, y in pts]
 
 
+def arrow(surface, color, a, b, size: float = 9.0, back: float = 11.0) -> None:
+    """Punta di freccia sulla linea da a a b, appena prima di b (il neurone)."""
+    d = np.array(b, dtype=float) - np.array(a, dtype=float)
+    n = np.hypot(*d)
+    if n < 1e-6:
+        return
+    d /= n
+    tip = np.array(b) - d * back
+    side = np.array([-d[1], d[0]]) * size * 0.45
+    base = tip - d * size
+    pygame.draw.polygon(surface, color, [tuple(tip), tuple(base + side), tuple(base - side)])
+
+
 class RowList:
-    """Elenco scorrevole con una riga scelta. Righe: (testo, chiave)."""
+    """Elenco scorrevole con una riga scelta. Righe: (testo, chiave).
+    `header`: righe fisse in cima che dicono cosa c'è in ogni colonna."""
 
     def __init__(self):
         self.rows: list[tuple[str, object]] = []
+        self.header: list[str] = []
         self.selected, self.scroll = 0, 0
         self.rect = pygame.Rect(0, 0, 0, 0)
 
     @property
+    def top(self) -> int:
+        """Dove comincia la prima riga, sotto l'intestazione."""
+        return self.rect.y + LINE * len(self.header) + (4 if self.header else 0)
+
+    @property
     def visible(self) -> int:
-        return max(self.rect.h // ROW, 1)
+        return max((self.rect.bottom - self.top) // ROW, 1)
 
     def select(self, k: int) -> None:
         self.selected = int(np.clip(k, 0, max(len(self.rows) - 1, 0)))
@@ -57,8 +79,8 @@ class RowList:
         if ev.type == pygame.MOUSEWHEEL and self.rect.collidepoint(pygame.mouse.get_pos()):
             self.scroll = int(np.clip(self.scroll - 3 * ev.y, 0, max(len(self.rows) - self.visible, 0)))
         elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and self.rect.collidepoint(ev.pos):
-            k = self.scroll + (ev.pos[1] - self.rect.y) // ROW
-            if k < len(self.rows) and k != self.selected:
+            k = self.scroll + (ev.pos[1] - self.top) // ROW
+            if ev.pos[1] >= self.top and k < len(self.rows) and k != self.selected:
                 self.select(k)
                 return True
         elif ev.type == pygame.KEYDOWN and self.rows:
@@ -71,14 +93,20 @@ class RowList:
         return False
 
     def draw(self, s, font) -> None:
+        for j, text in enumerate(self.header):
+            s.blit(font.render(text, True, TEXT if j == 0 else BORDER), (self.rect.x + 6, self.rect.y + LINE * j))
+        if self.header:
+            y = self.top - 3
+            pygame.draw.line(s, BORDER, (self.rect.x, y), (self.rect.right, y), 1)
         for j, k in enumerate(range(self.scroll, min(len(self.rows), self.scroll + self.visible))):
-            y = self.rect.y + j * ROW
+            y = self.top + j * ROW
             if k == self.selected:
                 pygame.draw.rect(s, IDLE, (self.rect.x, y, self.rect.w, ROW))
             s.blit(font.render(self.rows[k][0], True, TEXT if k == self.selected else DIM), (self.rect.x + 6, y + 4))
         if len(self.rows) > self.visible:  # barra di scorrimento
-            h = self.rect.h * self.visible / len(self.rows)
-            y = self.rect.y + self.rect.h * self.scroll / len(self.rows)
+            span = self.rect.bottom - self.top
+            h = span * self.visible / len(self.rows)
+            y = self.top + span * self.scroll / len(self.rows)
             pygame.draw.rect(s, BORDER, (self.rect.right - 3, y, 3, max(h, 8)))
 
 
@@ -97,8 +125,12 @@ class NetView:
         self.layout()
 
     def layout(self) -> None:
-        """Gli interni stanno nella colonna della loro distanza dai sensi,
-        ordinati per la posizione media di chi li alimenta (meno incroci)."""
+        """Sensi in colonna a sinistra, motori a destra, neuroni interni su
+        un'ellisse in mezzo: così i collegamenti tra interni sono corde ben
+        visibili. Sull'arco sinistro gli interni che ascoltano soprattutto i
+        sensi, sul destro quelli che parlano soprattutto ai motori; su ogni
+        arco l'ordine dall'alto in basso segue la posizione media di chi li
+        alimenta (meno incroci)."""
         self.pos = {}
         a, G = self.anat, self.rect
         if a is None:
@@ -113,18 +145,34 @@ class NetView:
                 self.pos[v] = (int(x), int(y0 + j * gap))
 
         column([k for k in range(a.n_in) if show[k]], G.x + 104, 24)
-        hidden = [v for v in range(a.n_in, a.n_in + a.n_hidden) if show[v]]
-        depth = {v: max(int(a.depth[v]), 1) for v in hidden}  # senza sensi a monte: prima colonna
-        n_cols = max(depth.values(), default=1)
-        lo, hi = G.x + 180, G.right - 140
-        xs = np.linspace(lo, hi, n_cols) if n_cols > 1 else [(lo + hi) / 2]
-        for d in range(1, n_cols + 1):
-            def bary(v):
-                ys = [self.pos[s][1] for s in a.inputs_of(v) if s in self.pos]
-                return np.mean(ys) if ys else (top + bottom) / 2
-
-            column(sorted((v for v in hidden if depth[v] == d), key=bary), xs[d - 1], 44)
         column(list(range(a.n_in + a.n_hidden, a.n_nodes)), G.right - 72, 70)
+        hidden = [v for v in range(a.n_in, a.n_in + a.n_hidden) if show[v]]
+        if not hidden:
+            return
+        motors = range(a.n_in + a.n_hidden, a.n_nodes)
+
+        def lean(v):  # >0: parla ai motori più di quanto ascolti i sensi
+            ins = [abs(a.weight(s, v)) for s in a.inputs_of(v)]
+            outs = [abs(a.weight(v, d)) for d in a.outputs_of(v)]
+            from_senses = sum(abs(a.weight(s, v)) for s in a.inputs_of(v) if s < a.n_in)
+            to_motors = sum(abs(a.weight(v, d)) for d in a.outputs_of(v) if d in motors)
+            return to_motors / (sum(outs) or 1.0) - from_senses / (sum(ins) or 1.0)
+
+        def bary(v):
+            ys = [self.pos[s][1] for s in a.inputs_of(v) if s < a.n_in and s in self.pos]
+            return np.mean(ys) if ys else (top + bottom) / 2
+
+        ranked = sorted(hidden, key=lean)
+        half = (len(ranked) + 1) // 2
+        left, right = sorted(ranked[:half], key=bary), sorted(ranked[half:], key=bary)
+        lo, hi = G.x + 175, G.right - 135
+        cx, cy = (lo + hi) / 2, (top + bottom) / 2
+        rx, ry = (hi - lo) / 2, (bottom - top) / 2 - 14
+        gap = 0.4  # radianti liberi in cima e in fondo: i due archi non si toccano
+        for nodes, a0, a1 in ((left, 1.5 * np.pi - gap, 0.5 * np.pi + gap), (right, -0.5 * np.pi + gap, 0.5 * np.pi - gap)):
+            angles = np.linspace(a0, a1, len(nodes)) if len(nodes) > 1 else [(a0 + a1) / 2]
+            for v, t in zip(nodes, angles):
+                self.pos[v] = (int(cx + rx * np.cos(t)), int(cy + ry * np.sin(t)))
 
     def node_at(self, p) -> int | None:
         best, dist = None, 12.0
@@ -156,13 +204,13 @@ class NetView:
             return
         sm = a.summary()
         head = (f"rete {KIND_NAMES[a.kind]}: {sm['neurons']} interni ({sm['useful_neurons']} utili), "
-                f"{sm['links']} colleg. ({sm['useful_links']} utili)")
+                f"{sm['links']} coll. ({sm['useful_links']} utili)")
         s.blit(font.render(head, True, TEXT), (G.x + 8, G.y + 4))
         sub = f"sensi usati {sm['senses_used']}/{a.n_in}, anelli {sm['loops']}"
         if "inhibitory" in sm:
             sub += f", {sm['neurons'] - sm['inhibitory']} ecc. + {sm['inhibitory']} inib."
         s.blit(font.render(sub, True, DIM), (G.x + 8, G.y + 20))
-        for x, title in ((G.x + 84, "sensi"), (G.centerx - 30, "interni"), (G.right - 92, "motori")):
+        for x, title in ((G.x + 84, "sensi"), (G.x + (175 + G.w - 135) // 2 - 24, "interni"), (G.right - 92, "motori")):
             s.blit(font.render(title, True, DIM), (x, G.y + 40))
 
         layer = pygame.Surface(G.size, pygame.SRCALPHA)
@@ -182,10 +230,14 @@ class NetView:
             p, q = pos[u], pos[v]
             if u == v:
                 pygame.draw.circle(layer, (*color, alpha), (p[0], p[1] - 12), 7, 1)
-            elif q[0] > p[0] + 5:
-                pygame.draw.line(layer, (*color, alpha), p, q, width)
-            else:  # all'indietro o nella stessa colonna: un anello
-                pygame.draw.lines(layer, (*color, alpha), False, bezier(p, q, 30 + 0.25 * abs(q[0] - p[0])), width)
+                continue
+            if a.is_motor(u):  # i motori che rimandano il loro valore indietro: un arco
+                pts = bezier(p, q, 40 + 0.15 * abs(q[0] - p[0]))
+            else:
+                pts = [p, q]
+            pygame.draw.lines(layer, (*color, alpha), False, pts, width)
+            if focus is not None and focus in (u, v):
+                arrow(layer, (*color, alpha), pts[-2], q)
         s.blit(layer, G.topleft)
 
         for v, p in self.pos.items():
@@ -211,8 +263,8 @@ class NetView:
                 pygame.draw.circle(s, PLAYER, p, 14, 1)
             if v == self.node:
                 pygame.draw.circle(s, PLAYER, p, 16, 1)
-        legend = [("eccita", EXCITE), ("inibisce", INHIBIT),
-                  ("rami morti: " + ("nascosti" if self.prune else "grigi") + " [P]", DEAD)]
+        legend = [("eccita", EXCITE), ("inibisce", INHIBIT), ("frecce = verso", DIM),
+                  ("rami morti " + ("nascosti" if self.prune else "grigi") + " [P]", DEAD)]
         if a.inhibitory is not None:
             legend[2:2] = [("bordo = tipo", TEXT)]
         x = G.x + 8
@@ -283,23 +335,39 @@ class Explorer:
         """Ricostruisce le righe dell'elenco corrente."""
         evo = self.evo
         rows, self.genomes = [], {}
-        if self.source == POPULATION:
-            genome, age = evo.ctrl.brains.genome, evo.age.copy()
+        if self.source in (POPULATION, SURVIVORS):
+            genome, age, ids = evo.ctrl.brains.genome, evo.age.copy(), evo.ids.copy()
             neurons, links = sizes(genome, self.n_in)
-            for i in sorted(range(len(genome)), key=lambda i: (-age[i], -links[i])):
+            members = range(len(genome)) if self.source == POPULATION else np.flatnonzero(age > 0)
+            for i in sorted(members, key=lambda i: (-age[i], ids[i])):
                 key = (evo.generation, int(i))
-                rows.append((f"#{i:<4d} età {age[i]:<3d}{neurons[i]:3d}n {links[i]:4d}c", key))
-                self.genomes[key] = (lambda i=i: genome.take([i]), f"gen{evo.generation:04d}-agente{i:03d}",
-                                     f"agente {i}, gen. {evo.generation}")
+                rows.append((f"{'#' + str(ids[i]):>6} {age[i]:>4d} {neurons[i]:>4d} {links[i]:>6d}", key))
+                self.genomes[key] = (lambda i=i: genome.take([i]), f"gen{evo.generation:04d}-individuo{ids[i]}",
+                                     f"individuo #{ids[i]}, età {age[i]}", f"#{ids[i]}")
             self.seen = None
+            if self.source == SURVIVORS:
+                what = (f"i {len(rows)} rimasti dalla selezione" if evo.selection is not None
+                        else f"{len(rows)} vincitori della gen. {evo.generation - 1}")
+                self.list.header = [f"{'num.':>6} {'età':>4} {'neur':>4} {'colleg':>6}", what,
+                                    "A: tutti insieme in arena"]
+            else:
+                self.list.header = [f"{'num.':>6} {'età':>4} {'neur':>4} {'colleg':>6}",
+                                    f"tutti i {len(rows)} in gara, foto gen. {evo.generation}",
+                                    "età 0 = figlio non ancora provato"]
         else:
             done = {h["generation"]: h["completed"] for h in evo.history}
-            for gen, age, g in reversed(evo.champions):
+            for gen, age, g, uid in reversed(evo.champions):
                 neurons, links = sizes(g, self.n_in)
-                pct = f"{done[gen] * 100 / self.cfg.population:3.0f}%" if gen in done else "  - "
-                rows.append((f"gen {gen:<5d}{pct} età {age:<3d}{neurons[0]:2d}n {links[0]:4d}c", gen))
-                self.genomes[gen] = (lambda g=g: g, f"campione-gen{gen:04d}", f"campione della generazione {gen}")
+                pct = f"{done[gen] * 100 / self.cfg.population:3.0f}%" if gen in done else "-"
+                rows.append((f"{gen:>5d} {pct:>5} {age:>4d} {neurons[0]:>4d} {links[0]:>6d}", gen))
+                self.genomes[gen] = (lambda g=g: g, f"campione-gen{gen:04d}",
+                                     f"campione gen. {gen}: #{uid}" if uid >= 0 else f"campione gen. {gen}",
+                                     f"#{uid}" if uid >= 0 else f"gen{gen}")
             self.seen = len(evo.champions)
+            self.list.header = [f"{'gen':>5} {'succ':>5} {'età':>4} {'neur':>4} {'colleg':>6}",
+                                "campione = il vincitore più",
+                                "anziano (a pari età il nato",
+                                "prima). Non è scelto a caso."]
         follow = self.list.selected == 0
         self.list.rows = rows
         keys = [k for _, k in rows]
@@ -310,6 +378,17 @@ class Explorer:
         """Da chiamare a ogni fotogramma: aggiunge i campioni nuovi."""
         if self.source == CHAMPIONS and self.seen != len(self.evo.champions):
             self.snapshot()
+
+    def show_individual(self, index: int) -> None:
+        """Mostra la rete dell'individuo al posto `index` della popolazione
+        attuale (fa una foto nuova; tra i sopravvissuti, se lo è)."""
+        self.source = SURVIVORS if self.evo.age[index] > 0 else POPULATION
+        self.snapshot()
+        keys = [k for _, k in self.list.rows]
+        key = (self.evo.generation, index)
+        if key in keys:
+            self.list.select(keys.index(key))
+            self._load()
 
     def switch(self, source: str) -> None:
         if source != self.source:
@@ -324,11 +403,12 @@ class Explorer:
             self.net.show(Anatomy(self.cfg, self.genomes[key][0]()) if key is not None else None)
 
     def selected(self):
-        """(genoma, nome per i file, descrizione) della rete scelta, o None."""
+        """(genoma, nome per i file, descrizione, etichetta breve) della rete
+        scelta, o None."""
         if self.key is None:
             return None
-        get, name, title = self.genomes[self.key]
-        return get(), name, title
+        get, name, title, label = self.genomes[self.key]
+        return get(), name, title, label
 
     # --- disposizione e comandi --------------------------------------------
 
@@ -353,12 +433,10 @@ class Explorer:
             return self.net.click(ev.pos)
         if ev.type == pygame.KEYDOWN:
             if ev.key == pygame.K_TAB:
-                self.switch(POPULATION if self.source == CHAMPIONS else CHAMPIONS)
-            elif ev.key == pygame.K_1:
-                self.switch(CHAMPIONS)
-            elif ev.key == pygame.K_2:
-                self.switch(POPULATION)
-            elif ev.key == pygame.K_r and self.source == POPULATION:
+                self.switch(SOURCES[(SOURCES.index(self.source) + 1) % len(SOURCES)])
+            elif ev.key in (pygame.K_1, pygame.K_2, pygame.K_3):
+                self.switch(SOURCES[ev.key - pygame.K_1])
+            elif ev.key == pygame.K_r and self.source != CHAMPIONS:
                 self.snapshot()
             elif ev.key == pygame.K_p:
                 self.net.toggle_prune()
@@ -373,22 +451,25 @@ class Explorer:
         """Disegna elenco, rete e dettagli; restituisce il neurone in evidenza."""
         x, y = self.tabs_at
         self.tab_rects = {}
-        for source, label in ((CHAMPIONS, f"1 campioni ({len(self.evo.champions)})"), (POPULATION, "2 popolazione")):
-            img = small.render(label, True, PLAYER if source == self.source else DIM)
+        for source in SOURCES:
+            img = small.render(TAB_LABELS[source], True, PLAYER if source == self.source else DIM)
             s.blit(img, (x, y))
             self.tab_rects[source] = pygame.Rect(x, y, img.get_width(), img.get_height())
-            x += img.get_width() + 12
+            if source == self.source:
+                pygame.draw.line(s, PLAYER, (x, y + img.get_height()), (x + img.get_width(), y + img.get_height()), 1)
+            x += img.get_width() + 10
         self.list.draw(s, small)
         if self.net.anat is None:
-            msg = "nessun campione: serve una generazione con almeno un vincitore" \
-                if self.source == CHAMPIONS else "popolazione vuota"
+            msg = {CHAMPIONS: "nessun campione: serve una generazione con almeno un vincitore",
+                   SURVIVORS: "nessun sopravvissuto: l'ultima generazione non ha vinto nessuno",
+                   POPULATION: "popolazione vuota"}[self.source]
             s.blit(small.render(msg, True, DIM), (self.net.rect.x + 10, self.net.rect.y + 10))
             return None
         focus = self.net.focus()
         self.net.draw(s, small, focus)
         title = self.genomes[self.key][2]
-        if self.source == POPULATION:
-            title += " (R: nuova foto)"
+        if self.source != CHAMPIONS:
+            title += " (R aggiorna)"
         s.blit(small.render(title, True, TARGET), (self.info.rect.x, self.info.rect.y - 20))
         lines = list(HINT) if focus is None else self.net.anat.describe(focus)
         self.info.draw(s, small, lines, focus)
@@ -432,6 +513,8 @@ class Inspector:
             self._export()
         elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_t:
             self.app.test(ex.selected(), back=self)
+        elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_a:
+            self.message = self.app.test_survivors(self.evo, back=self)
         elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and (cell := self._cell_at(ev.pos)):
             ex.net.node = ex.net.anat.n_in + cell[0]
         else:
@@ -455,14 +538,16 @@ class Inspector:
         pygame.draw.line(s, BORDER, (0, top - 4), (W, top - 4), 1)
         pygame.draw.line(s, BORDER, (lw - 4, top), (lw - 4, H), 1)
         pygame.draw.line(s, BORDER, (W - gw, top), (W - gw, H), 1)
-        hint = "Su/Giù rete | Tab elenco | clic neurone | P rami morti | T prova la rete | X esporta | Esc indietro"
-        s.blit(app.small.render(hint, True, DIM), (W - gw - 400, 15))
+        hint = ("Su/Giù rete | Tab elenco | clic neurone | P rami morti | T prova la rete | "
+                "A sopravvissuti in arena | X esporta | Esc indietro")
+        s.blit(app.small.render(hint, True, DIM), (W - app.small.size(hint)[0] - 10, 8))
         focus = ex.draw(s, app.font, app.small)
         if ex.net.anat is not None:
             self._draw_genome(s, focus)
         status = self.message or app.run_status()
         if status:
-            s.blit(app.small.render(status, True, TARGET), (lw + 10, H - 40))
+            img = app.small.render(status, True, TARGET)
+            s.blit(img, (W - img.get_width() - 10, 28))
 
     def _draw_genome(self, s, focus) -> None:
         a, app = self.explorer.net.anat, self.app

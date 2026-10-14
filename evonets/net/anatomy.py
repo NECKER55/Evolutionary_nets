@@ -147,6 +147,9 @@ class Anatomy:
             lines.append("ramo morto: non arriva ai motori")
         if v >= self.n_in:
             lines += self.brains.trait_text(self.traits[v - self.n_in], self.is_hidden(v))
+            d = int(self.depth[v])
+            lines.append(f"distanza dai sensi: {d} pass{'o' if d == 1 else 'i'}" if d > 0
+                         else "nessun senso lo raggiunge")
         ins, outs = self.inputs_of(v), self.outputs_of(v)
         lines.append(f"collegamenti: {len(ins)} entrano, {len(outs)} escono")
         for title, pairs in (("riceve da", [(s, self.weight(s, v)) for s in ins]),

@@ -195,11 +195,11 @@ def test_each_generation_with_winners_keeps_its_oldest_winner_as_champion(tmp_pa
     oldest = individual(e.ctrl.brains.genome, 2)
     e.age[2] = 5
     finish(e, [1, 2, 3])  # gen. 2: vince il più anziano
-    assert [(g, a) for g, a, _ in e.champions] == [(0, 0), (2, 5)]
+    assert [(g, a) for g, a, _, _ in e.champions] == [(0, 0), (2, 5)]
     assert equal(individual(e.champions[1][2], 0), oldest)
     e.save(tmp_path / "pop.npz")
     b = Evolution.load(Config(net_hidden_max=6), tmp_path / "pop.npz")
-    assert [(g, a) for g, a, _ in b.champions] == [(0, 0), (2, 5)]
+    assert [(g, a) for g, a, _, _ in b.champions] == [(0, 0), (2, 5)]
     assert equal(individual(b.champions[1][2], 0), oldest)
 
 
@@ -218,3 +218,73 @@ def test_a_trial_tests_one_network_on_fixed_arenas_and_is_reproducible():
         results.append((t.completed, t.times))
     assert results[0] == results[1]
     assert (e.ctrl.brains.genome.weights[3] == g.weights[0]).all()  # la rete provata non cambia
+
+
+def test_individuals_keep_their_number_while_they_survive():
+    e = evo()
+    first = e.ids[[4, 9]].copy()
+    finish(e, [4, 9])
+    assert list(e.ids[:2]) == list(first)  # i sopravvissuti stanno in testa
+    assert len(set(e.ids.tolist())) == 30 and e.ids[2:].min() >= 30  # i figli hanno numeri nuovi
+    o = e.oldest()
+    assert o["age"] == 1 and o["id"] in first and o["born"] == 0
+    assert (e.born[2:] == 1).all()  # i figli nascono nella generazione che stanno per correre
+    assert e.history[-1]["oldest_id"] in range(30)
+
+
+def test_final_selection_keeps_only_who_wins_every_round_and_makes_no_children(tmp_path):
+    e = evo()
+    finish(e, [1, 2, 3, 4])
+    finalists = e.ids[:4].copy()
+    assert e.start_selection(3) == 4 and e.selecting
+    assert e.world.n == 4 and len(e.ctrl.brains.genome) == 4
+    finish_round = lambda winners: (e.world.done.__setitem__(slice(None), False),
+                                    e.world.done.__setitem__(list(winners), True), e.next_selection_round())[-1]
+    assert finish_round([0, 2, 3]) == {"round": 1, "entered": 4, "passed": 3}
+    assert list(e.ids) == list(finalists[[0, 2, 3]])
+    finish_round([1, 2])
+    assert list(e.ids) == list(finalists[[2, 3]]) and e.selecting
+    finish_round([])  # fallisce tutti: restano i due della prova prima, e finisce
+    assert list(e.ids) == list(finalists[[2, 3]]) and not e.selecting
+    assert e.selection["note"] and e.generation == 1  # nessuna generazione nuova
+    assert e.oldest()["born"] == 0 and e.oldest()["age"] == 3  # la nascita non cambia, le prove si contano
+    # Salvati e ricaricati, ripartono in due e la generazione dopo torna piena.
+    e.save(tmp_path / "sel.npz")
+    b = Evolution.load(Config(net_hidden_max=6), tmp_path / "sel.npz")
+    assert b.world.n == 2 and b.cfg.population == 30 and list(b.ids) == list(e.ids)
+    b.run_generation()
+    assert b.world.n == 30 and len(b.ctrl.brains.genome) == 30
+
+
+def test_watching_does_not_change_the_result():
+    """Il viewer ricalcola i sensi per disegnarli: la corsa deve restare identica."""
+    plain, watched = evo(seed=7), evo(seed=7)
+    for _ in range(3):
+        plain.run_generation()
+    for _ in range(3):
+        while not watched.finished:
+            watched.ctrl.senses.observe(watched.world)  # come fa il disegno, a ogni fotogramma
+            watched.step()
+        watched.next_generation()
+    assert plain.history == watched.history
+    assert np.array_equal(plain.ctrl.brains.genome.weights, watched.ctrl.brains.genome.weights)
+
+
+def test_the_champion_is_the_oldest_winner_and_on_a_tie_the_first_born():
+    e = evo()
+    e.age[[3, 8, 12]] = [2, 5, 5]
+    e.ids[[8, 12]] = [40, 7]  # #7 è nato prima di #40
+    finish(e, [3, 8, 12])
+    assert e.champions[-1][3] == 7 and e.champions[-1][1] == 5
+
+
+def test_a_trial_can_test_a_group_and_tells_each_network_apart():
+    from evonets.evo.trial import Trial
+
+    e = evo()
+    g = e.ctrl.brains.genome.take([1, 2, 3])
+    t = Trial(e.cfg, g, arenas=2, clones=5)
+    while not t.finished:
+        t.run(1.0)
+    assert t.wins.shape == (3,) and t.wins.sum() == sum(t.completed)
+    assert ((t.rates() >= 0) & (t.rates() <= 1)).all()

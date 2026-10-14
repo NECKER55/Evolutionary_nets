@@ -112,17 +112,44 @@ class Brains:
         ones_out = np.ones((self.n, self.n_out), dtype=bool)
         self.target_on = np.concatenate([self.active, ones_out], axis=1)
         self.links = live_links(self.conn, self.active, self.n_in)
+        self._subset = None  # copie per `step_some`, da rifare
         self.w_eff = self.weights * self.links
 
     def reset_state(self) -> None:
         self.state = np.zeros((self.n, self.n_hidden + self.n_out))
 
+    # Geni compilati di cui `step_some` usa una copia ridotta.
+    SUBSET = ("w_eff", "bias", "target_on")
+
+    def _rows(self, rows: np.ndarray) -> dict:
+        """Copie dei geni compilati per i soli individui `rows`. Si rifanno
+        solo quando l'insieme cambia (in una generazione chi esce non rientra)."""
+        if self._subset is None or not np.array_equal(self._subset["rows"], rows):
+            self._subset = {"rows": rows, **{k: getattr(self, k)[rows] for k in self.SUBSET}}
+        return self._subset
+
     def step(self, obs: np.ndarray) -> np.ndarray:
         """obs (N, n_in) -> uscite (N, n_out) in [-1, 1]."""
-        x = np.concatenate([obs, self.state], axis=1)
-        z = (self.w_eff @ x[:, :, None])[:, :, 0] + self.bias
-        self.state = np.tanh(z) * self.target_on
-        return self.state[:, self.n_hidden :]
+        self.state, out = self._advance(obs, self.state, self)
+        return out
+
+    def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
+        """Come `step`, ma solo per gli individui `rows` (obs ha una riga per
+        ciascuno): gli altri restano fermi. Ogni rete calcola per conto suo,
+        quindi il risultato per `rows` è identico a quello di `step`."""
+        sub = self._rows(rows)
+        state, out = self._advance(obs, self.state[rows], sub)
+        self.state[rows] = state
+        return out
+
+    def _advance(self, obs, state, g):
+        """Un passo a partire da `state`, con i geni compilati `g` (self o una
+        copia ridotta). Restituisce (nuovo stato, uscite)."""
+        get = g.get if isinstance(g, dict) else lambda k: getattr(g, k)
+        x = np.concatenate([obs, state], axis=1)
+        z = (get("w_eff") @ x[:, :, None])[:, :, 0] + get("bias")
+        state = np.tanh(z) * get("target_on")
+        return state, state[:, self.n_hidden :]
 
 
 class SpikingBrains(Brains):
@@ -186,6 +213,8 @@ class SpikingBrains(Brains):
             w[:, :, : self.n_in] = self.weights[:, :, : self.n_in]
         self.w_eff = w * self.links
 
+    SUBSET = ("w_eff", "bias", "keep", "active")
+
     def reset_state(self) -> None:
         h = self.n_hidden
         self.charge = np.zeros((self.n, h + self.n_out))
@@ -196,18 +225,33 @@ class SpikingBrains(Brains):
 
     def step(self, obs: np.ndarray) -> np.ndarray:
         """obs (N, n_in) -> comandi (N, 2) in (-1, 1): spinta e sterzata."""
+        (self.charge, self.spikes, self.state), out = self._advance(
+            obs, (self.charge, self.spikes, self.state), self)
+        return out
+
+    def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
+        sub = self._rows(rows)
+        (charge, spikes, state), out = self._advance(
+            obs, (self.charge[rows], self.spikes[rows], self.state[rows]), sub)
+        self.charge[rows], self.spikes[rows], self.state[rows] = charge, spikes, state
+        return out
+
+    def _advance(self, obs, states, g):
+        get = g.get if isinstance(g, dict) else lambda k: getattr(g, k)
+        w_eff, bias, keep, active = get("w_eff"), get("bias"), get("keep"), get("active")
+        charge, spikes, state = states
         h = self.n_hidden
-        drive = 1.0 - self.keep
+        drive = 1.0 - keep
         for _ in range(self.substeps):
-            x = np.concatenate([obs, self.spikes, self.state[:, h:]], axis=1)
-            current = (self.w_eff @ x[:, :, None])[:, :, 0] + self.bias
+            x = np.concatenate([obs, spikes, state[:, h:]], axis=1)
+            current = (w_eff @ x[:, :, None])[:, :, 0] + bias
             current[:, :h] *= self.gain
-            self.charge = np.maximum(self.keep * self.charge + drive * current, -1.0)
-            inner = self.charge[:, :h]
-            fired = (inner >= 1.0) & self.active
-            inner[fired | ~self.active] = 0.0
-            self.spikes = fired.astype(float)
-            self.state[:, :h] = 0.8 * self.state[:, :h] + 0.2 * self.spikes
-            self.state[:, h:] = np.tanh(np.maximum(self.charge[:, h:], 0.0))
-        m = self.state[:, h:]
-        return np.stack([m[:, 0] - m[:, 1], m[:, 2] - m[:, 3]], axis=1)
+            charge = np.maximum(keep * charge + drive * current, -1.0)
+            inner = charge[:, :h]
+            fired = (inner >= 1.0) & active
+            inner[fired | ~active] = 0.0
+            spikes = fired.astype(float)
+            state[:, :h] = 0.8 * state[:, :h] + 0.2 * spikes
+            state[:, h:] = np.tanh(np.maximum(charge[:, h:], 0.0))
+        m = state[:, h:]
+        return (charge, spikes, state), np.stack([m[:, 0] - m[:, 1], m[:, 2] - m[:, 3]], axis=1)

@@ -72,6 +72,7 @@ class Renderer:
         self.arena = pygame.Rect(0, 0, *size)
         self.panel = pygame.Rect(size[0], 0, PANEL_W, size[1])
         self.screen = screen
+        self.name_of = lambda i: f"agente {i}"  # come chiamare l'agente i nel pannello della rete
         self.overlay = pygame.Surface(size, pygame.SRCALPHA)
         self.net_h = self.panel.h - GRAPH_H  # sopra la rete, sotto il grafico
         self.net_layer = pygame.Surface((PANEL_W, self.net_h), pygame.SRCALPHA)
@@ -237,10 +238,10 @@ class Renderer:
 
         n_hidden = int(brains.active[i].sum())
         kind = {"rate": "continua", "spike-ei": "a impulsi E/I"}[brains.KIND]
-        head = f"agente {i}, rete {kind}: {n_hidden} neuroni, {len(links)} collegamenti"
+        head = f"{self.name_of(i)}, rete {kind}: {n_hidden} neuroni, {len(links)} collegamenti"
         if hasattr(brains, "inhibitory"):
             n_inh = int((brains.inhibitory[i] & brains.active[i]).sum())
-            head = f"agente {i}, rete {kind}: {n_hidden - n_inh} ecc. + {n_inh} inib., {len(links)} colleg."
+            head = f"{self.name_of(i)}, rete {kind}: {n_hidden - n_inh} ecc. + {n_inh} inib., {len(links)} colleg."
         layer.blit(self.small.render(head, True, TEXT), (8, 8))
         for x, title in ((60, "sensi"), (228, "interni"), (PANEL_W - 88, "motori")):
             layer.blit(self.small.render(title, True, DIM), (x, 24))
@@ -262,7 +263,7 @@ class Renderer:
         if not history:
             plot(self.screen, box, self.small, (), 100.0)
             return
-        pct, avg = success_series(history, self.world.n)
+        pct, avg = success_series(history, self.world.cfg.population)
         plot(self.screen, box, self.small, ((pct, WALL, 1), (avg, TARGET, 2)), 100.0)
         self.screen.blit(self.small.render(f"gen. {history[0]['generation']}", True, DIM), (box.x, box.bottom + 6))
         last = self.small.render(f"gen. {history[-1]['generation']}: {pct[-1]:.0f}%  media {avg[-1]:.0f}%", True, TEXT)
