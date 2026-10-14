@@ -44,6 +44,11 @@ class NeuralController:
     def reset(self) -> None:
         self.brains.reset_state()
 
+    @property
+    def upkeep(self) -> np.ndarray:
+        """(N,) energia/s che ogni rete costa per il suo cablaggio."""
+        return self.senses.cfg.wire_cost * self.brains.wire_length
+
     def act(self, world) -> np.ndarray:
         """Comandi di tutti gli agenti. Si calcolano solo per chi è ancora in
         gara: per i morti e per chi ha completato la fisica ignora i comandi,

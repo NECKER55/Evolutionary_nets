@@ -54,7 +54,8 @@ def test_switched_off_neurons_keep_their_genes_as_latent():
 def test_spiking_weights_take_their_sign_from_the_neuron_type():
     cfg, g = blank("spike-ei")
     n_in = 42
-    g.traits[0, 0, 2] = -1.0  # n0 inibitorio
+    g.traits[0, :, 2] = 1.0  # tutti eccitatori...
+    g.traits[0, 0, 2] = -1.0  # ...tranne n0
     link(g, n_in, 3, n_in, 0.8)
     link(g, n_in, n_in, n_in + 4, 0.7)  # dal neurone inibitorio: segno negativo
     a = Anatomy(cfg, g)

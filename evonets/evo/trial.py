@@ -39,7 +39,7 @@ class Trial:
     def step(self) -> None:
         w = self.world
         before = w.done.copy()
-        w.step(self.ctrl.act(w))
+        w.step(self.ctrl.act(w), self.ctrl.upkeep)
         self.done_at[w.done & ~before] = w.t
         if (w.alive & ~w.done).any() and w.t < self.cfg.life_max:
             return

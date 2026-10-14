@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..config import Config
+from .geometry import connect_prob, distances
 
 
 def live_links(conn: np.ndarray, active: np.ndarray, n_in: int) -> np.ndarray:
@@ -29,19 +30,20 @@ class Genome:
     traits: np.ndarray
     conn: np.ndarray
     active: np.ndarray
+    pos: np.ndarray
+
+    FIELDS = ("weights", "traits", "conn", "active", "pos")
 
     def __len__(self) -> int:
         return len(self.weights)
 
     def take(self, idx) -> "Genome":
         """Copia indipendente degli individui indicati."""
-        return Genome(self.weights[idx].copy(), self.traits[idx].copy(),
-                      self.conn[idx].copy(), self.active[idx].copy())
+        return Genome(*(getattr(self, f)[idx].copy() for f in self.FIELDS))
 
     @staticmethod
     def concat(parts: list["Genome"]) -> "Genome":
-        return Genome(*(np.concatenate([getattr(p, f) for p in parts])
-                        for f in ("weights", "traits", "conn", "active")))
+        return Genome(*(np.concatenate([getattr(p, f) for p in parts]) for f in Genome.FIELDS))
 
 
 class Brains:
@@ -60,7 +62,11 @@ class Brains:
       conn    (N, T, S)  quali collegamenti esistono
       active  (N, H)     quali neuroni interni esistono
       traits  (N, T, K)  geni propri di ogni neurone; qui uno solo, la soglia (bias)
+      pos     (N, H, 2)  dove sta ogni neurone interno nel cervello (vedi geometry.py)
     dove S = n_in + H + n_out sono le sorgenti e T = H + n_out i destinatari.
+
+    I collegamenti nascono soprattutto tra neuroni vicini, e ogni collegamento
+    effettivo costa energia in proporzione alla sua lunghezza (`wire_length`).
     """
 
     KIND = "rate"
@@ -73,6 +79,7 @@ class Brains:
         return [f"soglia {traits[0]:+.3f}"]
 
     def __init__(self, cfg: Config, n: int, n_in: int, n_out: int, seed: int = 0):
+        self.cfg = cfg
         self.n, self.n_in, self.n_out = n, n_in, n_out
         self.n_hidden = h = cfg.net_hidden_max
         rng = np.random.default_rng(seed)
@@ -80,7 +87,9 @@ class Brains:
         std = cfg.net_weight_std
         self.weights = rng.normal(0.0, std, (n, targets, sources))
         self.traits = rng.normal(0.0, std, (n, targets, self.N_TRAITS))
-        self.conn = rng.random((n, targets, sources)) < cfg.net_conn_prob
+        self.pos = rng.random((n, h, 2))  # gli interni sparsi nel cervello
+        dist = distances(cfg, self.pos, n_in, n_out)
+        self.conn = rng.random((n, targets, sources)) < connect_prob(cfg, dist, n_in)
         # Ogni individuo nasce con una frazione diversa di neuroni interni attivi.
         self.active = rng.random((n, h)) < rng.random((n, 1))
         self._init_genes(cfg, rng)
@@ -96,12 +105,12 @@ class Brains:
 
     @property
     def genome(self) -> Genome:
-        return Genome(self.weights, self.traits, self.conn, self.active)
+        return Genome(self.weights, self.traits, self.conn, self.active, self.pos)
 
     def set_genome(self, genome: Genome) -> None:
         """Sostituisce l'intera popolazione (stesso numero di individui o no)."""
         self.weights, self.traits = genome.weights, genome.traits
-        self.conn, self.active = genome.conn, genome.active
+        self.conn, self.active, self.pos = genome.conn, genome.active, genome.pos
         self.n = len(genome)
         self.compile()
         self.reset_state()
@@ -112,6 +121,9 @@ class Brains:
         ones_out = np.ones((self.n, self.n_out), dtype=bool)
         self.target_on = np.concatenate([self.active, ones_out], axis=1)
         self.links = live_links(self.conn, self.active, self.n_in)
+        self.dist = distances(self.cfg, self.pos, self.n_in, self.n_out)
+        # Lunghezza totale dei collegamenti effettivi di ogni rete: il suo cablaggio.
+        self.wire_length = (self.dist * self.links).sum(axis=(1, 2))
         self._subset = None  # copie per `step_some`, da rifare
         self.w_eff = self.weights * self.links
 

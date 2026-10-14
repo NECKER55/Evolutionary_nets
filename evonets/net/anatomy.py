@@ -8,6 +8,7 @@ import numpy as np
 
 from .brain import Genome, live_links
 from .controllers import NeuralController
+from .geometry import anchors
 from .sensors import BODY, CHANNELS
 
 KIND_NAMES = {"rate": "continua", "spike-ei": "a impulsi E/I"}
@@ -51,6 +52,11 @@ class Anatomy:
         self.inhibitory = brains.inhibitory[0] if hasattr(brains, "inhibitory") else None
         self.labels = node_labels(self.n_in, self.n_hidden, brains.OUT_LABELS)
         self.n_vision = self.n_in - len(BODY)
+        senses, motors = anchors(cfg, self.n_in, self.n_out)
+        self.xy = np.concatenate([senses, genome.pos[0], motors])  # posizione di ogni neurone nel cervello
+        self.dist = brains.dist[0]  # (T, S)
+        self.wire_length = float(brains.wire_length[0])
+        self.wire_cost = cfg.wire_cost * self.wire_length
         self.useful = self._reaches_motors()
         self.depth = self._depth_from_senses()
 
@@ -74,6 +80,10 @@ class Anatomy:
 
     def weight(self, src: int, dst: int) -> float:
         return float(self.w[dst - self.n_in, src])
+
+    def length(self, src: int, dst: int) -> float:
+        """Lunghezza del collegamento da src a dst, in lati del cervello."""
+        return float(self.dist[dst - self.n_in, src])
 
     def edges(self) -> np.ndarray:
         """(E, 2): coppie (sorgente, destinatario) dei collegamenti effettivi."""
@@ -121,6 +131,8 @@ class Anatomy:
             "useful_links": int(useful_edges.sum()),
             "senses_used": int(self.useful[: self.n_in].sum()),
             "loops": len(back),
+            "wire_length": self.wire_length,
+            "wire_cost": self.wire_cost,
         }
         if self.inhibitory is not None:
             out["inhibitory"] = int((self.inhibitory & self.exists[hidden]).sum())
@@ -140,7 +152,8 @@ class Anatomy:
             if self.inhibitory is not None:
                 kind = " inibitorio" if self.inhibitory[v - self.n_in] else " eccitatorio"
             role = f"neurone interno{kind}"
-        lines = [f"{name}: {role}"]
+        x, y = self.xy[v]
+        lines = [f"{name}: {role}", f"posizione nel cervello ({x:.2f}, {y:.2f})"]
         if not self.exists[v]:
             lines.append("spento: i suoi geni restano nel genoma")
         elif not self.useful[v]:
@@ -152,14 +165,14 @@ class Anatomy:
                          else "nessun senso lo raggiunge")
         ins, outs = self.inputs_of(v), self.outputs_of(v)
         lines.append(f"collegamenti: {len(ins)} entrano, {len(outs)} escono")
-        for title, pairs in (("riceve da", [(s, self.weight(s, v)) for s in ins]),
-                             ("manda a", [(d, self.weight(v, d)) for d in outs])):
+        for title, pairs in (("riceve da", [(s, self.weight(s, v), self.length(s, v)) for s in ins]),
+                             ("manda a", [(d, self.weight(v, d), self.length(v, d)) for d in outs])):
             if pairs:
                 pairs.sort(key=lambda p: -abs(p[1]))
                 lines.append("")
-                lines.append(f"{title} (peso, effetto):")
-                lines += [f"  {self.labels[n]:13s}{w:+7.3f} {'eccita' if w > 0 else 'inibisce'}"
-                          + ("" if self.useful[n] else " (morto)") for n, w in pairs]
+                lines.append(f"{title}: peso, effetto, lunghezza")
+                lines += [f"  {self.labels[n]:12s}{w:+6.2f} {'eccita' if w > 0 else 'inibisce':8s} {d:.2f}"
+                          + ("" if self.useful[n] else " morto") for n, w, d in pairs]
         return lines
 
     def genome_text(self, title: str = "") -> str:
@@ -170,7 +183,8 @@ class Anatomy:
         head += [
             f"rete {KIND_NAMES[self.kind]}: {s['neurons']}/{self.n_hidden} neuroni interni "
             f"({s['useful_neurons']} utili), {s['links']} collegamenti ({s['useful_links']} utili), "
-            f"sensi usati {s['senses_used']}/{self.n_in}, anelli {s['loops']}",
+            f"sensi usati {s['senses_used']}/{self.n_in}, anelli {s['loops']}, "
+            f"cablaggio {s['wire_length']:.1f} (costa {s['wire_cost']:.2f} energia/s)",
             "pesi efficaci: >0 eccita, <0 inibisce"
             + (" (dai neuroni interni il segno lo dà il tipo)" if self.inhibitory is not None else ""),
             "latente = gene presente ma inattivo perché un capo del collegamento è spento",
@@ -183,9 +197,11 @@ class Anatomy:
             if self.exists[v] and not self.useful[v]:
                 state += ", ramo morto"
             traits = "; ".join(self.brains.trait_text(self.traits[t], self.is_hidden(v)))
-            body.append(f"[{self.labels[v]}] {state} | {traits}")
+            x, y = self.xy[v]
+            body.append(f"[{self.labels[v]}] {state} | posizione ({x:.3f}, {y:.3f}) | {traits}")
             for src in np.flatnonzero(self.conn[t]):
                 live = self.links[t, src]
                 w = self.w[t, src] if live else self.brains.weights[0, t, src]
-                body.append(f"    <- {self.labels[src]:14s} {w:+.3f}{'' if live else '  (latente)'}")
+                body.append(f"    <- {self.labels[src]:14s} {w:+.3f}  lunghezza {self.dist[t, src]:.3f}"
+                            f"{'' if live else '  (latente)'}")
         return "\n".join(head + body) + "\n"

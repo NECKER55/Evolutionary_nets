@@ -168,22 +168,22 @@ anziano).
 
 ### Come si legge una rete
 
-Vale per la pagina principale e per l'esploratore. Sensi in colonna a
-sinistra, motori a destra, **neuroni interni su un'ellisse** in mezzo: così i
-collegamenti tra interni (anelli compresi, cioè la memoria) sono corde ben
-visibili invece di linee sovrapposte. Sull'arco sinistro stanno gli interni che
-ascoltano soprattutto i sensi, sul destro quelli che parlano soprattutto ai
-motori; su ogni arco l'ordine dall'alto in basso segue i sensi che li
-alimentano, per ridurre gli incroci. Gli archi curvi sono i motori che
-rimandano il loro valore agli interni; un cerchietto sopra un neurone è un
-collegamento con se stesso.
+Vale per la pagina principale, per l'esploratore e per il pannello della rete
+nell'arena. Ogni neurone è disegnato **dove sta davvero nel cervello** (vedi il
+punto 8): sensi sul bordo sinistro, motori sul destro, neuroni interni nella
+loro posizione dentro il riquadro, che è il cervello. Un collegamento lungo sul
+disegno è lungo anche nel cervello, e costa energia in proporzione. Un
+cerchietto sopra un neurone è un collegamento con se stesso.
 
 Colore = segno (arancio eccita, azzurro inibisce), intensità e spessore =
 forza. Nelle reti a impulsi il bordo di un neurone interno dice il suo tipo. In
 grigio i **rami morti**: neuroni e collegamenti che non arrivano a nessun
 motore e quindi non cambiano il comportamento. Passando su un neurone (o
 cliccandolo) si accendono solo i suoi collegamenti, con una **freccia** che ne
-indica il verso; il pannello dei dettagli dice anche a quanti passi è dai sensi.
+indica il verso. Il pannello dei dettagli dice la posizione del neurone, a
+quanti passi è dai sensi e, per ogni collegamento, peso, effetto e lunghezza.
+In cima alla rete c'è il suo cablaggio: la lunghezza totale dei collegamenti e
+quanta energia costa al secondo.
 
 ### L'esploratore delle reti
 
@@ -295,7 +295,7 @@ La rete produce due comandi, entrambi tra -1 e 1.
 - Ogni agente nasce con **100 di energia** (`energy_init`). **Non si ricarica mai.**
 - **Si muore in un solo modo: quando l'energia arriva a zero.** Non esiste morte
   istantanea.
-- L'energia si consuma per tre motivi, che si sommano:
+- L'energia si consuma per quattro motivi, che si sommano:
 
 | Causa | Consumo al secondo |
 |---|---|
@@ -303,11 +303,16 @@ La rete produce due comandi, entrambi tra -1 e 1.
 | Spingere | fino a 2,5 in più, proporzionale al comando di spinta, uguale in avanti e indietro (`metabolism_move`) |
 | Sterzare | fino a 0,5 in più, proporzionale al comando di sterzata (`metabolism_turn`) |
 | Veleno | da 0 a 60, secondo la profondità nella zona (vedi sotto) |
+| Cablaggio del cervello | 0,004 per ogni unità di lunghezza dei collegamenti effettivi (`wire_cost`); una rete iniziale tipica paga circa 0,25, un decimo del metabolismo di base |
 
 - Si paga lo **sforzo comandato**, non la velocità raggiunta: spingere contro una
   parete costa come correre.
-- Conseguenze: un agente fermo vive 40 secondi; uno sempre a spinta piena 20
-  secondi, in cui percorre al massimo circa 600 unità (tre larghezze di arena).
+- Conseguenze: un agente fermo vive circa 40 secondi (un po' meno, per il
+  cablaggio); uno sempre a spinta piena circa 20 secondi, in cui percorre al
+  massimo circa 600 unità (tre larghezze di arena).
+- Il cablaggio si paga anche da fermi, come il cervello vero che consuma
+  energia sempre: una rete grande e piena di collegamenti lunghi accorcia la
+  vita. La selezione tiene un collegamento lungo solo se vale il suo prezzo.
 - **Un agente morto** resta fermo dov'è, diventa grigio e non può più completare
   il compito.
 
@@ -415,6 +420,17 @@ posto un gene dice se quel neurone esiste.
   ignorati. I suoi geni però restano scritti nel genoma: se una mutazione lo
   accende, nasce già con collegamenti e pesi.
 
+**Il cervello ha una geometria.** È un foglio quadrato di lato 1, come un
+pezzo di corteccia:
+
+- i **sensi** stanno in posizioni fisse sul bordo sinistro, disposti come la
+  retina: i 9 raggi dall'alto in basso nell'ordine del campo visivo, i 4 canali
+  di uno stesso raggio vicini tra loro; sotto, i sensi del corpo;
+- i **motori** stanno in posizioni fisse sul bordo destro;
+- ogni **neurone interno** sta dove dice il suo gene di posizione. Alla nascita
+  di una popolazione casuale le posizioni sono sparse a caso; poi si ereditano
+  e si spostano di poco con le mutazioni.
+
 **I collegamenti.** Non ci sono strati.
 
 - Un collegamento va da una **sorgente** (un senso, un neurone interno o un
@@ -423,9 +439,29 @@ posto un gene dice se quel neurone esiste.
 - Sono ammessi tutti i casi: senso → motore diretto, interno → interno, anelli,
   un neurone verso se stesso, un motore che rimanda il proprio valore a un interno.
 - Collegamenti possibili: 2.584 nelle reti continue, 2.808 in quelle a impulsi.
-- Alla nascita ogni collegamento possibile esiste con probabilità 15%
-  (`net_conn_prob`); contano solo quelli tra neuroni esistenti. Un senso può
-  restare senza alcun collegamento: per quell'individuo è come non averlo.
+- **Come nel cervello vero, due neuroni si collegano tanto più facilmente
+  quanto più sono vicini.** Alla nascita un collegamento esiste con probabilità
+  0,75 × e^(−d / 0,3), dove d è la distanza tra i due neuroni
+  (`net_conn_prob`, `net_conn_range`). È la regola esponenziale della distanza
+  osservata nella corteccia: i collegamenti locali sono la maggioranza, quelli
+  lunghi rari ma possibili.
+
+| Distanza | Probabilità del collegamento alla nascita |
+|---|---|
+| 0,1 (vicinissimi) | 54% |
+| 0,3 | 28% |
+| 0,5 | 14% |
+| 1 (da un bordo all'altro) | 3% |
+
+- Un neurone collegato a se stesso fa eccezione: in natura è raro, e ha
+  probabilità 5% (`net_self_prob`).
+- In media una rete casuale ha circa 175 collegamenti, lunghi in media 0,36;
+  quasi sempre (98%) c'è almeno un percorso dai sensi ai motori. Un
+  collegamento diretto senso → motore attraversa tutto il cervello ed è raro
+  (circa 2 per rete, come i riflessi): il segnale di solito passa per catene di
+  neuroni interni. Gli strati non sono imposti, ma la geometria li favorisce.
+- Contano solo i collegamenti tra neuroni esistenti. Un senso può restare senza
+  alcun collegamento: per quell'individuo è come non averlo.
 - Ogni collegamento ha un **peso**, sorteggiato attorno a zero (per lo più tra
   -2 e 2, `net_weight_std`).
 
@@ -519,13 +555,15 @@ Stessa struttura, ma i neuroni interni comunicano a impulsi e hanno un tipo.
 
 Il genoma di un individuo è tutto ciò che serve a costruire la sua rete:
 
-- per ciascuno dei 32 posti, se il neurone interno **esiste**;
+- per ciascuno dei 32 posti, se il neurone interno **esiste** e **dove sta** nel
+  cervello;
 - per ciascun collegamento possibile, se **esiste** e il suo **peso**;
 - per ciascun neurone interno o motore, i suoi **geni propri**.
 
 È organizzato a **blocchi, uno per neurone** (interno o motore). Il blocco di un
-neurone contiene: se esiste, i suoi geni propri, e tutti i suoi collegamenti *in
-ingresso* con i pesi.
+neurone contiene: se esiste, dove sta, i suoi geni propri, e tutti i suoi
+collegamenti *in ingresso* con i pesi. Nell'incrocio un neurone arriva intero da
+un genitore, posizione compresa.
 
 ### 12. La generazione
 
@@ -577,11 +615,14 @@ Si applicano a ogni figlio, ciascuna in modo indipendente.
 |---|---|---|
 | ritocco di un peso | 10% per ogni peso, di poco (in media ±0,3) | `mut_weight_prob`, `mut_weight_std` |
 | ritocco di un gene proprio di un neurone | 10% per ogni gene, di poco | le stesse |
-| un collegamento assente compare | 0,2% per ogni collegamento assente | `mut_conn_add` |
+| un collegamento assente compare | 1% tra neuroni vicinissimi, cala con la distanza come alla nascita (in media ~0,2%) | `mut_conn_add` |
 | un collegamento presente sparisce | 1% per ogni collegamento presente | `mut_conn_del` |
 | un neurone interno si accende o si spegne | 1% per ogni posto | `mut_neuron_toggle` |
+| un neurone interno si sposta | 10% per ogni neurone, di poco (in media 3% del lato del cervello), senza uscire | `mut_pos_prob`, `mut_pos_std` |
 
 - Un collegamento che compare usa il peso già scritto in quel punto del genoma.
+- Un collegamento che esiste resta anche se i suoi due neuroni si allontanano
+  (l'assone c'è già), ma costa di più.
 - In pratica un figlio ha qualche collegamento in più e in meno del genitore, e
   circa uno su tre guadagna o perde un neurone.
 - Nelle reti a impulsi il tipo di un neurone cambia quando il ritocco del suo
@@ -686,6 +727,7 @@ evonets/
   net/               rete
     sensors.py         vista e sensi del corpo
     brain.py           genoma e calcolo delle reti
+    geometry.py        dove stanno i neuroni e con che probabilità si collegano
     controllers.py     sensi -> rete -> comandi
     anatomy.py         struttura di una singola rete: rami morti, distanze, genoma in testo
   evo/               evoluzione
@@ -719,6 +761,8 @@ popolazione avanza in un solo passo. Gira su CPU.
   qualche decina di MB, in memoria e su disco). Valgono solo per la stessa
   forma di rete. Se cambi numero di
   raggi, sensi o massimo di neuroni, il caricamento viene rifiutato.
+  I salvataggi fatti prima della geometria del cervello (senza posizioni dei
+  neuroni) non si possono più aprire.
 
 ## Stato e prossimi passi
 

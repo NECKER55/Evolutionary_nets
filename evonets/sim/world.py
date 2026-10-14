@@ -53,8 +53,11 @@ class World:
             pos[bad] = self.rng.uniform(lo, hi, (int(bad.sum()), 2))
         return pos
 
-    def step(self, actions: np.ndarray) -> None:
-        """actions: (N, 2) in [-1, 1] -> colonne (spinta, sterzata)."""
+    def step(self, actions: np.ndarray, upkeep: np.ndarray | None = None) -> None:
+        """actions: (N, 2) in [-1, 1] -> colonne (spinta, sterzata).
+        upkeep: (N,) energia/s che ogni agente spende in più per mantenere il
+        proprio corpo (oggi: il cablaggio del cervello). Il mondo non sa da dove
+        viene: lo decide chi controlla gli agenti."""
         cfg = self.cfg
         dt = cfg.dt
         act = np.clip(actions, -1.0, 1.0)
@@ -101,6 +104,7 @@ class World:
             cfg.metabolism_basal
             + cfg.metabolism_move * np.abs(act[:, 0])
             + cfg.metabolism_turn * np.abs(turn)
+            + (0.0 if upkeep is None else upkeep)
         ) * active
         spent = (effort + cfg.hazard_drain * toxicity) * dt
         self.energy = np.maximum(self.energy - spent, 0.0)

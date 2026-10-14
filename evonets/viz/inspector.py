@@ -27,14 +27,6 @@ SOURCES = (CHAMPIONS, SURVIVORS, POPULATION)
 TAB_LABELS = {CHAMPIONS: "1 campioni", SURVIVORS: "2 sopravv.", POPULATION: "3 tutti"}
 
 
-def bezier(a, b, lift: float, n: int = 16) -> list[tuple[int, int]]:
-    """Arco da a a b che si alza di `lift` pixel: per i collegamenti all'indietro."""
-    mid = ((a[0] + b[0]) / 2.0, min(a[1], b[1]) - lift)
-    t = np.linspace(0.0, 1.0, n)[:, None]
-    pts = (1 - t) ** 2 * np.array(a) + 2 * (1 - t) * t * np.array(mid) + t**2 * np.array(b)
-    return [(int(x), int(y)) for x, y in pts]
-
-
 def arrow(surface, color, a, b, size: float = 9.0, back: float = 11.0) -> None:
     """Punta di freccia sulla linea da a a b, appena prima di b (il neurone)."""
     d = np.array(b, dtype=float) - np.array(a, dtype=float)
@@ -125,54 +117,27 @@ class NetView:
         self.layout()
 
     def layout(self) -> None:
-        """Sensi in colonna a sinistra, motori a destra, neuroni interni su
-        un'ellisse in mezzo: così i collegamenti tra interni sono corde ben
-        visibili. Sull'arco sinistro gli interni che ascoltano soprattutto i
-        sensi, sul destro quelli che parlano soprattutto ai motori; su ogni
-        arco l'ordine dall'alto in basso segue la posizione media di chi li
-        alimenta (meno incroci)."""
+        """Ogni neurone dove sta davvero nel cervello (un quadrato di lato 1,
+        vedi net/geometry.py): sensi sul bordo sinistro, motori sul destro,
+        interni nella loro posizione. Un collegamento lungo sul disegno è
+        lungo anche nel cervello, e costa in proporzione."""
         self.pos = {}
         a, G = self.anat, self.rect
         if a is None:
             return
         show = a.exists & (a.useful if self.prune else True)
         top, bottom = G.y + 64, G.bottom - 30
-
-        def column(nodes, x, gap_max):
-            gap = min(gap_max, (bottom - top) / max(len(nodes), 1))
-            y0 = (top + bottom) / 2 - gap * (len(nodes) - 1) / 2
-            for j, v in enumerate(nodes):
-                self.pos[v] = (int(x), int(y0 + j * gap))
-
-        column([k for k in range(a.n_in) if show[k]], G.x + 104, 24)
-        column(list(range(a.n_in + a.n_hidden, a.n_nodes)), G.right - 72, 70)
-        hidden = [v for v in range(a.n_in, a.n_in + a.n_hidden) if show[v]]
-        if not hidden:
-            return
-        motors = range(a.n_in + a.n_hidden, a.n_nodes)
-
-        def lean(v):  # >0: parla ai motori più di quanto ascolti i sensi
-            ins = [abs(a.weight(s, v)) for s in a.inputs_of(v)]
-            outs = [abs(a.weight(v, d)) for d in a.outputs_of(v)]
-            from_senses = sum(abs(a.weight(s, v)) for s in a.inputs_of(v) if s < a.n_in)
-            to_motors = sum(abs(a.weight(v, d)) for d in a.outputs_of(v) if d in motors)
-            return to_motors / (sum(outs) or 1.0) - from_senses / (sum(ins) or 1.0)
-
-        def bary(v):
-            ys = [self.pos[s][1] for s in a.inputs_of(v) if s < a.n_in and s in self.pos]
-            return np.mean(ys) if ys else (top + bottom) / 2
-
-        ranked = sorted(hidden, key=lean)
-        half = (len(ranked) + 1) // 2
-        left, right = sorted(ranked[:half], key=bary), sorted(ranked[half:], key=bary)
-        lo, hi = G.x + 175, G.right - 135
-        cx, cy = (lo + hi) / 2, (top + bottom) / 2
-        rx, ry = (hi - lo) / 2, (bottom - top) / 2 - 14
-        gap = 0.4  # radianti liberi in cima e in fondo: i due archi non si toccano
-        for nodes, a0, a1 in ((left, 1.5 * np.pi - gap, 0.5 * np.pi + gap), (right, -0.5 * np.pi + gap, 0.5 * np.pi - gap)):
-            angles = np.linspace(a0, a1, len(nodes)) if len(nodes) > 1 else [(a0 + a1) / 2]
-            for v, t in zip(nodes, angles):
-                self.pos[v] = (int(cx + rx * np.cos(t)), int(cy + ry * np.sin(t)))
+        left, right = G.x + 104, G.right - 72
+        for v in range(a.n_nodes):
+            if not show[v]:
+                continue
+            x, y = a.xy[v]
+            if a.is_hidden(v):  # un po' di margine dalle colonne di sensi e motori
+                px = left + 22 + x * (right - left - 44)
+            else:
+                px = left + x * (right - left)
+            self.pos[v] = (int(px), int(top + y * (bottom - top)))
+        self.box = pygame.Rect(left, top, right - left, bottom - top)
 
     def node_at(self, p) -> int | None:
         best, dist = None, 12.0
@@ -206,12 +171,15 @@ class NetView:
         head = (f"rete {KIND_NAMES[a.kind]}: {sm['neurons']} interni ({sm['useful_neurons']} utili), "
                 f"{sm['links']} coll. ({sm['useful_links']} utili)")
         s.blit(font.render(head, True, TEXT), (G.x + 8, G.y + 4))
-        sub = f"sensi usati {sm['senses_used']}/{a.n_in}, anelli {sm['loops']}"
+        sub = (f"sensi {sm['senses_used']}/{a.n_in}, anelli {sm['loops']}, "
+               f"cablaggio {sm['wire_length']:.0f} ({sm['wire_cost']:.2f} en./s)")
         if "inhibitory" in sm:
             sub += f", {sm['neurons'] - sm['inhibitory']} ecc. + {sm['inhibitory']} inib."
         s.blit(font.render(sub, True, DIM), (G.x + 8, G.y + 20))
-        for x, title in ((G.x + 84, "sensi"), (G.x + (175 + G.w - 135) // 2 - 24, "interni"), (G.right - 92, "motori")):
+        for x, title in ((G.x + 84, "sensi"), (G.centerx - 90, "interni, dove stanno nel cervello"),
+                         (G.right - 92, "motori")):
             s.blit(font.render(title, True, DIM), (x, G.y + 40))
+        pygame.draw.rect(s, (30, 33, 44), self.box.inflate(10, 10), 1)  # il cervello
 
         layer = pygame.Surface(G.size, pygame.SRCALPHA)
         ox, oy = G.topleft
@@ -231,10 +199,7 @@ class NetView:
             if u == v:
                 pygame.draw.circle(layer, (*color, alpha), (p[0], p[1] - 12), 7, 1)
                 continue
-            if a.is_motor(u):  # i motori che rimandano il loro valore indietro: un arco
-                pts = bezier(p, q, 40 + 0.15 * abs(q[0] - p[0]))
-            else:
-                pts = [p, q]
+            pts = [p, q]  # dritto: la lunghezza sul disegno è quella nel cervello
             pygame.draw.lines(layer, (*color, alpha), False, pts, width)
             if focus is not None and focus in (u, v):
                 arrow(layer, (*color, alpha), pts[-2], q)
@@ -346,7 +311,7 @@ class Explorer:
                                      f"individuo #{ids[i]}, età {age[i]}", f"#{ids[i]}")
             self.seen = None
             if self.source == SURVIVORS:
-                what = (f"i {len(rows)} rimasti dalla selezione" if evo.selection is not None
+                what = (f"{len(rows)} rimasti dalla selezione" if evo.selection is not None
                         else f"{len(rows)} vincitori della gen. {evo.generation - 1}")
                 self.list.header = [f"{'num.':>6} {'età':>4} {'neur':>4} {'colleg':>6}", what,
                                     "A: tutti insieme in arena"]

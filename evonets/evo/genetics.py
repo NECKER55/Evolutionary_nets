@@ -2,6 +2,7 @@ import numpy as np
 
 from ..config import Config
 from ..net.brain import Genome
+from ..net.geometry import connect_prob, distances
 
 
 def crossover(parents: Genome, mothers: np.ndarray, fathers: np.ndarray,
@@ -10,7 +11,8 @@ def crossover(parents: Genome, mothers: np.ndarray, fathers: np.ndarray,
 
     Il genoma si mescola a blocchi interi, uno per neurone: per ogni neurone il
     figlio prende da un solo genitore l'esistenza, i geni propri e tutti i
-    collegamenti in ingresso. Così i pesi che lavorano insieme restano insieme.
+    collegamenti in ingresso, e un neurone interno porta con sé la sua
+    posizione. Così i pesi che lavorano insieme restano insieme.
     """
     n_blocks = parents.traits.shape[1]
     n_hidden = parents.active.shape[1]
@@ -20,6 +22,7 @@ def crossover(parents: Genome, mothers: np.ndarray, fathers: np.ndarray,
         np.where(from_father[:, :, None], parents.traits[fathers], parents.traits[mothers]),
         np.where(from_father[:, :, None], parents.conn[fathers], parents.conn[mothers]),
         np.where(from_father[:, :n_hidden], parents.active[fathers], parents.active[mothers]),
+        np.where(from_father[:, :n_hidden, None], parents.pos[fathers], parents.pos[mothers]),
     )
 
 
@@ -34,8 +37,19 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator, strength: floa
         hit = chance(values.shape, cfg.mut_weight_prob)
         values[hit] += rng.normal(0.0, std, int(hit.sum()))
 
-    # Un collegamento che compare usa il peso già scritto in quel posto del genoma.
-    appear = ~genome.conn & chance(genome.conn.shape, cfg.mut_conn_add)
+    # I neuroni interni si spostano di poco, restando nel cervello.
+    moved = chance(genome.pos.shape[:2], cfg.mut_pos_prob)
+    genome.pos[moved] += rng.normal(0.0, cfg.mut_pos_std * strength, (int(moved.sum()), 2))
+    np.clip(genome.pos, 0.0, 1.0, out=genome.pos)
+
+    # Un collegamento compare con una probabilità che cala con la distanza,
+    # come alla nascita: mut_conn_add tra neuroni vicinissimi, molto meno tra
+    # neuroni lontani. Usa il peso già scritto in quel posto del genoma.
+    t, s = genome.conn.shape[1:]
+    n_in, n_out = s - t, t - genome.active.shape[1]
+    shape = connect_prob(cfg, distances(cfg, genome.pos, n_in, n_out), n_in) / cfg.net_conn_prob
+    p_add = np.minimum(1.0, cfg.mut_conn_add * strength * shape)
+    appear = ~genome.conn & (rng.random(genome.conn.shape) < p_add)
     vanish = genome.conn & chance(genome.conn.shape, cfg.mut_conn_del)
     genome.conn ^= appear | vanish
 

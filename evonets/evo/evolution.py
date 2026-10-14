@@ -72,7 +72,7 @@ class Evolution:
         if manual is not None:
             actions = actions.copy()
             actions[manual[0]] = manual[1]
-        self.world.step(actions)
+        self.world.step(actions, self.ctrl.upkeep)
 
     def oldest(self) -> dict | None:
         """L'individuo più anziano in gara: posto nella popolazione, numero,
@@ -107,6 +107,7 @@ class Evolution:
             "duration": world.t,
             "neurons": float(brains.active.sum(axis=1).mean()),
             "links": float(brains.links.sum(axis=(1, 2)).mean()),
+            "wiring": float(brains.wire_length.mean()),
             "oldest": int(self.age.max()),
             "oldest_id": int(self.ids[np.argmax(self.age)]),
         }
@@ -207,19 +208,21 @@ class Evolution:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         g = self.ctrl.brains.genome
-        data = dict(weights=g.weights, traits=g.traits, conn=g.conn, active=g.active, age=self.age,
+        data = dict(weights=g.weights, traits=g.traits, conn=g.conn, active=g.active, pos=g.pos, age=self.age,
                     ids=self.ids, next_id=self.next_id, born=self.born, population=self.cfg.population,
                     net_type=self.cfg.net_type, seed=self.seed,
                     generation=self.generation, world_seed=self.world.seed,
                     history=json.dumps(self.history))
         if self.last_parents is not None:
             lp = self.last_parents
-            data.update(lp_weights=lp.weights, lp_traits=lp.traits, lp_conn=lp.conn, lp_active=lp.active)
+            data.update(lp_weights=lp.weights, lp_traits=lp.traits, lp_conn=lp.conn, lp_active=lp.active,
+                        lp_pos=lp.pos)
         if self.champions:
             gens, ages, genomes, ids = zip(*self.champions)
             ch = Genome.concat(list(genomes))
             data.update(ch_generation=np.array(gens), ch_age=np.array(ages), ch_id=np.array(ids),
-                        ch_weights=ch.weights, ch_traits=ch.traits, ch_conn=ch.conn, ch_active=ch.active)
+                        ch_weights=ch.weights, ch_traits=ch.traits, ch_conn=ch.conn, ch_active=ch.active,
+                        ch_pos=ch.pos)
         if self.selection is not None:
             data["selection"] = json.dumps(self.selection)
         np.savez_compressed(path, **data)
@@ -230,6 +233,9 @@ class Evolution:
         rete sono quelli salvati; la forma delle reti deve coincidere con la
         configurazione attuale."""
         d = np.load(path)
+        if "pos" not in d:
+            raise ValueError(f"{path}: salvataggio di una versione senza geometria del cervello "
+                             "(i neuroni non hanno posizione): non si può caricare")
 
         def traits(prefix=""):  # i salvataggi più vecchi avevano solo la soglia
             if prefix + "traits" in d:
@@ -248,7 +254,7 @@ class Evolution:
                 f"{path}: reti di forma {d['weights'].shape[1:]}, ma la configurazione attuale "
                 f"prevede {expected} (sono cambiati i raggi, i sensi o net_hidden_max?)"
             )
-        evo.ctrl.brains.set_genome(Genome(d["weights"], traits(), d["conn"], d["active"]))
+        evo.ctrl.brains.set_genome(Genome(d["weights"], traits(), d["conn"], d["active"], d["pos"]))
         evo.age = d["age"]
         if "ids" in d:
             evo.ids, evo.next_id, evo.born = d["ids"], int(d["next_id"]), d["born"]
@@ -261,9 +267,9 @@ class Evolution:
         evo.seed = int(d["seed"]) if "seed" in d else None
         evo.history = json.loads(str(d["history"]))
         if "lp_weights" in d:
-            evo.last_parents = Genome(d["lp_weights"], traits("lp_"), d["lp_conn"], d["lp_active"])
+            evo.last_parents = Genome(d["lp_weights"], traits("lp_"), d["lp_conn"], d["lp_active"], d["lp_pos"])
         if "ch_weights" in d:
-            ch = Genome(d["ch_weights"], d["ch_traits"], d["ch_conn"], d["ch_active"])
+            ch = Genome(d["ch_weights"], d["ch_traits"], d["ch_conn"], d["ch_active"], d["ch_pos"])
             ids = d["ch_id"] if "ch_id" in d else np.full(len(d["ch_age"]), -1)
             evo.champions = [(int(g), int(a), ch.take([k]), int(i))
                              for k, (g, a, i) in enumerate(zip(d["ch_generation"], d["ch_age"], ids))]

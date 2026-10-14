@@ -172,8 +172,8 @@ class Renderer:
 
     def _net_layout(self, brains, i: int) -> dict[int, tuple[int, int]]:
         """Posizione nel pannello di ogni neurone esistente: ingressi in colonna
-        a sinistra (raggruppati per raggio, poi il corpo), interni in cerchio,
-        uscite a destra."""
+        a sinistra (raggruppati per raggio, poi il corpo), interni nella loro
+        posizione nel cervello, uscite a destra."""
         n_ch, n_vis = len(CHANNELS), brains.n_in - len(BODY)
         h_px = self.net_h
         pos, y = {}, 44.0
@@ -185,11 +185,13 @@ class Renderer:
                 y += 3.0 if k < n_vis else 12.0
             pos[k] = (78, int(y))
             y += step if k < n_vis else body_step
-        hidden = np.flatnonzero(brains.active[i])
-        cx, cy, rad = 250, h_px // 2 + 10, 105
-        for j, hid in enumerate(hidden):
-            a = 2.0 * np.pi * j / len(hidden) - np.pi / 2.0
-            pos[brains.n_in + hid] = (int(cx + rad * np.cos(a)), int(cy + rad * np.sin(a)))
+        # Gli interni dove stanno nel cervello (net/geometry.py), tra la colonna
+        # dei sensi e quella dei motori.
+        left, right, top, bottom = 78 + 22, PANEL_W - 70 - 22, 44, h_px - 16
+        for hid in np.flatnonzero(brains.active[i]):
+            x, y = brains.pos[i, hid]
+            pos[brains.n_in + hid] = (int(left + x * (right - left)), int(top + y * (bottom - top)))
+        cy = h_px // 2 + 10
         for o in range(brains.n_out):
             gap = 100 if brains.n_out <= 2 else 62
             pos[brains.n_in + brains.n_hidden + o] = (PANEL_W - 70, int(cy + (o - (brains.n_out - 1) / 2) * gap))

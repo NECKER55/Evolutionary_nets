@@ -69,7 +69,7 @@ class App:
         if not len(idx):
             return "nessun sopravvissuto da provare: l'ultima generazione non ha vinto nessuno"
         if evo.selection is not None and not evo.selecting:
-            what = f"i {len(idx)} rimasti dalla selezione finale"
+            what = ("l'unico rimasto" if len(idx) == 1 else f"i {len(idx)} rimasti") + " dalla selezione finale"
         else:
             what = f"i {len(idx)} sopravvissuti (vincitori della gen. {evo.generation - 1})"
         labels = [f"#{i}" for i in evo.ids[idx]]
@@ -118,6 +118,8 @@ def save_info(path) -> str:
     """Una riga che descrive un salvataggio, senza caricarlo per intero."""
     try:
         with np.load(path) as d:
+            if "pos" not in d:
+                return "versione vecchia, senza geometria del cervello: non si può aprire"
             net = str(d["net_type"]) if "net_type" in d else "rate"
             n = len(d["weights"])
             text = f"generazione {int(d['generation'])}, {n} individui, rete {KIND_NAMES.get(net, net)}"

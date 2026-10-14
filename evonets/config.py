@@ -27,6 +27,11 @@ class Config:
     metabolism_basal: float = 2.5  # energia/s solo per esistere
     metabolism_move: float = 2.5  # energia/s in più a spinta piena (avanti o indietro)
     metabolism_turn: float = 0.5  # energia/s in più a sterzata piena
+    # Costo del cablaggio: energia/s per ogni unità di lunghezza di
+    # collegamento effettivo (il cervello è un quadrato di lato 1). Una rete
+    # iniziale tipica, lunga in tutto ~60, paga ~0.25/s: un decimo del
+    # metabolismo di base. Come in natura, un filo lungo deve valere il suo prezzo.
+    wire_cost: float = 0.004
 
     # Campo visivo
     vision_rays: int = 9
@@ -42,8 +47,16 @@ class Config:
     # inibitorio.
     net_type: str = "rate"
     net_hidden_max: int = 32
-    net_conn_prob: float = 0.15
     net_weight_std: float = 1.0
+    # Geometria (vedi net/geometry.py): il cervello è un quadrato di lato 1,
+    # sensi a sinistra, motori a destra. Alla nascita un collegamento esiste con
+    # probabilità net_conn_prob * exp(-distanza / net_conn_range): locale quasi
+    # sempre, lungo di rado. Con questi valori una rete casuale ha in media
+    # tanti collegamenti quanti ne avrebbe con il 15% uniforme, ma lunghi la
+    # metà, e quasi sempre almeno un percorso dai sensi ai motori.
+    net_conn_prob: float = 0.75  # probabilità a distanza 0
+    net_conn_range: float = 0.3  # portata tipica di un collegamento
+    net_self_prob: float = 0.05  # un neurone collegato a se stesso: raro, come in natura
     # Solo "spike-ei": passi di rete per ogni passo di fisica, e guadagno della
     # corrente in ingresso ai neuroni interni.
     spike_substeps: int = 4
@@ -71,9 +84,13 @@ class Config:
     crossover_rate: float = 0.5  # quota di figli con due genitori (gli altri: copia)
     mut_weight_prob: float = 0.1  # probabilità che un singolo peso o soglia venga ritoccato
     mut_weight_std: float = 0.3  # ampiezza del ritocco
-    mut_conn_add: float = 0.002  # probabilità che un collegamento assente compaia
+    # Probabilità che un collegamento assente compaia, tra due neuroni a
+    # distanza 0; cala con la distanza come alla nascita (in media ~0.2%).
+    mut_conn_add: float = 0.01
     mut_conn_del: float = 0.01  # probabilità che un collegamento presente sparisca
     mut_neuron_toggle: float = 0.01  # probabilità che un neurone interno si accenda o si spenga
+    mut_pos_prob: float = 0.1  # probabilità che un neurone interno si sposti
+    mut_pos_std: float = 0.03  # di quanto, in lati del cervello
 
     # Compito
     target_radius: float = 3.0
@@ -102,6 +119,7 @@ TUNABLES = (
     "wall_restitution",
     "metabolism_basal",
     "metabolism_move",
+    "wire_cost",
     "hazard_speed",
     "hazard_drain",
     "hazard_falloff",

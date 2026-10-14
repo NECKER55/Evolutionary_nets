@@ -24,7 +24,7 @@ def bench(cfg: Config, n_agents: int, steps: int, seed: int) -> None:
     ctrl = NeuralController(cfg, n_agents, seed)
     t0 = time.perf_counter()
     for _ in range(steps):
-        world.step(ctrl.act(world))
+        world.step(ctrl.act(world), ctrl.upkeep)
     el = time.perf_counter() - t0
     print(
         f"{n_agents} agenti x {steps} step in {el:.2f}s -> "

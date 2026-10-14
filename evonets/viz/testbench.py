@@ -114,7 +114,7 @@ class TestScreen:
             if self.manual:
                 actions = actions.copy()
                 actions[self.focus] = hand
-            self.world.step(actions)
+            self.world.step(actions, self.ctrl.upkeep)
             if self.over:
                 break
 
