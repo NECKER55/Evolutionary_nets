@@ -186,3 +186,35 @@ def test_manual_override_replaces_only_that_agents_commands():
         b.step((3, np.array([1.0, 1.0])))
     same = np.isclose(a.world.pos, b.world.pos).all(axis=1)
     assert not same[3] and same[np.arange(30) != 3].all()
+
+
+def test_each_generation_with_winners_keeps_its_oldest_winner_as_champion(tmp_path):
+    e = evo()
+    finish(e, [4])  # gen. 0: un vincitore, età 0
+    finish(e, [])  # gen. 1: nessuno, nessun campione
+    oldest = individual(e.ctrl.brains.genome, 2)
+    e.age[2] = 5
+    finish(e, [1, 2, 3])  # gen. 2: vince il più anziano
+    assert [(g, a) for g, a, _ in e.champions] == [(0, 0), (2, 5)]
+    assert equal(individual(e.champions[1][2], 0), oldest)
+    e.save(tmp_path / "pop.npz")
+    b = Evolution.load(Config(net_hidden_max=6), tmp_path / "pop.npz")
+    assert [(g, a) for g, a, _ in b.champions] == [(0, 0), (2, 5)]
+    assert equal(individual(b.champions[1][2], 0), oldest)
+
+
+def test_a_trial_tests_one_network_on_fixed_arenas_and_is_reproducible():
+    from evonets.evo.trial import Trial
+
+    e = evo()
+    g = e.ctrl.brains.genome.take([3])
+    results = []
+    for _ in range(2):
+        t = Trial(e.cfg, g, arenas=3, clones=10)
+        while not t.finished:
+            t.run(1.0)
+        assert len(t.completed) == 3 and all(0 <= c <= 10 for c in t.completed)
+        assert len(t.times) == sum(t.completed)
+        results.append((t.completed, t.times))
+    assert results[0] == results[1]
+    assert (e.ctrl.brains.genome.weights[3] == g.weights[0]).all()  # la rete provata non cambia

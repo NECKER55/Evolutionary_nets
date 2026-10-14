@@ -29,6 +29,9 @@ class Evolution:
         quota con mutazioni più forti) o, se non ce ne sono mai stati, da reti
         casuali.
     Ogni generazione affronta un'arena nuova, uguale per tutti.
+
+    `champions` conserva, per ogni generazione con almeno un vincitore, il
+    genoma del vincitore più anziano: è la traccia di come cambia la rete.
     """
 
     def __init__(self, cfg: Config, seed: int = 0, task=None):
@@ -40,6 +43,7 @@ class Evolution:
         self.generation = 0
         self.last_parents: Genome | None = None
         self.history: list[dict] = []
+        self.champions: list[tuple[int, int, Genome]] = []  # (generazione, età, genoma)
 
     @property
     def finished(self) -> bool:
@@ -80,6 +84,8 @@ class Evolution:
 
         genome = brains.genome
         if len(winners):
+            champion = winners[np.argmax(self.age[winners])]
+            self.champions.append((self.generation, int(self.age[champion]), genome.take([champion])))
             parents = genome.take(winners)
             self.last_parents = parents
             keep = winners if cfg.max_age <= 0 else winners[self.age[winners] + 1 < cfg.max_age]
@@ -123,6 +129,11 @@ class Evolution:
         if self.last_parents is not None:
             lp = self.last_parents
             data.update(lp_weights=lp.weights, lp_traits=lp.traits, lp_conn=lp.conn, lp_active=lp.active)
+        if self.champions:
+            gens, ages, genomes = zip(*self.champions)
+            ch = Genome.concat(list(genomes))
+            data.update(ch_generation=np.array(gens), ch_age=np.array(ages), ch_weights=ch.weights,
+                        ch_traits=ch.traits, ch_conn=ch.conn, ch_active=ch.active)
         np.savez_compressed(path, **data)
 
     @classmethod
@@ -152,4 +163,8 @@ class Evolution:
         evo.history = json.loads(str(d["history"]))
         if "lp_weights" in d:
             evo.last_parents = Genome(d["lp_weights"], traits("lp_"), d["lp_conn"], d["lp_active"])
+        if "ch_weights" in d:
+            ch = Genome(d["ch_weights"], d["ch_traits"], d["ch_conn"], d["ch_active"])
+            evo.champions = [(int(g), int(a), ch.take([k]))
+                             for k, (g, a) in enumerate(zip(d["ch_generation"], d["ch_age"]))]
         return evo

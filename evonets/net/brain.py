@@ -5,6 +5,22 @@ import numpy as np
 from ..config import Config
 
 
+def live_links(conn: np.ndarray, active: np.ndarray, n_in: int) -> np.ndarray:
+    """Collegamenti che contano davvero: presenti nel genoma e tra neuroni
+    esistenti. conn (N, T, S), active (N, H) -> (N, T, S)."""
+    n = len(conn)
+    n_out = conn.shape[1] - active.shape[1]
+    target_on = np.concatenate([active, np.ones((n, n_out), dtype=bool)], axis=1)
+    source_on = np.concatenate([np.ones((n, n_in), dtype=bool), target_on], axis=1)
+    return conn & target_on[:, :, None] & source_on[:, None, :]
+
+
+def retention(gene: np.ndarray) -> np.ndarray:
+    """Reti a impulsi: quota di carica che un neurone trattiene a ogni passo,
+    dal gene "perdita". Da ~0.5 (neurone rapido) a ~0.97 (lento), tipicamente ~0.8."""
+    return 1.0 / (1.0 + np.exp(-(1.5 + gene)))
+
+
 @dataclass
 class Genome:
     """I genomi di un gruppo di individui, uno per riga (vedi `Brains`)."""
@@ -51,6 +67,11 @@ class Brains:
     N_TRAITS = 1
     OUT_LABELS = ("spinta", "sterzo")
 
+    @staticmethod
+    def trait_text(traits: np.ndarray, hidden: bool) -> list[str]:
+        """I geni propri di un neurone, in parole."""
+        return [f"soglia {traits[0]:+.3f}"]
+
     def __init__(self, cfg: Config, n: int, n_in: int, n_out: int, seed: int = 0):
         self.n, self.n_in, self.n_out = n, n_in, n_out
         self.n_hidden = h = cfg.net_hidden_max
@@ -88,11 +109,9 @@ class Brains:
     def compile(self) -> None:
         """Da chiamare dopo ogni modifica al genoma: prepara i pesi effettivi,
         azzerando ciò che tocca un neurone interno inesistente."""
-        ones_in = np.ones((self.n, self.n_in), dtype=bool)
         ones_out = np.ones((self.n, self.n_out), dtype=bool)
         self.target_on = np.concatenate([self.active, ones_out], axis=1)
-        source_on = np.concatenate([ones_in, self.active, ones_out], axis=1)
-        self.links = self.conn & self.target_on[:, :, None] & source_on[:, None, :]
+        self.links = live_links(self.conn, self.active, self.n_in)
         self.w_eff = self.weights * self.links
 
     def reset_state(self) -> None:
@@ -135,6 +154,13 @@ class SpikingBrains(Brains):
     N_TRAITS = 3
     OUT_LABELS = ("avanti", "indietro", "destra", "sinistra")
 
+    @staticmethod
+    def trait_text(traits: np.ndarray, hidden: bool) -> list[str]:
+        kind = ("inibitorio" if traits[2] < 0.0 else "eccitatorio") if hidden else "- (solo per gli interni)"
+        return [f"corrente di fondo {traits[0]:+.3f}",
+                f"carica trattenuta {float(retention(traits[1])):.0%} (gene {traits[1]:+.3f})",
+                f"tipo {kind} (gene {traits[2]:+.3f})"]
+
     def __init__(self, cfg: Config, n: int, n_in: int, n_out: int = 4, seed: int = 0):
         self.substeps, self.gain = cfg.spike_substeps, cfg.spike_gain
         self.sensors_excitatory_only = cfg.sensors_excitatory_only
@@ -152,9 +178,7 @@ class SpikingBrains(Brains):
 
     def compile(self) -> None:
         super().compile()
-        # Quota di carica trattenuta a ogni passo di rete: da ~0.5 (neurone
-        # rapido) a ~0.97 (lento), tipicamente ~0.8.
-        self.keep = 1.0 / (1.0 + np.exp(-(1.5 + self.traits[:, :, 1])))
+        self.keep = retention(self.traits[:, :, 1])
         sign = np.ones((self.n, self.n_in + self.n_hidden + self.n_out))
         sign[:, self.n_in : self.n_in + self.n_hidden] = np.where(self.inhibitory, -1.0, 1.0)
         w = np.abs(self.weights) * sign[:, None, :]

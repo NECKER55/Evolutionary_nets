@@ -29,16 +29,49 @@ BODY_SHORT = ("avanti", "traverso", "rotaz.", "energia", "dolore", "urto")
 RINGS = 10
 
 
+def success_series(history: list[dict], n: int) -> tuple[np.ndarray, np.ndarray]:
+    """Percentuale di successi per generazione e la sua media sulle ultime 10."""
+    pct = np.array([h["completed"] for h in history]) * 100.0 / n
+    csum = np.cumsum(np.insert(pct, 0, 0.0))
+    k = np.arange(1, len(pct) + 1)
+    start = np.maximum(k - 10, 0)
+    return pct, (csum[k] - csum[start]) / (k - start)
+
+
+def plot(surface, box: pygame.Rect, font, series, top: float, ticks=(0.0, 0.5, 1.0), fmt="{:3.0f}") -> None:
+    """Grafico a linee in `box`, da 0 a `top`. `series`: (valori, colore, spessore);
+    `ticks` sono frazioni di `top` con una riga di griglia ciascuna."""
+    top = max(top, 1e-9)
+    for f in ticks:
+        y = box.bottom - box.h * f
+        pygame.draw.line(surface, IDLE, (box.x, y), (box.right, y), 1)
+        img = font.render(fmt.format(top * f), True, DIM)
+        surface.blit(img, (box.x - img.get_width() - 6, y - 6))
+    for values, color, width in series:
+        if not len(values):
+            continue
+        xs = box.x + np.arange(len(values)) * box.w / max(len(values) - 1, 1)
+        pts = [(int(x), int(box.bottom - box.h * min(v, top) / top)) for x, v in zip(xs, values)]
+        if len(pts) > 1:
+            pygame.draw.lines(surface, color, False, pts, width)
+        else:
+            pygame.draw.circle(surface, color, pts[0], 2)
+
+
 class Renderer:
-    def __init__(self, world: World, arena_px: int = 1000):
+    @staticmethod
+    def window_size(cfg, arena_px: int = 1000) -> tuple[int, int]:
+        scale = arena_px / cfg.arena_w
+        return int(cfg.arena_w * scale) + PANEL_W, int(cfg.arena_h * scale)
+
+    def __init__(self, world: World, screen: pygame.Surface, arena_px: int = 1000):
         self.world = world
         cfg = world.cfg
         self.scale = scale = arena_px / cfg.arena_w  # pixel per unità: l'arena occupa sempre la stessa larghezza
         size = (int(cfg.arena_w * scale), int(cfg.arena_h * scale))
         self.arena = pygame.Rect(0, 0, *size)
         self.panel = pygame.Rect(size[0], 0, PANEL_W, size[1])
-        self.screen = pygame.display.set_mode((size[0] + PANEL_W, size[1]))
-        pygame.display.set_caption("Evolutionary nets")
+        self.screen = screen
         self.overlay = pygame.Surface(size, pygame.SRCALPHA)
         self.net_h = self.panel.h - GRAPH_H  # sopra la rete, sotto il grafico
         self.net_layer = pygame.Surface((PANEL_W, self.net_h), pygame.SRCALPHA)
@@ -226,25 +259,12 @@ class Renderer:
         pygame.draw.line(self.screen, BORDER, (self.panel.x, self.net_h), (self.panel.right, self.net_h), 1)
         title = "successi (%) - sottile: ogni gen., spessa: media di 10"
         self.screen.blit(self.small.render(title, True, DIM), (self.panel.x + 8, self.net_h + 8))
-        for pct in (0, 50, 100):
-            y = box.bottom - box.h * pct // 100
-            pygame.draw.line(self.screen, IDLE, (box.x, y), (box.right, y), 1)
-            self.screen.blit(self.small.render(f"{pct:3d}", True, DIM), (self.panel.x + 14, y - 6))
         if not history:
+            plot(self.screen, box, self.small, (), 100.0)
             return
-        pct = np.array([h["completed"] for h in history]) * 100.0 / self.world.n
-        csum = np.cumsum(np.insert(pct, 0, 0.0))
-        k = np.arange(1, len(pct) + 1)
-        start = np.maximum(k - 10, 0)
-        avg = (csum[k] - csum[start]) / (k - start)
-        xs = box.x + (k - 1) * box.w / max(len(pct) - 1, 1)
-        for values, color, width in ((pct, WALL, 1), (avg, TARGET, 2)):
-            pts = [(int(x), int(box.bottom - box.h * v / 100.0)) for x, v in zip(xs, values)]
-            if len(pts) > 1:
-                pygame.draw.lines(self.screen, color, False, pts, width)
-            else:
-                pygame.draw.circle(self.screen, color, pts[0], 2)
-        self.screen.blit(self.small.render("gen. 0", True, DIM), (box.x, box.bottom + 6))
+        pct, avg = success_series(history, self.world.n)
+        plot(self.screen, box, self.small, ((pct, WALL, 1), (avg, TARGET, 2)), 100.0)
+        self.screen.blit(self.small.render(f"gen. {history[0]['generation']}", True, DIM), (box.x, box.bottom + 6))
         last = self.small.render(f"gen. {history[-1]['generation']}: {pct[-1]:.0f}%  media {avg[-1]:.0f}%", True, TEXT)
         self.screen.blit(last, (box.right - last.get_width(), box.bottom + 6))
 
@@ -267,4 +287,3 @@ class Renderer:
         if history is not None:
             self._draw_graph(history)
         self._draw_hud(hud)
-        pygame.display.flip()
