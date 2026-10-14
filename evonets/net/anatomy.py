@@ -12,6 +12,7 @@ from .controllers import NeuralController
 from .geometry import motor_anchors, receptor_anchors
 
 KIND_NAMES = {"rate": "continua", "spike-ei": "a impulsi E/I"}
+MOD_VISIBLE = 0.05  # sotto questa quota di M un neurone si considera non modulato
 
 
 def sizes(genome: Genome) -> tuple[np.ndarray, np.ndarray]:
@@ -52,6 +53,8 @@ class Anatomy:
         self.exists[: self.n_in] = genome.r_active[0]
         self.exists[self.n_in : self.n_in + self.n_hidden] = genome.active[0]
         self.inhibitory = brains.inhibitory[0] if hasattr(brains, "inhibitory") else None
+        self.modulatory = brains.modulatory[0]  # (H,)
+        self.kmod = brains.kmod[0]  # (T, H): quanto M di ogni modulatore arriva a ogni neurone
         self.labels = node_labels(genome, brains.OUT_LABELS)
         # Fenomeno dominante di ogni recettore (per il colore nei disegni).
         dom = [receptors.dominant(genome.receptors, 0, k) for k in range(self.n_in)]
@@ -64,12 +67,27 @@ class Anatomy:
         self.wire_cost = cfg.wire_cost * self.wire_length
         self.upkeep = float(brains.upkeep[0])
         self.useful = self._reaches_motors()
+        # Un modulatore non ha uscite: è utile se modula qualcuno che conta.
+        for h in np.flatnonzero(self.modulatory):
+            reached = self.n_in + np.flatnonzero(self.kmod[:, h] > MOD_VISIBLE)
+            if self.useful[reached].any():
+                self.useful[self.n_in + h] = True
         self.depth = self._depth_from_senses()
 
     # --- struttura ---------------------------------------------------------
 
     def is_hidden(self, v: int) -> bool:
         return self.n_in <= v < self.n_in + self.n_hidden
+
+    def is_modulator(self, v: int) -> bool:
+        return self.is_hidden(v) and bool(self.modulatory[v - self.n_in])
+
+    def modulated_by(self, v: int) -> list[tuple[int, float]]:
+        """Neuroni (numero, quota di M) che il modulatore v raggiunge."""
+        h = v - self.n_in
+        out = [(self.n_in + t, float(k)) for t, k in enumerate(self.kmod[:, h])
+               if k > MOD_VISIBLE and self.exists[self.n_in + t]]
+        return sorted(out, key=lambda x: -x[1])
 
     def is_motor(self, v: int) -> bool:
         return v >= self.n_in + self.n_hidden
@@ -133,6 +151,7 @@ class Anatomy:
         back = [(s, d) for s, d in e if s >= self.n_in and (s == d or self.depth[s] >= self.depth[d])]
         out = {
             "receptors": int(self.exists[: self.n_in].sum()),
+            "modulators": int((self.modulatory & self.exists[hidden]).sum()),
             "neurons": int(self.exists[hidden].sum()),
             "useful_neurons": int((self.exists & self.useful)[hidden].sum()),
             "links": len(e),
@@ -161,6 +180,9 @@ class Anatomy:
             if self.inhibitory is not None:
                 kind = " inibitorio" if self.inhibitory[v - self.n_in] else " eccitatorio"
             role = f"neurone interno{kind}"
+            if self.is_modulator(v):
+                role = "MODULATORE" + (f" ({'M negativo' if self.inhibitory[v - self.n_in] else 'M positivo'})"
+                                       if self.inhibitory is not None else "")
         x, y = self.xy[v]
         lines = [f"{name}: {role}", f"posizione nel cervello ({x:.2f}, {y:.2f})"]
         if not self.exists[v]:
@@ -174,6 +196,10 @@ class Anatomy:
             d = int(self.depth[v])
             lines.append(f"distanza dai recettori: {d} pass{'o' if d == 1 else 'i'}" if d > 0
                          else "nessun recettore lo raggiunge")
+        if self.is_modulator(v):
+            reached = self.modulated_by(v)
+            lines.append(f"non trasmette: rilascia M, che arriva a {len(reached)} neuroni")
+            lines += [f"  {self.labels[t]:12s} M x{k:.2f}" for t, k in reached[:8]]
         ins, outs = self.inputs_of(v), self.outputs_of(v)
         lines.append(f"collegamenti: {len(ins)} entrano, {len(outs)} escono")
         for title, pairs in (("riceve da", [(s, self.weight(s, v), self.length(s, v)) for s in ins]),

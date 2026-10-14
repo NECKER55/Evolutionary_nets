@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from statistics import NormalDist
 
 import numpy as np
 
@@ -21,6 +22,14 @@ def meta_start(cfg: Config) -> np.ndarray:
 
 
 PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", "toggle", "dup", "pos_prob")]
+
+
+# Geni della plasticità, in coda ai geni propri di ogni neurone interno o
+# motore (vedi docs/SPEC_FASE_E.md). Riguardano le sinapsi che il neurone
+# RICEVE: Δw = η · M · (A·pre·post + B·pre + C·post + D), con
+# η = plasticity_initial_rate · e^gene (gene 0 = plasticità debole di partenza).
+# "mod" > 0 rende un neurone interno modulatore: non trasmette, rilascia M.
+PLASTIC = ("eta", "A", "B", "C", "D", "mod")
 
 
 def clamp_meta(meta: np.ndarray, cfg: Config) -> None:
@@ -211,20 +220,42 @@ class Brains:
     """
 
     KIND = "rate"
-    N_TRAITS = 1
+    BASE_TRAITS = 1  # soglia; poi i geni della plasticità
+    N_TRAITS = BASE_TRAITS + len(PLASTIC)
     OUT_LABELS = ("spinta", "sterzo")
 
-    @staticmethod
-    def trait_text(traits: np.ndarray, hidden: bool) -> list[str]:
+    @classmethod
+    def trait_text(cls, traits: np.ndarray, hidden: bool) -> list[str]:
         """I geni propri di un neurone, in parole."""
-        return [f"soglia {traits[0]:+.3f}"]
+        return [f"soglia {traits[0]:+.3f}"] + cls.plastic_text(traits, hidden)
+
+    @classmethod
+    def plastic_text(cls, traits: np.ndarray, hidden: bool) -> list[str]:
+        eta, a, b, c, d, mod = traits[cls.BASE_TRAITS:]
+        lines = [f"plasticità in entrata: η0 x {np.exp(eta):.2g}",
+                 f"  A {a:+.2f} pre·post   B {b:+.2f} pre",
+                 f"  C {c:+.2f} post       D {d:+.2f}"]
+        if hidden:
+            lines.append("modulatore: sì (non trasmette, rilascia M)" if mod > 0
+                         else f"modulatore: no (gene {mod:+.2f})")
+        return lines
 
     def __init__(self, cfg: Config, n: int, n_out: int = 2, seed: int = 0):
         self.cfg, self.n_out = cfg, n_out
         rng = np.random.default_rng(seed)
         genome = primordial(cfg, n, n_out, self.N_TRAITS, rng)
         self._init_genes(cfg, rng, genome)
+        self._init_plasticity(cfg, rng, genome)
         self.set_genome(genome)
+
+    def _init_plasticity(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
+        """Plasticità debole e diversa da individuo a individuo; una quota
+        `modulatory_initial_share` dei neuroni nasce modulatrice."""
+        t = genome.traits[:, :, self.BASE_TRAITS:]
+        t[..., 0] = rng.normal(0.0, 0.5, t.shape[:2])
+        t[..., 1:5] = rng.normal(0.0, cfg.plasticity_initial_rule, t.shape[:2] + (4,))
+        offset = NormalDist().inv_cdf(1.0 - cfg.modulatory_initial_share)
+        t[..., 5] = rng.normal(0.0, 1.0, t.shape[:2]) - offset
 
     def _init_genes(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
         """Per i tipi di rete che hanno geni con una distribuzione iniziale propria."""
@@ -232,6 +263,11 @@ class Brains:
     @property
     def bias(self) -> np.ndarray:
         return self.traits[:, :, 0]
+
+    @property
+    def modulatory(self) -> np.ndarray:
+        """(N, H): True dove il neurone interno è un modulatore acceso."""
+        return (self.traits[:, : self.n_hidden, self.BASE_TRAITS + 5] > 0.0) & self.active
 
     @property
     def genome(self) -> Genome:
@@ -255,10 +291,21 @@ class Brains:
         """Da chiamare dopo ogni modifica al genoma: prepara i pesi effettivi,
         azzerando ciò che tocca un neurone o un recettore inesistente."""
         g, cfg = self._genome, self.cfg
+        R, H = self.n_in, self.n_hidden
         ones_out = np.ones((self.n, self.n_out), dtype=bool)
         self.target_on = np.concatenate([self.active, ones_out], axis=1)
         self.links = live_links(self.conn, self.active, g.r_active)
+        # I modulatori non trasmettono: le loro uscite non esistono (né costano).
+        mod = self.modulatory
+        self.links[:, :, R : R + H] &= ~mod[:, None, :]
         self.dist = distances(cfg, self.pos, g.r_y, self.n_out)
+        # Plasticità: M arriva a ogni neurone dai modulatori, per diffusione,
+        # calando con la distanza (trasmissione di volume).
+        p = self.traits[:, :, self.BASE_TRAITS :]
+        self.eta, self.rule = cfg.plasticity_initial_rate * np.exp(p[..., 0]), p[..., 1:5]
+        self.kmod = np.exp(-self.dist[:, :, R : R + H] / cfg.modulation_range) * mod[:, None, :]
+        self.learns = mod.any(axis=1) & cfg.plasticity  # chi ha almeno un modulatore
+        self._mod_sign = mod.astype(float)
         # Lunghezza totale dei collegamenti effettivi di ogni rete: il suo cablaggio.
         self.wire_length = (self.dist * self.links).sum(axis=(1, 2))
         # Quanto costa mantenere questo corpo e questo cervello, energia/s.
@@ -268,10 +315,31 @@ class Brains:
                        + cfg.receptor_sens_cost * gain.sum(axis=(1, 2)))
         self._subset = None  # copie per `step_some`, da rifare
         self._prepared = None  # recettori pronti per il calcolo, da rifare
-        self.w_eff = self.weights * self.links
+        self._compile_extra()
+        self.w_eff = self._born_weights()
+        self.learned = False
+
+    def _compile_extra(self) -> None:
+        """Per i tipi di rete con geni compilati propri (prima dei pesi)."""
+
+    def _born_weights(self) -> np.ndarray:
+        """I pesi effettivi alla nascita, dal genoma."""
+        return self.weights * self.links
+
+    # Segno obbligato dei pesi (legge di Dale): None = libero.
+    dale = None
 
     def reset_state(self) -> None:
+        """Vita nuova: stato a zero e pesi di nuovo quelli del genoma (ciò che
+        si è imparato non si eredita e non passa da un'arena all'altra)."""
         self.state = np.zeros((self.n, self.n_hidden + self.n_out))
+        self._forget()
+
+    def _forget(self) -> None:
+        if self.learned:
+            self.w_eff = self._born_weights()
+            self._subset = None
+            self.learned = False
 
     # Geni compilati di cui `step_some` usa una copia ridotta.
     SUBSET = ("w_eff", "bias", "target_on")
@@ -295,7 +363,9 @@ class Brains:
 
     def step(self, obs: np.ndarray) -> np.ndarray:
         """obs (N, R) -> uscite (N, n_out) in [-1, 1]."""
+        before = self.state
         self.state, out = self._advance(obs, self.state, self)
+        self._learn(np.arange(self.n), obs, before, self.state)
         return out
 
     def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
@@ -303,9 +373,46 @@ class Brains:
         ciascuno): gli altri restano fermi. Ogni rete calcola per conto suo,
         quindi il risultato per `rows` è identico a quello di `step`."""
         sub = self._rows(rows)
-        state, out = self._advance(obs, self.state[rows], sub)
+        before = self.state[rows]
+        state, out = self._advance(obs, before, sub)
         self.state[rows] = state
+        self._learn(rows, obs, before, state, sub)
         return out
+
+    def _pre(self, obs, before, after) -> np.ndarray:
+        """Attività di ogni sorgente che ha appena agito sui destinatari."""
+        return np.concatenate([obs, before], axis=1)
+
+    def _learn(self, rows, obs, before, after, sub=None) -> None:
+        """Plasticità modulata (docs/SPEC_FASE_E.md): per ogni collegamento
+        effettivo Δw = η · M · (A·pre·post + B·pre + C·post + D), con η, A, B,
+        C, D del neurone che riceve e M che arriva per diffusione dai
+        modulatori. Solo chi ha almeno un modulatore impara."""
+        if not self.cfg.plasticity:
+            return
+        local = np.flatnonzero(self.learns[rows])
+        if not len(local):
+            return
+        who = rows[local]
+        H = self.n_hidden
+        pre = self._pre(obs[local], before[local], after[local])  # (n, S)
+        post = after[local]  # (n, T)
+        m = np.einsum("nth,nh->nt", self.kmod[who], after[local, :H] * self._mod_sign[who])
+        rule = self.rule[who]
+        drive = ((rule[..., 0] * post)[:, :, None] * pre[:, None, :] + rule[..., 1, None] * pre[:, None, :]
+                 + (rule[..., 2] * post + rule[..., 3])[:, :, None])
+        w = self.w_eff[who] + (self.eta[who] * m)[:, :, None] * drive * self.links[who]
+        limit = self.cfg.synapse_max
+        np.clip(w, -limit, limit, out=w)
+        if self.dale is not None:  # un neurone eccitatorio non diventa inibitorio, e viceversa
+            sign = self.dale[who][:, None, :]
+            w = np.where(sign > 0, np.maximum(w, 0.0), np.where(sign < 0, np.minimum(w, 0.0), w))
+        self.w_eff[who] = w
+        if sub is not None:
+            sub["w_eff"][local] = w
+        elif self._subset is not None:
+            self._subset = None
+        self.learned = True
 
     def _advance(self, obs, state, g):
         """Un passo a partire da `state`, con i geni compilati `g` (self o una
@@ -343,15 +450,16 @@ class SpikingBrains(Brains):
     """
 
     KIND = "spike-ei"
-    N_TRAITS = 3
+    BASE_TRAITS = 3  # corrente di fondo, perdita, tipo; poi la plasticità
+    N_TRAITS = BASE_TRAITS + len(PLASTIC)
     OUT_LABELS = ("avanti", "indietro", "destra", "sinistra")
 
-    @staticmethod
-    def trait_text(traits: np.ndarray, hidden: bool) -> list[str]:
+    @classmethod
+    def trait_text(cls, traits: np.ndarray, hidden: bool) -> list[str]:
         kind = ("inibitorio" if traits[2] < 0.0 else "eccitatorio") if hidden else "- (solo per gli interni)"
         return [f"corrente di fondo {traits[0]:+.3f}",
                 f"carica trattenuta {float(retention(traits[1])):.0%} (gene {traits[1]:+.3f})",
-                f"tipo {kind} (gene {traits[2]:+.3f})"]
+                f"tipo {kind} (gene {traits[2]:+.3f})"] + cls.plastic_text(traits, hidden)
 
     def __init__(self, cfg: Config, n: int, n_out: int = 4, seed: int = 0):
         self.substeps, self.gain = cfg.spike_substeps, cfg.spike_gain
@@ -368,20 +476,33 @@ class SpikingBrains(Brains):
         """(N, H): True dove il neurone interno è inibitorio."""
         return self.traits[:, : self.n_hidden, 2] < 0.0
 
-    def compile(self) -> None:
-        super().compile()
+    def _compile_extra(self) -> None:
         self.keep = retention(self.traits[:, :, 1])
+        # Segno di ogni sorgente: +1 eccitatoria, -1 inibitoria, 0 libera (i
+        # recettori, salvo `sensors_excitatory_only`). Vale anche per ciò che
+        # si impara (legge di Dale) e per il segno della modulazione.
         sign = np.ones((self.n, self.n_in + self.n_hidden + self.n_out))
         sign[:, self.n_in : self.n_in + self.n_hidden] = np.where(self.inhibitory, -1.0, 1.0)
-        w = np.abs(self.weights) * sign[:, None, :]
         if not self.sensors_excitatory_only:
-            w[:, :, : self.n_in] = self.weights[:, :, : self.n_in]
-        self.w_eff = w * self.links
+            sign[:, : self.n_in] = 0.0
+        self.dale = sign
+        # Un modulatore eccitatorio rilascia M positivo ("bene"), uno
+        # inibitorio M negativo ("male").
+        self._mod_sign = np.where(self.inhibitory, -1.0, 1.0) * self.modulatory
+
+    def _born_weights(self) -> np.ndarray:
+        w = np.where(self.dale[:, None, :] == 0.0, self.weights, np.abs(self.weights) * self.dale[:, None, :])
+        return w * self.links
+
+    def _pre(self, obs, before, after) -> np.ndarray:
+        """Tracce recenti degli impulsi (e livelli dei motori) dopo il passo."""
+        return np.concatenate([obs, after], axis=1)
 
     SUBSET = ("w_eff", "bias", "keep", "active")
 
     def reset_state(self) -> None:
         h = self.n_hidden
+        self._forget()
         self.charge = np.zeros((self.n, h + self.n_out))
         self.spikes = np.zeros((self.n, h))
         # Per il viewer e per i collegamenti in uscita dai motori: attività
@@ -390,15 +511,19 @@ class SpikingBrains(Brains):
 
     def step(self, obs: np.ndarray) -> np.ndarray:
         """obs (N, R) -> comandi (N, 2) in (-1, 1): spinta e sterzata."""
+        before = self.state.copy()
         (self.charge, self.spikes, self.state), out = self._advance(
             obs, (self.charge, self.spikes, self.state), self)
+        self._learn(np.arange(self.n), obs, before, self.state)
         return out
 
     def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
         sub = self._rows(rows)
+        before = self.state[rows]
         (charge, spikes, state), out = self._advance(
-            obs, (self.charge[rows], self.spikes[rows], self.state[rows]), sub)
+            obs, (self.charge[rows], self.spikes[rows], before.copy()), sub)
         self.charge[rows], self.spikes[rows], self.state[rows] = charge, spikes, state
+        self._learn(rows, obs, before, state, sub)
         return out
 
     def _advance(self, obs, states, g):

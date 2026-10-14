@@ -120,7 +120,7 @@ def test_reset_restores_behaviour_and_population_is_reproducible():
 def test_leak_gene_is_inherited_and_mutated_with_the_rest_of_the_neuron():
     b = brains(20)
     cfg, g = b.cfg, b.genome
-    assert g.traits.shape[2] == 3
+    assert g.traits.shape[2] == SpikingBrains.N_TRAITS == 9
     kids = reproduce(g.take([0]), 30, cfg, np.random.default_rng(0))
     assert (kids.traits[:, :, 1] != g.traits[0, :, 1]).any()
     b.set_genome(kids)

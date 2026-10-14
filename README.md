@@ -540,8 +540,26 @@ pezzo di corteccia:
 - Gli anelli trattengono informazione da un passo all'altro: sono la **memoria**
   dell'agente. Non esiste altra memoria.
 - Alla nascita tutti i neuroni partono da zero.
-- **I pesi non cambiano durante la vita.** L'agente non impara: si impara solo
-  di generazione in generazione.
+- **I pesi possono cambiare durante la vita**, se l'individuo ha dei neuroni
+  modulatori: vedi "Imparare durante la vita" qui sotto. Ciò che si impara non
+  si eredita.
+
+**Imparare durante la vita** (dettagli in [docs/SPEC_FASE_E.md](docs/SPEC_FASE_E.md)).
+
+- Ogni neurone ha, tra i suoi geni, una **regola di plasticità** per le
+  sinapsi che riceve: Δw = η · M · (A·pre·post + B·pre + C·post + D). η, A, B,
+  C e D sono geni: l'evoluzione sceglie *come* imparare, non *cosa*.
+- Un gene può rendere un neurone interno **modulatore** (come i neuroni a
+  dopamina): non trasmette, ma rilascia M, che si diffonde nel cervello e
+  arriva ai neuroni vicini calando con la distanza. M dice alle sinapsi quando
+  cambiare e in che verso. Senza modulatori non si impara nulla.
+- Una sinapsi non supera ±4 e, nelle reti a impulsi, non cambia segno.
+- A ogni nascita e a ogni arena si riparte dai pesi del genoma.
+- Alla partenza circa il 10% dei neuroni è modulatore e la plasticità è debole.
+  Nel mondo di oggi non c'è niente da imparare (tutto ciò che serve si vede, e
+  l'energia non sale mai): l'ambiente che renderà utile imparare è ancora da
+  decidere. Nel viewer i modulatori hanno l'anello viola; toccandone uno, linee
+  viola mostrano i neuroni che raggiunge.
 
 ### 9. Rete continua (`--net rate`, predefinita)
 
@@ -904,9 +922,10 @@ popolazione avanza in un solo passo. Gira su CPU.
   Riprendendo una corsa si riparte con la configurazione salvata, non con
   quella attuale. Il registro compare in cima alla pagina principale, nel
   menu accanto al salvataggio e nel terminale con `--load`.
-  Il formato attuale è il 4 (recettori universali con adattamento, posti che
-  crescono, mutazioni come geni). Quelli del formato 3 si aprono con
-  l'adattamento spento, e il registro lo annota. Quelli precedenti avevano i
+  Il formato attuale è il 5 (recettori universali con adattamento, posti che
+  crescono, mutazioni come geni, plasticità). Quelli dei formati 3 e 4 si
+  aprono convertiti (senza adattamento, senza plasticità), e il registro lo
+  annota. Quelli precedenti avevano i
   sensi fissi e non si possono più aprire.
 
 ## Stato e prossimi passi
@@ -923,7 +942,7 @@ Da fare:
 
 - calibrare i costi di neuroni e recettori ed esperimento di validazione dei
   recettori (specifica, sezione 10);
-- apprendimento durante la vita (plasticità), fase E;
+- l'ambiente che rende utile imparare (fase E: la logica dei neuroni c'è già);
 - oggetto fisico da spingere e zona di consegna (compiti 2 e 3);
 - ottimizzazione delle prestazioni (compilazione dei cicli pesanti, eventualmente GPU);
 - esperimenti sulla forma della rete e del genoma, descritti in

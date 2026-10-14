@@ -67,6 +67,8 @@ FROM_RUN = frozenset({
     "net_hidden_slots", "receptor_slots", "pool_fill", "pool_step",
     "receptor_initial", "receptor_initial_spread_deg", "receptor_initial_aperture_deg",
     "receptor_initial_gain", "receptor_initial_width", "receptor_initial_tau", "receptor_initial_adaptation",
+    "plasticity", "plasticity_initial_rate", "plasticity_initial_rule", "modulatory_initial_share",
+    "modulation_range", "synapse_max",
     "spike_substeps", "spike_gain", "spike_inhibitory_share", "sensors_excitatory_only",
     "population", "max_age", "rescue_share", "rescue_strength", "crossover_rate",
     "mut_weight_prob", "mut_weight_std", "mut_conn_add", "mut_conn_del", "mut_neuron_toggle",

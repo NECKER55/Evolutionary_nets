@@ -39,6 +39,6 @@ def test_saved_config_is_complete_json(tmp_path):
     e = Evolution(small(), 0)
     e.save(tmp_path / "pop.npz")
     d = np.load(tmp_path / "pop.npz")
-    assert int(d["format"]) == 4
+    assert int(d["format"]) == 5
     assert json.loads(str(d["config"]))["energy_init"] == e.cfg.energy_init
     assert json.loads(str(d["log"]))[0]["code"]

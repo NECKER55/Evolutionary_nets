@@ -16,8 +16,8 @@ import numpy as np
 import pygame
 
 from ..net.anatomy import KIND_NAMES, Anatomy, sizes
-from .render import (BG, BORDER, DEAD, DIM, EXCITE, GENERALIST, IDLE, INHIBIT, MOCK, PHENOMENON_COLOR, PLAYER,
-                     TARGET, TEXT)
+from .render import (BG, BORDER, DEAD, DIM, EXCITE, GENERALIST, IDLE, INHIBIT, MOCK, MODULATOR, PHENOMENON_COLOR,
+                     PLAYER, TARGET, TEXT)
 
 ROW = 20
 LINE = 16
@@ -175,6 +175,8 @@ class NetView:
                f"cablaggio {sm['wire_length']:.0f}, costo {sm['upkeep']:.2f} en./s")
         if "inhibitory" in sm:
             sub += f", {sm['neurons'] - sm['inhibitory']} ecc. + {sm['inhibitory']} inib."
+        if sm["modulators"]:
+            sub += f", {sm['modulators']} modulatori"
         s.blit(font.render(sub, True, DIM), (G.x + 8, G.y + 20))
         for x, title in ((G.x + 70, "recettori"), (G.centerx - 90, "interni, dove stanno nel cervello"),
                          (G.right - 92, "motori")):
@@ -221,6 +223,11 @@ class NetView:
             pygame.draw.line(layer, (*color, alpha), p, q, width)
             mid = (p[0] + 0.55 * (q[0] - p[0]), p[1] + 0.55 * (q[1] - p[1]))
             arrow(layer, (*color, alpha), p, mid, size=11.0, back=0.0)
+        # Un modulatore toccato: linee viola verso i neuroni che raggiunge.
+        if focus is not None and a.is_modulator(focus) and focus in pos:
+            for t, k in a.modulated_by(focus):
+                if t in pos:
+                    pygame.draw.line(layer, (*MODULATOR, int(60 + 180 * k)), pos[focus], pos[t], 1)
         s.blit(layer, G.topleft)
 
         # Etichette dei recettori dall'alto in basso, spostate quanto basta
@@ -243,6 +250,8 @@ class NetView:
                 rim = TEXT
                 if a.inhibitory is not None:
                     rim = INHIBIT if a.inhibitory[v - a.n_in] else EXCITE
+                if a.is_modulator(v):
+                    rim = MODULATOR
                 pygame.draw.circle(s, (34, 38, 50), p, 10)
                 pygame.draw.circle(s, DEAD if dead else rim, p, 10, 2)
                 img = font.render(str(v - a.n_in), True, DEAD if dead else TEXT)
@@ -255,6 +264,7 @@ class NetView:
                   ("rami morti " + ("nascosti" if self.prune else "grigi") + " [P]", DEAD)]
         if a.inhibitory is not None:
             legend[2:2] = [("bordo = tipo", TEXT)]
+        legend.insert(2, ("viola = modulatore", MODULATOR))
         x = G.x + 8
         for text, color in legend:
             img = font.render(text, True, color)

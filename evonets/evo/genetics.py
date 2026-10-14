@@ -66,8 +66,10 @@ def duplicate_neuron(g: Genome, i: int, h: int, f: int, rng: np.random.Generator
 
     La copia riceve gli stessi ingressi e manda le stesse uscite; le uscite di
     originale e copia vengono dimezzate. Così insieme fanno esattamente quello
-    che faceva l'originale da solo: la duplicazione non cambia il
-    comportamento, ma la copia è libera di divergere."""
+    che faceva l'originale da solo: alla nascita la duplicazione non cambia il
+    comportamento, ma la copia è libera di divergere. (Con la plasticità le
+    due copie imparano ciascuna per conto suo: durante la vita la neutralità
+    non è più esatta.)"""
     r = g.n_rec
     src_h, src_f = r + h, r + f
     for a in (g.weights, g.conn):

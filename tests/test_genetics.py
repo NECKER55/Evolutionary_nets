@@ -117,8 +117,10 @@ def test_same_rng_seed_gives_the_same_children():
 
 
 def test_neuron_duplication_does_not_change_behaviour():
+    """Senza apprendimento è esatta; con la plasticità le due copie imparano
+    ciascuna per conto suo, quindi la neutralità vale solo alla nascita."""
     for net in ("rate", "spike-ei"):
-        b = rich(20, seed=8, net=net, conn=0.4)
+        b = rich(20, seed=8, net=net, conn=0.4, plasticity=False)
         g = b.genome
         for i in range(20):  # ogni individuo duplica un suo neurone acceso in un posto libero
             on, off = np.flatnonzero(g.active[i]), np.flatnonzero(~g.active[i])
@@ -127,7 +129,7 @@ def test_neuron_duplication_does_not_change_behaviour():
                 duplicate_neuron(g, i, int(on[0]), int(off[0]), np.random.default_rng(i))
         dup = type(b)(b.cfg, 20, b.n_out, 0)
         dup.set_genome(g.take(np.arange(20)))
-        orig = rich(20, seed=8, net=net, conn=0.4)
+        orig = rich(20, seed=8, net=net, conn=0.4, plasticity=False)
         obs = np.random.default_rng(9).uniform(0, 1, (30, 20, R))
         for o in obs:
             assert np.allclose(orig.step(o), dup.step(o), atol=1e-12), net

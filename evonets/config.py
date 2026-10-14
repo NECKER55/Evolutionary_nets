@@ -122,6 +122,17 @@ class Config:
     net_conn_prob: float = 0.75  # probabilità a distanza 0
     net_conn_range: float = 0.3  # portata tipica di un collegamento (valore iniziale: poi è un gene)
     net_self_prob: float = 0.05  # un neurone collegato a se stesso: raro, come in natura
+    # Plasticità (docs/SPEC_FASE_E.md): le sinapsi cambiano durante la vita
+    # secondo una regola i cui coefficienti sono geni del neurone che riceve,
+    # modulata da M, che i neuroni modulatori rilasciano e che si diffonde nel
+    # cervello calando come exp(-d / modulation_range). Ciò che si impara non si
+    # eredita. plasticity = False la spegne del tutto (per confronti).
+    plasticity: bool = True
+    plasticity_initial_rate: float = 0.001  # η0: velocità di partenza (il gene la moltiplica)
+    plasticity_initial_rule: float = 0.5  # deviazione dei coefficienti A, B, C, D alla partenza
+    modulatory_initial_share: float = 0.1  # quota di neuroni che nasce modulatrice
+    modulation_range: float = 0.2  # quanto lontano arriva il modulatore, in lati del cervello
+    synapse_max: float = 4.0  # forza massima di una sinapsi: le sinapsi vere saturano
     # Solo "spike-ei": passi di rete per ogni passo di fisica, e guadagno della
     # corrente in ingresso ai neuroni interni.
     spike_substeps: int = 4

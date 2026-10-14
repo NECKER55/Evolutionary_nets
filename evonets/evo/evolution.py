@@ -20,8 +20,12 @@ RANDOM = "nessun genitore: reti casuali"
 # Versione del formato dei salvataggi. 1 = con geometria del cervello ma senza
 # configurazione; 2 = con configurazione completa e registro dell'ambiente;
 # 3 = recettori universali, posti che crescono, mutazioni come geni;
-# 4 = adattamento sensoriale (i file del formato 3 si aprono con l'adattamento spento).
-FORMAT = 4
+# 4 = adattamento sensoriale (i file del formato 3 si aprono con l'adattamento spento);
+# 5 = plasticità (i file precedenti si aprono senza plasticità né modulatori).
+FORMAT = 5
+# Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
+# nullo, regola a zero, nessun modulatore.
+NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
 # Geni aggiunti dopo il formato 3, con il valore che vuol dire "assente".
 ADDED_IN_4 = {"r_tau": 0.0, "r_sub": 0.0, "r_div": 0.0}
 
@@ -205,6 +209,9 @@ class Evolution:
             "wiring": float(brains.wire_length.mean()),
             **receptor_stats(brains.genome, brains.links),
             "upkeep": float(brains.upkeep.mean()),
+            # Plasticità: modulatori per individuo, quota di chi può imparare.
+            "modulators": float(brains.modulatory.sum(axis=1).mean()),
+            "learners": float(brains.learns.mean()),
             "mutation": {k: float(np.exp(np.median(brains.genome.meta[:, i]))) for i, k in enumerate(META)},
             "oldest": int(self.age.max()),
             "oldest_id": int(self.ids[np.argmax(self.age)]),
@@ -351,10 +358,16 @@ class Evolution:
             else:  # costante che questo codice non conosce più
                 unknown[k] = v
 
+        base = 1 if str(d["net_type"]) == "rate" else 3  # geni propri prima della plasticità
+
         def genome(prefix=""):
             shape = d[prefix + "r_active"].shape
-            return Genome(*(d[prefix + f] if prefix + f in d else np.full(shape, ADDED_IN_4[f])
-                            for f in Genome.FIELDS))
+            g = Genome(*(d[prefix + f] if prefix + f in d else np.full(shape, ADDED_IN_4[f])
+                         for f in Genome.FIELDS))
+            if g.traits.shape[2] == base:
+                extra = np.broadcast_to(NO_PLASTICITY, g.traits.shape[:2] + (len(NO_PLASTICITY),))
+                g.traits = np.concatenate([g.traits, extra], axis=2)
+            return g
 
         # Dopo una selezione finale gli individui sono meno della popolazione:
         # la generazione in corso la fanno solo loro, la successiva torna piena.
@@ -383,8 +396,10 @@ class Evolution:
         evo.exams = json.loads(str(d["exams"]))
         resumed = {"generation": evo.generation, "event": "ripresa", "code": code_version()}
         evo.log = json.loads(str(d["log"]))
-        if fmt == 3:
-            resumed["note"] = "salvataggio di formato 3: recettori convertiti con l'adattamento sensoriale spento"
+        if fmt < FORMAT:
+            resumed["note"] = (f"salvataggio di formato {fmt}: convertito"
+                               + (", recettori senza adattamento sensoriale" if fmt == 3 else "")
+                               + ", neuroni senza plasticità né modulatori")
         if unknown:
             resumed["note"] = "costanti salvate che questo codice non conosce più: " + ", ".join(unknown)
         evo.log.append(resumed)

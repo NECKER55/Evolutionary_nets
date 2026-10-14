@@ -22,6 +22,7 @@ WALL = (200, 204, 215)
 PHENOMENON_COLOR = ((250, 230, 110), (120, 220, 60), (235, 150, 70), (240, 90, 90), (180, 130, 245),
                     (150, 160, 185))
 GENERALIST = TEXT
+MODULATOR = (200, 120, 255)  # neuroni modulatori: anello viola
 EXCITE = (255, 160, 50)
 INHIBIT = (70, 150, 255)
 IDLE = (52, 56, 70)
@@ -240,6 +241,8 @@ class Renderer:
                 rim, hid = TEXT, k - brains.n_in
                 if hasattr(brains, "inhibitory") and hid < brains.n_hidden:
                     rim = INHIBIT if brains.inhibitory[i, hid] else EXCITE
+                if hid < brains.n_hidden and brains.modulatory[i, hid]:
+                    rim = MODULATOR
                 pygame.draw.circle(layer, rim, p, 5 if rim is not TEXT else 4, 1)
         for o, name in enumerate(brains.OUT_LABELS):
             p = pos[brains.n_in + brains.n_hidden + o]
