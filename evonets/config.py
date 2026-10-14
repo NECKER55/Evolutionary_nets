@@ -22,8 +22,11 @@ class Config:
 
     # Energia: unica riserva dell'agente, a zero si muore. Non si ricarica, quindi
     # è anche la durata della vita: energy_init / metabolism_basal secondi da
-    # fermo, meno se ci si muove o si attraversa il veleno.
-    energy_init: float = 100.0
+    # fermo, meno se ci si muove o si attraversa il veleno. 150 e non 100: con
+    # 100 anche una rete buona fallisce spesso per sfortuna e la selezione è
+    # rumorosa; con 150 le reti evolute riescono meglio anche se poi messe alla
+    # prova con 100 (vedi docs/NOTE.md, "Energia iniziale").
+    energy_init: float = 150.0
     metabolism_basal: float = 2.5  # energia/s solo per esistere
     metabolism_move: float = 2.5  # energia/s in più a spinta piena (avanti o indietro)
     metabolism_turn: float = 0.5  # energia/s in più a sterzata piena
@@ -69,7 +72,7 @@ class Config:
     # Generazioni. Una generazione finisce quando tutti sono morti o hanno
     # completato il compito. Si riproduce solo chi lo ha completato.
     population: int = 200
-    life_max: float = 60.0  # s, tetto di sicurezza se il metabolismo è spento
+    life_max: float = 90.0  # s, tetto di sicurezza se il metabolismo è spento
     # Generazioni che un individuo può vivere al massimo; 0 = nessun limite: un
     # genitore resta finché continua a completare il compito.
     max_age: int = 0

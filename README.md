@@ -292,7 +292,7 @@ La rete produce due comandi, entrambi tra -1 e 1.
 
 ### 4. L'energia e la morte
 
-- Ogni agente nasce con **100 di energia** (`energy_init`). **Non si ricarica mai.**
+- Ogni agente nasce con **150 di energia** (`energy_init`). **Non si ricarica mai.**
 - **Si muore in un solo modo: quando l'energia arriva a zero.** Non esiste morte
   istantanea.
 - L'energia si consuma per quattro motivi, che si sommano:
@@ -307,9 +307,14 @@ La rete produce due comandi, entrambi tra -1 e 1.
 
 - Si paga lo **sforzo comandato**, non la velocità raggiunta: spingere contro una
   parete costa come correre.
-- Conseguenze: un agente fermo vive circa 40 secondi (un po' meno, per il
-  cablaggio); uno sempre a spinta piena circa 20 secondi, in cui percorre al
-  massimo circa 600 unità (tre larghezze di arena).
+- Conseguenze: un agente fermo vive circa 60 secondi (un po' meno, per il
+  cablaggio); uno sempre a spinta piena circa 30 secondi, in cui percorre al
+  massimo circa 900 unità (quattro larghezze di arena e mezza).
+- Perché 150: con 100 anche una rete buona fallisce spesso per sfortuna (non
+  trova il bersaglio in tempo) e viene eliminata, quindi la selezione è
+  rumorosa. In un confronto su 4 semi e 120 generazioni, le reti evolute con 150
+  completano il 51% delle prove anche quando le si mette alla prova con 100,
+  contro il 39% di quelle evolute con 100 (dettagli in `docs/NOTE.md`).
 - Il cablaggio si paga anche da fermi, come il cervello vero che consuma
   energia sempre: una rete grande e piena di collegamenti lunghi accorcia la
   vita. La selezione tiene un collegamento lungo solo se vale il suo prezzo.
@@ -572,7 +577,7 @@ un genitore, posizione compresa.
 - Tutti gli individui di una generazione vivono nella stessa arena, nello stesso
   momento.
 - **La generazione finisce** quando ogni individuo è morto oppure ha completato
-  il compito. C'è anche un tetto di sicurezza di 60 secondi (`life_max`), che
+  il compito. C'è anche un tetto di sicurezza di 90 secondi (`life_max`), che
   con i valori di default non scatta mai.
 - **Ogni generazione ha un'arena nuova**: zone di veleno, bersaglio e punti di
   nascita vengono risorteggiati.
