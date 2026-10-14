@@ -40,6 +40,7 @@ class NeuralController:
             raise ValueError(f"net_type sconosciuto: {cfg.net_type!r} (validi: {', '.join(NET_TYPES)})")
         kind, n_motors = NET_TYPES[cfg.net_type]
         self.brains = kind(cfg, n, self.senses.size, n_motors, seed)
+        self.noise_rng = np.random.default_rng([seed, 7])  # solo per il rumore dei sensi
 
     def reset(self) -> None:
         self.brains.reset_state()
@@ -56,9 +57,15 @@ class NeuralController:
         cambia, il calcolo si alleggerisce man mano che la gara si sfoltisce."""
         racing = world.alive & ~world.done
         if racing.all():
-            return self.brains.step(self.senses.observe(world))
+            return self.brains.step(self._noisy(self.senses.observe(world)))
         actions = np.zeros((world.n, 2))
         rows = np.flatnonzero(racing)
         if len(rows):
-            actions[rows] = self.brains.step_some(self.senses.observe(world, rows), rows)
+            actions[rows] = self.brains.step_some(self._noisy(self.senses.observe(world, rows)), rows)
         return actions
+
+    def _noisy(self, obs: np.ndarray) -> np.ndarray:
+        sd = self.senses.cfg.sensor_noise
+        if sd <= 0.0:
+            return obs
+        return np.clip(obs + sd * self.noise_rng.standard_normal(obs.shape), -1.0, 1.0)

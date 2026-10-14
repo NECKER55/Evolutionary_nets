@@ -168,11 +168,22 @@ def test_save_and_load_resume_exactly_where_evolution_stopped(tmp_path):
     assert np.array_equal(a.world.done, b.world.done) and np.array_equal(a.world.pos, b.world.pos)
 
 
+def test_load_restores_the_saved_brain_size(tmp_path):
+    a = evo()
+    a.save(tmp_path / "pop.npz")
+    cfg = Config(net_hidden_max=9)
+    Evolution.load(cfg, tmp_path / "pop.npz")
+    assert cfg.net_hidden_max == a.cfg.net_hidden_max
+
+
 def test_load_refuses_networks_of_a_different_shape(tmp_path):
     a = evo()
     a.save(tmp_path / "pop.npz")
+    data = dict(np.load(tmp_path / "pop.npz"))
+    del data["config"]  # formato 1: la forma viene dalla configurazione attuale
+    np.savez(tmp_path / "old.npz", **data)
     try:
-        Evolution.load(Config(net_hidden_max=9), tmp_path / "pop.npz")
+        Evolution.load(Config(net_hidden_max=9), tmp_path / "old.npz")
     except ValueError as err:
         assert "forma" in str(err)
     else:

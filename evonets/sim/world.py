@@ -48,6 +48,8 @@ class World:
         pos = self.rng.uniform(lo, hi, (self.n, 2))
         for _ in range(100):
             bad = self.hazards.clearance(pos) < r + cfg.spawn_margin
+            if hasattr(self.task, "spawn_ok"):
+                bad |= ~self.task.spawn_ok(self, pos)
             if not bad.any():
                 break
             pos[bad] = self.rng.uniform(lo, hi, (int(bad.sum()), 2))
@@ -110,6 +112,8 @@ class World:
         self.energy = np.maximum(self.energy - spent, 0.0)
         self.alive &= self.energy > 0.0
 
+        if hasattr(self.task, "step"):
+            self.task.step(self)
         self.done |= self.task.completed(self) & self.alive
         self.t += dt
 

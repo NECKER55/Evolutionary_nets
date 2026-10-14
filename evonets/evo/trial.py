@@ -19,12 +19,13 @@ class Trial:
     Si avanza a pezzi (`run(budget)`), così l'interfaccia resta reattiva.
     """
 
-    def __init__(self, cfg, genomes: Genome, arenas: int = 20, clones: int = 50, seed: int = TRIAL_SEED):
+    def __init__(self, cfg, genomes: Genome, arenas: int = 20, clones: int = 50, seed: int = TRIAL_SEED,
+                 task=None):
         self.cfg, self.arenas, self.clones, self.seed = cfg, arenas, clones, seed
         self.k = len(genomes)
         self.owner = np.repeat(np.arange(self.k), clones)  # di quale rete è ogni copia
         n = len(self.owner)
-        self.world = World(cfg, n, seed)
+        self.world = World(cfg, n, seed, task)
         self.ctrl = NeuralController(cfg, n)
         self.ctrl.brains.set_genome(genomes.take(self.owner))
         self.done_at = np.full(n, np.nan)  # quando ciascuna copia ha completato

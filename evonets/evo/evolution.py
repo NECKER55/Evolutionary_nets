@@ -1,4 +1,6 @@
+import dataclasses
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -7,12 +9,35 @@ from ..config import Config
 from ..net.brain import Genome
 from ..net.controllers import NeuralController
 from ..sim.world import World
+from .exam import Exam, candidates
 from .genetics import reproduce
 
 NORMAL = "normale"
 ONE_PARENT = "un solo genitore"
 RESTART = "nessun genitore: ripartenza dagli ultimi"
 RANDOM = "nessun genitore: reti casuali"
+
+# Versione del formato dei salvataggi. 1 = con geometria del cervello ma senza
+# configurazione; 2 = con configurazione completa e registro dell'ambiente.
+FORMAT = 2
+
+
+def code_version() -> str:
+    """Il commit git del codice in uso ("+modifiche" se ce ne sono di non
+    committate), o "sconosciuta" fuori da un repository."""
+    root = Path(__file__).resolve().parents[2]
+    try:
+        head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True,
+                              text=True, timeout=5, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root,
+                               capture_output=True, text=True, timeout=5).stdout.strip()
+        return head + ("+modifiche" if dirty else "")
+    except (OSError, subprocess.SubprocessError):
+        return "sconosciuta"
+
+
+def describe_change(changes: dict) -> str:
+    return ", ".join(f"{k} {old} → {new}" for k, (old, new) in changes.items())
 
 
 class Evolution:
@@ -42,6 +67,11 @@ class Evolution:
     rifanno la prova in arene nuove per un numero di volte stabilito, senza
     figli; chi fallisce è eliminato. Restano gli individui che hanno vinto ogni
     volta.
+
+    `log` è il registro dell'ambiente: quando la corsa è nata o è stata
+    ripresa (con quale versione del codice) e ogni cambio della
+    configurazione, con la generazione in cui è avvenuto. Viene salvato con la
+    configurazione completa, così una corsa si può sempre ricostruire.
     """
 
     def __init__(self, cfg: Config, seed: int = 0, task=None):
@@ -59,6 +89,20 @@ class Evolution:
         self.next_id = cfg.population
         self.born = np.zeros(cfg.population, dtype=int)  # generazione di nascita
         self.selection: dict | None = None  # fase di selezione finale, se c'è stata
+        self.log: list[dict] = [{"generation": 0, "event": "inizio", "code": code_version()}]
+        self.exams: list[dict] = []  # risultati degli esami fatti (vedi evo/exam.py)
+        self.exam: Exam | None = None  # esame in corso
+        self._seen = dataclasses.asdict(cfg)  # configurazione già registrata
+
+    def note_changes(self) -> dict:
+        """Registra i cambi della configurazione dall'ultima volta (per esempio
+        le costanti ritoccate a mano durante la corsa). Restituisce i cambi."""
+        now = dataclasses.asdict(self.cfg)
+        changes = {k: [self._seen.get(k), v] for k, v in now.items() if self._seen.get(k) != v}
+        if changes:
+            self.log.append({"generation": self.generation, "event": "cambio", "changes": changes})
+            self._seen = now
+        return changes
 
     @property
     def finished(self) -> bool:
@@ -73,6 +117,30 @@ class Evolution:
             actions = actions.copy()
             actions[manual[0]] = manual[1]
         self.world.step(actions, self.ctrl.upkeep)
+
+    def start_exam(self, **kw) -> Exam:
+        """Comincia l'esame dei più anziani della popolazione attuale. Si
+        porta avanti con `exam.run(budget)` e si chiude con `collect_exam`.
+        `kw` va a `Exam` (arene e copie: cambiarle solo per le prove del codice)."""
+        idx = candidates(self.age, self.ids)
+        self.exam = Exam(self.cfg, self.ctrl.brains.genome.take(idx), self.generation, self.ids[idx], **kw)
+        return self.exam
+
+    def collect_exam(self) -> dict | None:
+        """Se l'esame in corso è finito, ne registra il risultato e lo
+        restituisce."""
+        if self.exam is None or not self.exam.finished:
+            return None
+        result = self.exam.result()
+        self.exams.append(result)
+        self.exam = None
+        return result
+
+    def exam_due(self) -> bool:
+        """È ora dell'esame automatico (ogni `exam_every` generazioni)?"""
+        every = self.cfg.exam_every
+        return (every > 0 and self.generation > 0 and self.generation % every == 0 and self.exam is None
+                and not any(e["generation"] == self.generation for e in self.exams))
 
     def oldest(self) -> dict | None:
         """L'individuo più anziano in gara: posto nella popolazione, numero,
@@ -97,6 +165,7 @@ class Evolution:
     def next_generation(self) -> dict:
         """Selezione e ricambio. Restituisce le statistiche della generazione
         appena conclusa (aggiunte anche a `history`)."""
+        self.note_changes()
         cfg, world, brains = self.cfg, self.world, self.ctrl.brains
         n = cfg.population
         winners = np.flatnonzero(world.done)
@@ -207,12 +276,15 @@ class Evolution:
         che serve per riprendere l'evoluzione da lì."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.note_changes()
         g = self.ctrl.brains.genome
         data = dict(weights=g.weights, traits=g.traits, conn=g.conn, active=g.active, pos=g.pos, age=self.age,
                     ids=self.ids, next_id=self.next_id, born=self.born, population=self.cfg.population,
                     net_type=self.cfg.net_type, seed=self.seed,
                     generation=self.generation, world_seed=self.world.seed,
-                    history=json.dumps(self.history))
+                    history=json.dumps(self.history), format=FORMAT,
+                    config=json.dumps(dataclasses.asdict(self.cfg)), log=json.dumps(self.log),
+                    exams=json.dumps(self.exams))
         if self.last_parents is not None:
             lp = self.last_parents
             data.update(lp_weights=lp.weights, lp_traits=lp.traits, lp_conn=lp.conn, lp_active=lp.active,
@@ -229,13 +301,26 @@ class Evolution:
 
     @classmethod
     def load(cls, cfg: Config, path) -> "Evolution":
-        """Riprende da un salvataggio. Dimensione della popolazione e tipo di
-        rete sono quelli salvati; la forma delle reti deve coincidere con la
-        configurazione attuale."""
+        """Riprende da un salvataggio. `cfg` viene riscritta con la
+        configurazione salvata: si riparte nelle stesse condizioni in cui la
+        corsa si era fermata. I salvataggi del formato 1 non hanno la
+        configurazione: si usano i valori attuali e lo si annota nel registro.
+        La forma delle reti deve coincidere con la configurazione."""
         d = np.load(path)
         if "pos" not in d:
             raise ValueError(f"{path}: salvataggio di una versione senza geometria del cervello "
                              "(i neuroni non hanno posizione): non si può caricare")
+        fmt = int(d["format"]) if "format" in d else 1
+        if fmt > FORMAT:
+            raise ValueError(f"{path}: salvataggio di formato {fmt}, più nuovo di questo codice ({FORMAT})")
+        unknown = {}
+        if "config" in d:
+            fields = {f.name for f in dataclasses.fields(cfg)}
+            for k, v in json.loads(str(d["config"])).items():
+                if k in fields:
+                    setattr(cfg, k, v)
+                else:  # costante che questo codice non conosce più
+                    unknown[k] = v
 
         def traits(prefix=""):  # i salvataggi più vecchi avevano solo la soglia
             if prefix + "traits" in d:
@@ -275,4 +360,17 @@ class Evolution:
                              for k, (g, a, i) in enumerate(zip(d["ch_generation"], d["ch_age"], ids))]
         if "selection" in d:
             evo.selection = json.loads(str(d["selection"]))
+        if "exams" in d:
+            evo.exams = json.loads(str(d["exams"]))
+        resumed = {"generation": evo.generation, "event": "ripresa", "code": code_version()}
+        if "log" in d:
+            evo.log = json.loads(str(d["log"]))
+        else:
+            evo.log = []
+            resumed["note"] = ("salvataggio di formato 1, senza configurazione: si usano i valori "
+                               "attuali, che possono differire da quelli in cui la corsa è nata")
+        if unknown:
+            resumed["note"] = "costanti salvate che questo codice non conosce più: " + ", ".join(unknown)
+        evo.log.append(resumed)
+        evo._seen = dataclasses.asdict(cfg)
         return evo

@@ -4,6 +4,7 @@
     uv run main.py --load runs/pop.npz      # il menu parte con quel salvataggio già scelto
     uv run main.py --evolve 300             # 300 generazioni nel terminale, poi salva
     uv run main.py --evolve 300 --select 5  # ... poi i sopravvissuti rifanno la prova 5 volte
+    uv run main.py --exam runs/pop.npz      # esame fisso dei più anziani di un salvataggio
     uv run main.py --bench                  # throughput della simulazione senza grafica
 
 Senza --evolve né --bench le altre opzioni precompilano il menu.
@@ -16,6 +17,8 @@ from pathlib import Path
 
 from evonets import Config, World
 from evonets.evo import Evolution
+from evonets.evo.evolution import describe_change
+from evonets.evo.exam import TESTS
 from evonets.net import NeuralController
 
 
@@ -38,12 +41,36 @@ def start(cfg: Config, seed: int, load: str | None) -> Evolution:
     if load:
         evo = Evolution.load(cfg, load)
         print(f"ripreso {load}: generazione {evo.generation}, {cfg.population} individui, rete {cfg.net_type}")
+        for e in evo.log:
+            if e["event"] == "cambio":
+                print(f"  gen. {e['generation']}: {describe_change(e['changes'])}")
+            if "note" in e:
+                print(f"  nota: {e['note']}")
         return evo
     return Evolution(cfg, seed)
 
 
-def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str, select: int = 0) -> None:
+def print_exam(r: dict) -> None:
+    scores = "  ".join(f"{k} {v:.0%}" for k, v in r["scores"].items())
+    print(f"  ESAME gen. {r['generation']} ({r['who']} più anziani, {r['seconds']:.0f}s): "
+          f"media {r['score']:.0%}, migliore {r['best']:.0%} | {scores}")
+
+
+def exam(cfg: Config, path: str) -> None:
+    evo = Evolution.load(cfg, path)
+    print(f"esame di {path}, generazione {evo.generation}: {len(TESTS)} prove, "
+          f"{'; '.join(f'{t.name} ({t.what})' for t in TESTS)}")
+    evo.start_exam().run()
+    print_exam(evo.collect_exam())
+    evo.save(path)
+    print(f"risultato aggiunto al salvataggio ({len(evo.exams)} esami in tutto)")
+
+
+def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str, select: int = 0,
+           exam_every: int | None = None) -> None:
     evo = start(cfg, seed, load)
+    if exam_every is not None:
+        cfg.exam_every = exam_every
     seed_text = f"seme {evo.seed}" if evo.seed is not None else "seme sconosciuto (salvataggio vecchio)"
     print(f"{cfg.population} individui, rete {cfg.net_type}, {seed_text}, compito: {evo.world.task.name}")
     print(" gen  completato  sopravv.  neuroni  collegam.  vita(s)  inibitori  evento")
@@ -56,6 +83,9 @@ def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str
             f"{format(s['inhibitory'], '9.0%') if 'inhibitory' in s else '        -'}  "
             f"{'' if s['event'] == 'normale' else s['event']}"
         )
+        if evo.exam_due():
+            evo.start_exam().run()
+            print_exam(evo.collect_exam())
     el = time.perf_counter() - t0
     evo.save(save)
     print(f"{generations} generazioni in {el:.0f}s ({el / generations:.2f}s l'una), salvato in {save}")
@@ -89,6 +119,9 @@ def main() -> None:
     ap.add_argument("--evolve", type=int, metavar="G", help="fa evolvere G generazioni senza grafica")
     ap.add_argument("--select", type=int, default=0, metavar="K",
                     help="con --evolve: alla fine i sopravvissuti rifanno la prova K volte, senza figli")
+    ap.add_argument("--exam-every", type=int, metavar="K",
+                    help="con --evolve: esame fisso ogni K generazioni (default 50; 0 = mai)")
+    ap.add_argument("--exam", metavar="FILE", help="esame fisso dei più anziani di un salvataggio")
     ap.add_argument("--load", metavar="FILE", help="riprende da una popolazione salvata")
     ap.add_argument("--save", metavar="FILE",
                     help="dove salvare (default: runs/pop.npz con --evolve, un nome nuovo nel menu)")
@@ -102,8 +135,10 @@ def main() -> None:
         return
     if args.agents:
         cfg.population = args.agents
-    if args.evolve:
-        evolve(cfg, args.evolve, seed, args.load, args.save or "runs/pop.npz", args.select)
+    if args.exam:
+        exam(cfg, args.exam)
+    elif args.evolve:
+        evolve(cfg, args.evolve, seed, args.load, args.save or "runs/pop.npz", args.select, args.exam_every)
     else:
         from evonets.viz.app import App
 

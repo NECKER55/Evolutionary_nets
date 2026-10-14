@@ -18,6 +18,8 @@ installano da sole al primo comando.
 uv run main.py                        # interfaccia grafica: menu, corsa, esploratore delle reti
 uv run main.py --evolve 300           # 300 generazioni nel terminale, senza grafica, poi salva
 uv run main.py --evolve 300 --select 5  # ... poi i sopravvissuti rifanno la prova 5 volte, senza figli
+uv run main.py --evolve 300 --exam-every 100  # esame fisso ogni 100 generazioni (default 50; 0 = mai)
+uv run main.py --exam runs/pop.npz    # esame fisso dei più anziani di un salvataggio, aggiunto al file
 uv run main.py --bench                # misura la velocità della simulazione
 uv run pytest                         # test
 ```
@@ -45,8 +47,9 @@ Si sceglie la corsa e la si lancia con Invio (o il pulsante).
 | Casualità | **seme casuale** (uno nuovo a ogni corsa) o **seme fisso** (quello della riga Seme). In entrambi i casi il seme usato compare nel menu, in cima alla corsa e nel salvataggio |
 | Seme | il seme fisso; con il seme casuale mostra quello appena estratto |
 | Generazioni | dopo quante fermarsi e salvare; 0 = senza limite |
+| Esame ogni | ogni quante generazioni fare l'esame fisso ai 20 più anziani (vedi "L'esame fisso"); 0 = mai. Default 50 |
 | Selezione finale | finite le generazioni, quante prove fanno ancora i sopravvissuti, senza figli (vedi "La selezione finale"); 0 = niente. Si attiva solo con Generazioni > 0 |
-| Riprendi da | un salvataggio in `runs/` da cui continuare; rete e individui vengono da lì |
+| Riprendi da | un salvataggio in `runs/` da cui continuare; rete, individui e tutte le costanti vengono da lì |
 | Salva in | dove salvare; per una corsa nuova propone un nome con data e ora, così non sovrascrive nulla |
 
 Con un salvataggio scelto, "Esplora reti e genomi" lo apre nell'esploratore
@@ -72,7 +75,13 @@ anziano è cliccabile** (riquadro bordato o riga sottolineata in cima, oppure
 - dimensione media delle reti: neuroni interni e collegamenti;
 - sopravvissuti e generazioni vinte di fila dal più anziano: quanto a lungo un
   genitore continua a vincere;
-- quota di neuroni inibitori (reti a impulsi) o durata della generazione (reti continue).
+- quota di neuroni inibitori (reti a impulsi) o durata della generazione (reti
+  continue). Appena c'è un esame fisso, questo grafico lascia il posto ai
+  punteggi d'esame (media e migliore, un punto per esame), con sopra i
+  risultati dell'ultimo esame prova per prova.
+
+In cima alla pagina c'è anche il registro dell'ambiente (invariato, oppure
+l'ultimo cambio di costante) e, se c'è, l'avanzamento dell'esame in corso.
 
 **Al centro, le reti.** Tre elenchi (`1`, `2`, `3` o `Tab`):
 
@@ -121,6 +130,7 @@ o inibisce, dal più forte. Se sono tanti si scorrono con la rotella.
 | `P` | rami morti in grigio o nascosti |
 | `I` | esploratore a tutto schermo, con il genoma |
 | `F` | apre l'arena (la corsa continua) |
+| `E` | **esame fisso adesso** dei 20 più anziani (gira su altri core; va avanti anche in pausa) |
 | `Z` | massima velocità sì/no: nasconde l'esploratore, ridisegna due volte al secondo e dà il resto del tempo all'evoluzione |
 | `Spazio` | pausa |
 | `S` | salva la popolazione |
@@ -401,6 +411,10 @@ orientamento nell'arena. Sa solo quello che segue.
 L'ordine degli ingressi è: i 4 del raggio 1, i 4 del raggio 2, … i 4 del raggio
 9, poi i 6 del corpo. Ingressi e uscite sono fissi e uguali per tutti: sono il
 corpo dell'agente, non evolvono.
+
+- I sensi sono perfetti: nessun disturbo (`sensor_noise` = 0). Un disturbo
+  casuale si può accendere nella configurazione; lo usa la prova "rumore"
+  dell'esame fisso.
 
 ### 8. La rete: struttura comune ai due tipi
 
@@ -712,6 +726,48 @@ generazione in corso da soli, poi la popolazione torna piena con i loro figli.
 Lo stesso succede riprendendo l'evoluzione dal file dei selezionati. Il file si
 può anche aprire dal menu per esplorarne le reti o provarle una per una.
 
+### 20. L'esame fisso
+
+Il successo nel compito del momento non basta per dire se gli agenti stanno
+diventando più capaci: se l'ambiente cambia, la percentuale cambia anche
+quando gli agenti restano uguali. Per questo c'è un esame **sempre uguale e mai
+usato per la selezione**, come un test di laboratorio. Lo fanno i **20
+individui più anziani** della popolazione (a parità di età, i nati prima),
+cioè quelli che hanno superato più prove di fila. È composto da 7 prove:
+
+| Prova | Cosa cambia rispetto all'ambiente d'esame | Cosa misura |
+|---|---|---|
+| base | niente | il compito di sempre, in arene mai viste |
+| lontano | il bersaglio nasce ad almeno 90 u da tutti | esplorazione |
+| veleno+ | 24 zone di veleno invece di 12 | prudenza |
+| veleno0 | nessun veleno | se il veleno era solo un ostacolo o anche un indizio |
+| arena | arena quadrata 160 x 160 invece di 200 x 140 | generalizzazione |
+| rumore | disturbo casuale su ogni senso (deviazione standard 0,1) | robustezza |
+| mobile | il bersaglio si muove a 5 u/s e rimbalza sulle pareti | inseguire |
+
+- **8 arene per prova, 5 copie di ogni rete per arena**: 40 tentativi per rete
+  e per prova. Il punteggio di una prova è la media sulle 20 reti; il
+  punteggio dell'esame è la media delle 7 prove; "migliore" è la rete con la
+  media più alta.
+- **Non segue l'ambiente della corsa.** Le costanti dell'ambiente d'esame
+  (fisica, energia, veleno, vista...) sono scritte in `evo/exam.py` e non
+  cambiano se cambi quelle della corsa. Dalla corsa vengono solo il tipo e la
+  forma della rete. Anche le arene hanno semi fissi, diversi da quelli
+  dell'evoluzione e del banco di prova.
+- **Non cambia l'evoluzione**: usa copie delle reti e generatori casuali
+  propri. Farlo o non farlo dà la stessa corsa.
+- **Gira in processi separati**, su tutti i core tranne due: circa 12 secondi
+  con 12 core, senza rallentare l'interfaccia. Ogni arena è un lavoro a sé,
+  quindi il risultato non dipende da quanti processi lo fanno.
+- **Quando**: in automatico ogni `exam_every` generazioni (riga "Esame ogni"
+  del menu, `--exam-every K` nel terminale, default 50; se il precedente è
+  ancora in corso quello nuovo si salta), con `E` sulla pagina principale, o
+  con `--exam FILE` su un salvataggio. I risultati finiscono nel salvataggio.
+  Un esame non finito quando si esce dalla corsa va perso.
+- Se un giorno le prove cambiano, cambia anche il numero di versione
+  dell'esame, salvato con ogni risultato: punteggi di versioni diverse non si
+  confrontano.
+
 ### Un punto di riferimento
 
 In una prova da 120 generazioni con le impostazioni di default (reti continue) i
@@ -728,7 +784,7 @@ evonets/
   sim/               simulatore: non sa nulla di reti
     world.py           arena, fisica, energia
     hazards.py         veleno
-    tasks.py           compiti
+    tasks.py           compiti (e le varianti dell'esame: bersaglio lontano, in movimento)
   net/               rete
     sensors.py         vista e sensi del corpo
     brain.py           genoma e calcolo delle reti
@@ -739,6 +795,7 @@ evonets/
     genetics.py        incrocio e mutazione
     evolution.py       ciclo delle generazioni, campioni, salvataggio
     trial.py           valutazione di una rete singola su arene fisse
+    exam.py            esame fisso: 7 prove, in parallelo su più processi
   viz/               interfaccia (l'unica parte che usa la grafica)
     app.py             finestra, menu e corsa (pagina principale e arena)
     render.py          arena e rete dal vivo, grafici
@@ -763,18 +820,27 @@ popolazione avanza in un solo passo. Gira su CPU.
   scrive accanto a quello esistente e si passa a `Evolution(cfg, task=...)`.
 - **Salvataggi**: contengono la popolazione, la storia e il campione di ogni
   generazione (circa 20 KB l'uno: una corsa di migliaia di generazioni occupa
-  qualche decina di MB, in memoria e su disco). Valgono solo per la stessa
-  forma di rete. Se cambi numero di
-  raggi, sensi o massimo di neuroni, il caricamento viene rifiutato.
-  I salvataggi fatti prima della geometria del cervello (senza posizioni dei
-  neuroni) non si possono più aprire.
+  qualche decina di MB, in memoria e su disco). Contengono anche la
+  **configurazione completa** e il **registro dell'ambiente**: quando la corsa
+  è nata o è stata ripresa, con quale versione del codice (il commit git,
+  "+modifiche" se c'erano modifiche non committate), e ogni costante cambiata,
+  con la generazione in cui è cambiata (anche i ritocchi fatti con `C`).
+  Riprendendo una corsa si riparte con la configurazione salvata, non con
+  quella attuale. Il registro compare in cima alla pagina principale, nel
+  menu accanto al salvataggio e nel terminale con `--load`.
+  I salvataggi senza configurazione (formato 1, fatti prima di questa
+  versione) si aprono con i valori attuali e il registro lo annota: se la
+  forma della rete non coincide, il caricamento viene rifiutato. I salvataggi
+  fatti prima della geometria del cervello (senza posizioni dei neuroni) non
+  si possono più aprire.
 
 ## Stato e prossimi passi
 
 Fatto: simulatore, sensi, reti a forma libera (continue e a impulsi con neuroni eccitatori o inibitori), ciclo
 evolutivo, interfaccia con menu, pagina principale con statistiche e reti dei
 vincitori esplorabili durante la corsa, esploratore di genomi, banco di prova
-per singole reti, salvataggio, per il primo compito.
+per singole reti, salvataggio con configurazione e registro dell'ambiente,
+esame fisso, per il primo compito.
 
 Da fare:
 

@@ -40,6 +40,9 @@ class Config:
     vision_rays: int = 9
     vision_fov_deg: float = 120.0  # apertura totale del ventaglio
     vision_range: float = 30.0  # u
+    # Rumore dei sensi: deviazione standard di un disturbo casuale aggiunto a
+    # ogni ingresso della rete a ogni passo. 0 = sensi perfetti (lo usa l'esame).
+    sensor_noise: float = 0.0
 
     # Rete: fino a net_hidden_max neuroni interni, liberi di collegarsi in
     # qualsiasi direzione (anelli compresi). Alla nascita ogni individuo ne ha
@@ -110,6 +113,12 @@ class Config:
     hazard_pulse: float = 0.15  # ampiezza relativa della pulsazione del raggio
     hazard_speed: float = 1.0  # moltiplicatore globale (leva del curriculum)
     spawn_margin: float = 3.0  # distanza minima dai pericoli allo spawn
+
+    # Esame (evo/exam.py): ogni quante generazioni metterlo in automatico ai
+    # più anziani della popolazione; 0 = mai (resta il tasto E). Non cambia
+    # l'evoluzione: è solo una misura. Gira in processi separati, su tutti i
+    # core tranne due: circa 12 s su 12 core (un minuto e più su uno solo).
+    exam_every: int = 50
 
 
 # Costanti regolabili a runtime dal viewer (Tab per scegliere, [ ] per variare).
