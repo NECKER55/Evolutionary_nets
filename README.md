@@ -785,8 +785,10 @@ evonets/
     world.py           arena, fisica, energia
     hazards.py         veleno
     tasks.py           compiti (e le varianti dell'esame: bersaglio lontano, in movimento)
+    signals.py         fisica dei segnali per i recettori universali (fase C, non ancora in uso)
   net/               rete
     sensors.py         vista e sensi del corpo
+    receptors.py       recettore universale: geni, segnale, rumore (fase C, non ancora in uso)
     brain.py           genoma e calcolo delle reti
     geometry.py        dove stanno i neuroni e con che probabilità si collegano
     controllers.py     sensi -> rete -> comandi

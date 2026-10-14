@@ -40,6 +40,47 @@ class Config:
     vision_rays: int = 9
     vision_fov_deg: float = 120.0  # apertura totale del ventaglio
     vision_range: float = 30.0  # u
+    # Fisica dei segnali (sim/signals.py), per i recettori universali. Ogni
+    # fenomeno ha un asse della "qualità" in [0, 1]: colore, molecola,
+    # frequenza, temperatura. Cosa emette ogni oggetto è scritto qui: dare un
+    # suono al bersaglio o un odore al veleno è cambiare un numero.
+    # Luce: mezzo torbido, si attenua come exp(-d / light_attenuation).
+    light_attenuation: float = 12.0  # u
+    light_samples: int = 5  # direzioni campione nell'apertura di un recettore
+    wall_color: float = 0.5
+    wall_color_width: float = 0.3
+    wall_albedo: float = 0.4
+    target_color: float = 0.85
+    target_color_width: float = 0.06
+    target_albedo: float = 1.0
+    hazard_color: float = 0.25
+    hazard_color_width: float = 0.06
+    hazard_glow: float = 0.05  # luce emessa dal veleno per unità di lunghezza attraversata
+    # Sostanze: la tossina del veleno (dentro la zona = intensità del danno),
+    # più un odore che si allontana come exp(-d / smell_range).
+    toxin_molecule: float = 0.15
+    hazard_smell: float = 0.0  # tossina che esce dalla zona; 0 = inodore fuori
+    target_molecule: float = 0.6
+    target_smell: float = 0.0
+    smell_range: float = 10.0  # u
+    # Meccanica: pressione da contatto (frequenza 0) e vibrazioni a distanza.
+    vibration_range: float = 20.0  # u
+    target_vibration: float = 0.0  # ampiezza; 0 = silenzioso
+    target_vibration_freq: float = 0.6
+    hazard_vibration: float = 0.0
+    hazard_vibration_freq: float = 0.3
+    # Temperatura: ambiente uniforme più eventuali sorgenti di calore.
+    ambient_temperature: float = 0.5
+    heat_range: float = 15.0  # u
+    target_heat: float = 0.0
+    hazard_heat: float = 0.0
+    # Magnetismo: campo uniforme, come quello di un pianeta. 0 = nessun campo.
+    magnetic_field: float = 0.0
+    magnetic_angle_deg: float = 90.0
+    # Recettori: rumore di fondo e saturazione, in "quanti" per passo.
+    receptor_dark: float = 1.0
+    receptor_saturation: float = 100.0
+
     # Rumore dei sensi: deviazione standard di un disturbo casuale aggiunto a
     # ogni ingresso della rete a ogni passo. 0 = sensi perfetti (lo usa l'esame).
     sensor_noise: float = 0.0

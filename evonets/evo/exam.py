@@ -45,6 +45,15 @@ ENVIRONMENT = dict(
     life_max=90.0, target_radius=3.0,
     hazard_drain=60.0, hazard_falloff=2.0, n_hazards=12, hazard_radius_min=5.0, hazard_radius_max=12.0,
     hazard_omega_min=0.2, hazard_omega_max=0.8, hazard_pulse=0.15, hazard_speed=1.0, spawn_margin=3.0,
+    # Fisica dei segnali dei recettori universali (ancora non usata dalla versione 1).
+    light_attenuation=12.0, light_samples=5, wall_color=0.5, wall_color_width=0.3, wall_albedo=0.4,
+    target_color=0.85, target_color_width=0.06, target_albedo=1.0,
+    hazard_color=0.25, hazard_color_width=0.06, hazard_glow=0.05,
+    toxin_molecule=0.15, hazard_smell=0.0, target_molecule=0.6, target_smell=0.0, smell_range=10.0,
+    vibration_range=20.0, target_vibration=0.0, target_vibration_freq=0.6,
+    hazard_vibration=0.0, hazard_vibration_freq=0.3,
+    ambient_temperature=0.5, heat_range=15.0, target_heat=0.0, hazard_heat=0.0,
+    magnetic_field=0.0, magnetic_angle_deg=90.0, receptor_dark=1.0, receptor_saturation=100.0,
 )
 
 # Le costanti che invece vengono dalla corsa: riguardano la rete (forma,
