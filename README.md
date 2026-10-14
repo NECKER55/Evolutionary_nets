@@ -15,26 +15,128 @@ Serve [uv](https://docs.astral.sh/uv/). Le dipendenze (NumPy, pygame-ce) si
 installano da sole al primo comando.
 
 ```
-uv run main.py                        # evoluzione dal vivo nel viewer
-uv run main.py --net spike-ei         # lo stesso, con reti a impulsi (neuroni eccitatori o inibitori)
-uv run main.py --evolve 300           # 300 generazioni senza grafica, poi salva
-uv run main.py --load runs/pop.npz    # riprende da un salvataggio
+uv run main.py                        # interfaccia grafica: menu, corsa, esploratore delle reti
+uv run main.py --evolve 300           # 300 generazioni nel terminale, senza grafica, poi salva
+uv run main.py --evolve 300 --select 5  # ... poi i sopravvissuti rifanno la prova 5 volte, senza figli
 uv run main.py --bench                # misura la velocità della simulazione
 uv run pytest                         # test
 ```
 
-Opzioni: `--net rate|spike-ei` (tipo di rete, default `rate`), `--agents N`
-(individui, default 200), `--seed N` (stessa sequenza di
-arene e reti a parità di numero), `--save FILE` (default `runs/pop.npz`).
+Senza `--evolve` né `--bench`, le opzioni `--net rate|spike-ei`, `--agents N`,
+`--seed N`, `--load FILE` e `--save FILE` precompilano il menu. Senza `--seed`
+il seme è casuale e viene stampato, così la corsa si può rifare.
 
-Il flusso tipico è addestrare in fretta con `--evolve` e poi riaprire il
-risultato con `--load` per guardarlo.
+## L'interfaccia
 
-## Il viewer
+Una finestra sola con quattro schermate: menu, corsa, esploratore delle reti e
+banco di prova. **Una corsa aperta continua in sottofondo** anche mentre si
+guardano l'esploratore o il banco di prova; lì `B` la mette in pausa o la fa
+ripartire, e una riga in basso dice a che generazione è arrivata.
 
-A sinistra l'arena, a destra la rete dell'agente seguito e, sotto, il grafico
-dei successi per generazione (linea sottile: ogni generazione; linea spessa: media
-delle ultime 10).
+### Il menu
+
+Si sceglie la corsa e la si lancia con Invio (o il pulsante).
+
+| Riga | Significato |
+|---|---|
+| Modalità | **veloce**: si parte dalla pagina principale (statistiche e reti), l'arena si apre con `F`; **massima velocità**: solo statistiche, ridisegnate due volte al secondo, tutto il resto del tempo all'evoluzione; **dal vivo**: si parte con l'arena a schermo. Il risultato è lo stesso in tutte e tre |
+| Rete | continua o a impulsi con neuroni eccitatori/inibitori |
+| Individui | dimensione della popolazione |
+| Casualità | **seme casuale** (uno nuovo a ogni corsa) o **seme fisso** (quello della riga Seme). In entrambi i casi il seme usato compare nel menu, in cima alla corsa e nel salvataggio |
+| Seme | il seme fisso; con il seme casuale mostra quello appena estratto |
+| Generazioni | dopo quante fermarsi e salvare; 0 = senza limite |
+| Selezione finale | finite le generazioni, quante prove fanno ancora i sopravvissuti, senza figli (vedi "La selezione finale"); 0 = niente. Si attiva solo con Generazioni > 0 |
+| Riprendi da | un salvataggio in `runs/` da cui continuare; rete e individui vengono da lì |
+| Salva in | dove salvare; per una corsa nuova propone un nome con data e ora, così non sovrascrive nulla |
+
+Con un salvataggio scelto, "Esplora reti e genomi" lo apre nell'esploratore
+senza far ripartire l'evoluzione; da lì si possono anche provare le sue reti.
+
+Su/Giù o Tab scelgono la riga, Sinistra/Destra (o il clic) cambiano il valore,
+numeri e percorso si scrivono da tastiera. Nei numeri le cifre si aggiungono in
+coda: per scriverne uno nuovo si cancella prima con Backspace.
+
+### La corsa: la pagina principale
+
+Mentre l'evoluzione va avanti, la pagina è divisa in tre.
+
+**A sinistra, le statistiche.** In alto i numeri chiave: successi dell'ultima
+generazione, media delle ultime 10, record (con la generazione in cui è
+arrivato), il più anziano (il suo numero e quante prove ha vinto di fila),
+neuroni e collegamenti medi, durata dell'ultima generazione, campioni raccolti.
+In cima alla pagina una riga dice anche in che generazione è nato. **Il più
+anziano è cliccabile** (riquadro bordato o riga sottolineata in cima, oppure
+`O`): si apre la sua rete. Sotto, quattro grafici per generazione:
+
+- successi (linea sottile: ogni generazione; spessa: media delle ultime 10);
+- dimensione media delle reti: neuroni interni e collegamenti;
+- sopravvissuti e generazioni vinte di fila dal più anziano: quanto a lungo un
+  genitore continua a vincere;
+- quota di neuroni inibitori (reti a impulsi) o durata della generazione (reti continue).
+
+**Al centro, le reti.** Tre elenchi (`1`, `2`, `3` o `Tab`):
+
+- **campioni**: uno per ogni generazione già conclusa con almeno un vincitore.
+  Il campione **non è scelto a caso**: è il vincitore più anziano di quella
+  generazione (quello che ha vinto più prove di fila) e, a parità di età, il
+  nato prima (numero più basso). Accanto, la percentuale di successi di quella
+  generazione. Si aggiorna da solo: se è scelta la riga più in alto, si segue
+  l'ultimo campione arrivato;
+- **sopravvissuti**: i vincitori dell'ultima generazione conclusa, che ora
+  corrono di nuovo (dopo una selezione finale: i rimasti);
+- **tutti**: tutta la popolazione in gara, sopravvissuti più figli appena nati
+  (età 0, non ancora messi alla prova).
+
+Sopravvissuti e tutti sono una fotografia: `R` la rifà. La rete scelta è
+disegnata accanto (vedi "Come si legge una rete").
+
+In cima alla pagina una riga dice sempre quanti sono i sopravvissuti e quanti i
+figli nuovi della generazione in corso.
+
+Sopra ogni elenco un'intestazione dice cosa c'è in ogni colonna:
+
+| Colonna | Significato |
+|---|---|
+| gen | generazione di cui è campione |
+| succ | percentuale della popolazione che ha completato il compito in quella generazione |
+| num. | numero dell'individuo (vedi punto 18) |
+| età | prove vinte di fila |
+| neur | neuroni interni esistenti |
+| colleg | collegamenti effettivi |
+
+**A destra, il neurone toccato**: chi è (senso, interno eccitatorio o
+inibitorio, motore), i suoi geni propri e **tutti** i suoi collegamenti, in
+ingresso ("riceve da") e in uscita ("manda a"), ciascuno con il peso e se eccita
+o inibisce, dal più forte. Se sono tanti si scorrono con la rotella.
+
+| Tasto | Azione |
+|---|---|
+| Su/Giù, clic | scegli la rete nell'elenco |
+| clic su un neurone | lo fissa nel pannello di destra (un altro clic lo libera); passarci sopra basta per vederlo |
+| `T` | **prova da sola la rete scelta** (banco di prova) |
+| `A` | **mette in arena tutti i sopravvissuti insieme** (banco di prova) |
+| `Tab` / `1` / `2` / `3` | campioni / sopravvissuti / tutti |
+| `Invio` | a esperimento concluso, riapre il riepilogo |
+| `O`, o clic sul più anziano | mostra la rete del più anziano (nell'arena: lo segue) |
+| `P` | rami morti in grigio o nascosti |
+| `I` | esploratore a tutto schermo, con il genoma |
+| `F` | apre l'arena (la corsa continua) |
+| `Z` | massima velocità sì/no: nasconde l'esploratore, ridisegna due volte al secondo e dà il resto del tempo all'evoluzione |
+| `Spazio` | pausa |
+| `S` | salva la popolazione |
+| `Esc` | torna al menu, salvando se ci sono generazioni nuove (lo stesso alla chiusura della finestra) |
+
+La pagina principale lascia all'interfaccia una parte del tempo per restare
+reattiva; con `Z` (o la modalità "massima velocità" nel menu) la corsa va più
+veloce, con lo stesso risultato.
+
+### La corsa: l'arena
+
+`F` apre l'arena in turbo senza fermare l'evoluzione; `F` di nuovo torna alla
+pagina principale. A sinistra gli agenti, a destra la rete dell'agente seguito
+e, sotto, il grafico dei successi. In alto a sinistra lo stato della generazione,
+il più anziano in gara e l'agente seguito (che all'apertura è proprio il più
+anziano).
 
 | Nell'arena | Significato |
 |---|---|
@@ -49,7 +151,7 @@ delle ultime 10).
 |---|---|
 | Colonna sinistra | i sensi: 4 pallini per raggio (il bordo indica cosa guarda), poi i sensi del corpo |
 | Cerchio centrale | i neuroni interni di quell'individuo |
-| Destra | i due motori, spinta e sterzo |
+| Destra | i motori |
 | Pallino arancione / azzurro | neurone attivo in positivo / negativo |
 | Linea arancione / azzurra | collegamento che eccita / inibisce; si illumina quando passa segnale |
 
@@ -57,12 +159,97 @@ delle ultime 10).
 |---|---|
 | `+` / `-` | velocità da x1 a x16 |
 | `T` | turbo |
-| `Spazio` | pausa |
-| `S` | salva la popolazione |
 | clic | segui un altro agente |
 | `M` | guida manuale dell'agente seguito (WASD o frecce) |
 | `V` | raggi visivi sì/no |
 | `C` | elenco delle costanti; `Tab` sceglie, `,` `.` regolano |
+| `O` | segui il più anziano: il pannello a destra mostra la sua rete |
+| `F`, `I`, `Spazio`, `S`, `Esc` | come nella pagina principale |
+
+### Come si legge una rete
+
+Vale per la pagina principale e per l'esploratore. Sensi in colonna a
+sinistra, motori a destra, **neuroni interni su un'ellisse** in mezzo: così i
+collegamenti tra interni (anelli compresi, cioè la memoria) sono corde ben
+visibili invece di linee sovrapposte. Sull'arco sinistro stanno gli interni che
+ascoltano soprattutto i sensi, sul destro quelli che parlano soprattutto ai
+motori; su ogni arco l'ordine dall'alto in basso segue i sensi che li
+alimentano, per ridurre gli incroci. Gli archi curvi sono i motori che
+rimandano il loro valore agli interni; un cerchietto sopra un neurone è un
+collegamento con se stesso.
+
+Colore = segno (arancio eccita, azzurro inibisce), intensità e spessore =
+forza. Nelle reti a impulsi il bordo di un neurone interno dice il suo tipo. In
+grigio i **rami morti**: neuroni e collegamenti che non arrivano a nessun
+motore e quindi non cambiano il comportamento. Passando su un neurone (o
+cliccandolo) si accendono solo i suoi collegamenti, con una **freccia** che ne
+indica il verso; il pannello dei dettagli dice anche a quanti passi è dai sensi.
+
+### L'esploratore delle reti
+
+`I` apre a tutto schermo lo stesso elenco e la stessa rete della pagina
+principale, più il **genoma** come matrice: una riga per blocco (neurone
+interno o motore), una colonna per sorgente (sensi | interni | motori). Colore =
+peso effettivo, grigio = gene latente (collegamento scritto nel genoma ma con un
+capo spento), righe scure = neuroni spenti. Passando col mouse su una cella se
+ne legge il valore; il clic su una riga sceglie quel neurone.
+
+`T` prova la rete scelta, `X` scrive il genoma completo (blocco per blocco, con i
+geni latenti) in un file di testo in `runs/genomi/`, `Esc` torna indietro. Il
+campione di ogni generazione finisce nel salvataggio, quindi tutto questo si
+può fare anche dopo, aprendo il salvataggio dal menu.
+
+### Fine dell'esperimento
+
+Quando le generazioni richieste sono finite (e l'eventuale selezione finale è
+conclusa) la corsa si ferma e sulla pagina principale compare un
+**riepilogo**: quante generazioni, i successi dell'ultima, **quanti
+sopravvissuti ci sono e chi sono** (i loro numeri), il più anziano, l'esito di
+ogni prova della selezione, dove sono stati salvati. Sotto, i pulsanti per le
+cose da fare dopo:
+
+| Pulsante | Cosa fa |
+|---|---|
+| Guarda i sopravvissuti in arena (`A`) | li mette tutti insieme nel banco di prova, per vedere come si comportano |
+| Esplora le loro reti (`2`) | chiude il riepilogo e mostra l'elenco dei sopravvissuti con le loro reti |
+| Continua l'evoluzione (`Spazio`) | riprende da dove si era fermata, senza limite |
+| Chiudi (`Invio`) | chiude il riepilogo; `Invio` lo riapre |
+
+### Il banco di prova
+
+Una rete sola, o un gruppo, nell'arena fuori dall'evoluzione: nessuno nasce e
+nessuno viene eliminato, si osserva soltanto.
+
+- **una rete**: un campione o un singolo individuo, scelto con `T` dalla pagina
+  principale o dall'esploratore;
+- **un gruppo**: tutti i sopravvissuti insieme, con `A` (o dal riepilogo di
+  fine esperimento). Si segue un agente col clic o con `Tab`; la sua rete è dal
+  vivo nel pannello di destra. In basso a destra una riga per rete: quante
+  arene viste ha completato e, dopo `E`, la sua percentuale nella
+  valutazione, le migliori in alto.
+
+- Le arene sono **sempre le stesse** (arena 0, 1, 2, ..., con semi propri,
+  diversi da quelli dell'evoluzione): reti diverse si confrontano sulle stesse
+  prove. A fine arena si passa da sola alla successiva; in basso a destra un
+  quadratino per arena vista (azzurro = completato).
+- `E` lancia una **valutazione**: 20 arene fisse, con 50 copie della rete per
+  arena (10 copie a testa per un gruppo) che partono da punti diversi. Dà la
+  percentuale di prove completate (per ogni rete, in un gruppo), il tempo medio
+  per arrivare e, per una rete sola, una barra per arena. Va avanti a pezzi,
+  senza bloccare la schermata.
+
+| Tasto | Azione |
+|---|---|
+| `Spazio` | pausa |
+| `+` / `-` | velocità da x1 a x64 |
+| `N` / `R` | arena successiva / rifai questa |
+| `A` | passa da sola alla successiva sì/no |
+| `E` | valutazione su 20 arene (50 copie, 10 a testa per un gruppo) |
+| clic, `Tab` | segui un altro agente del gruppo |
+| `M` | guida manuale (WASD o frecce) |
+| `V` | raggi visivi sì/no |
+| `B` | pausa/ripresa della corsa in sottofondo |
+| `Esc` | torna indietro |
 
 ## Le regole, in dettaglio
 
@@ -411,9 +598,73 @@ Si applicano a ogni figlio, ciascuna in modo indipendente.
 
 ### 17. Ripetibilità
 
-Tutto ciò che è casuale dipende dal seme (`--seed`). A parità di seme e di
-impostazioni, due corse danno esattamente le stesse arene, le stesse reti e gli
-stessi risultati.
+Tutto ciò che è casuale (arene, reti iniziali, mutazioni, incroci, scelta dei
+genitori) viene da un generatore di numeri pseudocasuali che parte da un seme.
+A parità di seme e di impostazioni, due corse danno esattamente le stesse arene,
+le stesse reti e gli stessi risultati. Semi diversi danno corse diverse.
+
+Questo non toglie casualità all'evoluzione: dentro una corsa i numeri si
+comportano come se fossero casuali, e la selezione lavora su di essi come
+farebbe sul caso vero. Il seme decide soltanto *quale* storia, tra tutte quelle
+possibili, viene raccontata. Il vantaggio è poterla rifare identica: per
+controllare un risultato, per capire un comportamento strano, per confrontare
+due versioni del codice sulle stesse condizioni. Per questo il seme usato è
+sempre mostrato e salvato, anche quando è estratto a caso.
+
+Un risultato si giudica su più corse con semi diversi, non su una sola: una
+corsa è un'estrazione, e la sua fortuna conta.
+
+**La velocità non cambia il risultato.** Il tempo della simulazione non è
+quello dell'orologio: ogni passo vale sempre 1/60 di secondo (`dt`), qualunque
+sia la velocità scelta. x1, x16, turbo, pagina principale, massima velocità,
+`--evolve` nel terminale o corsa in sottofondo cambiano solo quanti passi si
+calcolano per ogni fotogramma, non i passi stessi; il disegno legge lo stato
+senza toccarlo. Con lo stesso seme si ottengono le stesse generazioni (c'è un
+test che lo verifica). Cambiano il risultato solo le azioni dell'utente: la
+guida manuale (`M`) e le costanti regolate dal vivo (`C`), che valgono dal
+momento in cui le si cambia.
+
+Per andare più veloci senza cambiare nulla si può solo calcolare di più per
+secondo: meno disegno (modalità massima velocità) e codice più efficiente. Per
+esempio sensi e reti vengono calcolati solo per gli agenti ancora in gara, dato
+che i comandi di morti e arrivati non hanno effetto, e la vista tratta tutte le
+zone di veleno in un'operazione sola: con le stesse operazioni sugli stessi
+numeri il risultato resta identico bit per bit (lo verificano i test). Allungare il passo `dt`, invece,
+cambierebbe la simulazione: fisica più grossolana, vista e reti aggiornate meno
+spesso, un agente veloce potrebbe attraversare il bersaglio senza toccarlo, e le
+reti evolute non sarebbero più le stesse.
+
+### 18. Il numero di ogni individuo
+
+Ogni individuo riceve un numero alla nascita (`#123`) e lo conserva finché
+resta nella popolazione: un sopravvissuto lo porta con sé di generazione in
+generazione, ogni figlio ne riceve uno nuovo. L'**età** è quante prove ha vinto
+di fila; il **più anziano** è quello con l'età più alta, ed è mostrato con il
+suo numero e la generazione in cui è nato.
+
+### 19. La selezione finale (facoltativa)
+
+Con un numero di generazioni stabilito si può chiedere, alla fine, una
+selezione senza figli (riga "Selezione finale" nel menu, `--select K` nel
+terminale):
+
+1. finite le generazioni la popolazione viene salvata come al solito;
+2. restano in gara solo i **sopravvissuti**, cioè chi ha vinto l'ultima
+   generazione; non nasce nessuno;
+3. rifanno la prova K volte, ogni volta in un'arena nuova; **chi fallisce è
+   eliminato**;
+4. se in una prova falliscono tutti, la selezione si ferma e restano quelli che
+   avevano superato la prova precedente (sono a pari merito);
+5. i rimasti vengono salvati a parte, in `<nome>-selezionati.npz`, e la corsa si
+   mette in pausa con il riepilogo di fine esperimento (vedi "Fine
+   dell'esperimento"), da cui li si può guardare in arena.
+
+Durante la selezione la pagina principale e l'arena dicono a che prova si è e
+quanti sono in gara; al posto dell'ultimo grafico c'è l'esito di ogni prova.
+Finita la selezione, `Spazio` riprende l'evoluzione: i selezionati corrono la
+generazione in corso da soli, poi la popolazione torna piena con i loro figli.
+Lo stesso succede riprendendo l'evoluzione dal file dei selezionati. Il file si
+può anche aprire dal menu per esplorarne le reti o provarle una per una.
 
 ### Un punto di riferimento
 
@@ -436,12 +687,18 @@ evonets/
     sensors.py         vista e sensi del corpo
     brain.py           genoma e calcolo delle reti
     controllers.py     sensi -> rete -> comandi
+    anatomy.py         struttura di una singola rete: rami morti, distanze, genoma in testo
   evo/               evoluzione
     genetics.py        incrocio e mutazione
-    evolution.py       ciclo delle generazioni, salvataggio
-  viz/               viewer (l'unica parte che usa la grafica)
-    render.py
-main.py              avvio: viewer, addestramento veloce, benchmark
+    evolution.py       ciclo delle generazioni, campioni, salvataggio
+    trial.py           valutazione di una rete singola su arene fisse
+  viz/               interfaccia (l'unica parte che usa la grafica)
+    app.py             finestra, menu e corsa (pagina principale e arena)
+    render.py          arena e rete dal vivo, grafici
+    inspector.py       elenco di reti, rete disegnata e toccabile, genoma
+    testbench.py       banco di prova di una rete singola
+    widgets.py         controlli del menu
+main.py              avvio: interfaccia, addestramento nel terminale, benchmark
 tests/               un file di test per ciascun gruppo
 docs/NOTE.md         idee e direzioni future
 ```
@@ -457,13 +714,18 @@ popolazione avanza in un solo passo. Gira su CPU.
 - **Nuovo compito**: in `evonets/sim/tasks.py` un compito è un oggetto con un
   nome, `reset(world)` e `completed(world)`, che dice chi ha completato. Si
   scrive accanto a quello esistente e si passa a `Evolution(cfg, task=...)`.
-- **Salvataggi**: valgono solo per la stessa forma di rete. Se cambi numero di
+- **Salvataggi**: contengono la popolazione, la storia e il campione di ogni
+  generazione (circa 20 KB l'uno: una corsa di migliaia di generazioni occupa
+  qualche decina di MB, in memoria e su disco). Valgono solo per la stessa
+  forma di rete. Se cambi numero di
   raggi, sensi o massimo di neuroni, il caricamento viene rifiutato.
 
 ## Stato e prossimi passi
 
 Fatto: simulatore, sensi, reti a forma libera (continue e a impulsi con neuroni eccitatori o inibitori), ciclo
-evolutivo, viewer con statistiche e salvataggio, per il primo compito.
+evolutivo, interfaccia con menu, pagina principale con statistiche e reti dei
+vincitori esplorabili durante la corsa, esploratore di genomi, banco di prova
+per singole reti, salvataggio, per il primo compito.
 
 Da fare:
 

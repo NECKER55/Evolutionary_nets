@@ -29,14 +29,16 @@ class Vision:
         half = np.radians(self.cfg.vision_fov_deg) / 2.0
         return heading[:, None] + np.linspace(-half, half, self.cfg.vision_rays)[None, :]
 
-    def sense(self, world) -> np.ndarray:
-        """(N, R, C) in [0, 1], un canale per tipo di cosa vista."""
+    def sense(self, world, rows=None) -> np.ndarray:
+        """(N, R, C) in [0, 1], un canale per tipo di cosa vista. Con `rows`
+        solo per quegli agenti (ognuno vede indipendentemente dagli altri)."""
         cfg = self.cfg
+        heading, pos = (world.heading, world.pos) if rows is None else (world.heading[rows], world.pos[rows])
         # Internamente l'asse degli agenti sta per ultimo: è quello lungo, e
         # NumPy è molto più veloce quando il ciclo interno scorre su di esso.
-        ang = np.ascontiguousarray(self.ray_angles(world.heading).T)  # (R, N)
+        ang = np.ascontiguousarray(self.ray_angles(heading).T)  # (R, N)
         dx, dy = np.cos(ang), np.sin(ang)
-        ox, oy = world.pos[:, 0], world.pos[:, 1]
+        ox, oy = pos[:, 0], pos[:, 1]
         dist = np.empty((len(CHANNELS), *ang.shape))
         dist[0] = self._walls(ox, oy, dx, dy)
         dist[1] = self._circles(ox, oy, dx, dy, world.hazards.pos, world.hazards.radius)
@@ -58,18 +60,21 @@ class Vision:
     @staticmethod
     def _circles(ox, oy, dx, dy, centers, radii) -> np.ndarray:
         """Distanza (R, N) dal cerchio più vicino lungo ogni raggio; inf = nessuno."""
-        best = np.full(dx.shape, np.inf)
-        # Un cerchio alla volta: i cerchi sono pochi e gli array restano piccoli.
-        for (cx, cy), r in zip(centers, radii):
-            fx, fy = cx - ox, cy - oy
-            proj = fx * dx + fy * dy
-            disc = (r * r - fx * fx - fy * fy) + proj * proj
-            half_chord = np.sqrt(np.maximum(disc, 0.0))
-            # Colpito se la retta taglia il cerchio e l'uscita è davanti; se
-            # l'origine è già dentro, l'ingresso è alle spalle -> distanza 0.
-            hit = (disc >= 0.0) & (proj + half_chord >= 0.0)
-            np.minimum(best, np.where(hit, np.maximum(proj - half_chord, 0.0), np.inf), out=best)
-        return best
+        if len(centers) == 0:
+            return np.full(dx.shape, np.inf)
+        # Tutti i cerchi insieme, sul primo asse: (cerchi, raggi, agenti). Gli
+        # array sono piccoli e il costo sta nel numero di operazioni, non nella
+        # loro dimensione.
+        cx, cy = centers[:, 0, None, None], centers[:, 1, None, None]
+        r = radii[:, None, None]
+        fx, fy = cx - ox, cy - oy
+        proj = fx * dx + fy * dy
+        disc = (r * r - fx * fx - fy * fy) + proj * proj
+        half_chord = np.sqrt(np.maximum(disc, 0.0))
+        # Colpito se la retta taglia il cerchio e l'uscita è davanti; se
+        # l'origine è già dentro, l'ingresso è alle spalle -> distanza 0.
+        hit = (disc >= 0.0) & (proj + half_chord >= 0.0)
+        return np.where(hit, np.maximum(proj - half_chord, 0.0), np.inf).min(axis=0)
 
 
 class Senses:
@@ -93,22 +98,26 @@ class Senses:
         rays = [f"raggio {r + 1} {c}" for r in range(self.cfg.vision_rays) for c in CHANNELS]
         return rays + list(BODY)
 
-    def observe(self, world) -> np.ndarray:
+    def observe(self, world, rows=None) -> np.ndarray:
+        """(N, size), oppure (len(rows), size) con i soli agenti `rows`."""
         cfg = self.cfg
-        self.rays = self.vision.sense(world)
-        cos, sin = np.cos(world.heading), np.sin(world.heading)
-        vx, vy = world.vel[:, 0], world.vel[:, 1]
+        pick = (lambda a: a) if rows is None else (lambda a: a[rows])
+        self.rays = self.vision.sense(world, rows)
+        heading = pick(world.heading)
+        cos, sin = np.cos(heading), np.sin(heading)
+        vel = pick(world.vel)
+        vx, vy = vel[:, 0], vel[:, 1]
         v_max = cfg.thrust_accel / cfg.lin_drag
         w_max = cfg.turn_accel / cfg.ang_drag
         body = np.stack(
             [
                 np.clip((vx * cos + vy * sin) / v_max, -1.0, 1.0),
                 np.clip((vy * cos - vx * sin) / v_max, -1.0, 1.0),
-                np.clip(world.ang_vel / w_max, -1.0, 1.0),
-                world.energy / cfg.energy_init,
-                world.pain,
-                world.bump.astype(float),
+                np.clip(pick(world.ang_vel) / w_max, -1.0, 1.0),
+                pick(world.energy) / cfg.energy_init,
+                pick(world.pain),
+                pick(world.bump).astype(float),
             ],
             axis=1,
         )
-        return np.concatenate([self.rays.reshape(world.n, -1), body], axis=1)
+        return np.concatenate([self.rays.reshape(len(body), -1), body], axis=1)

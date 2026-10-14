@@ -5,6 +5,22 @@ import numpy as np
 from ..config import Config
 
 
+def live_links(conn: np.ndarray, active: np.ndarray, n_in: int) -> np.ndarray:
+    """Collegamenti che contano davvero: presenti nel genoma e tra neuroni
+    esistenti. conn (N, T, S), active (N, H) -> (N, T, S)."""
+    n = len(conn)
+    n_out = conn.shape[1] - active.shape[1]
+    target_on = np.concatenate([active, np.ones((n, n_out), dtype=bool)], axis=1)
+    source_on = np.concatenate([np.ones((n, n_in), dtype=bool), target_on], axis=1)
+    return conn & target_on[:, :, None] & source_on[:, None, :]
+
+
+def retention(gene: np.ndarray) -> np.ndarray:
+    """Reti a impulsi: quota di carica che un neurone trattiene a ogni passo,
+    dal gene "perdita". Da ~0.5 (neurone rapido) a ~0.97 (lento), tipicamente ~0.8."""
+    return 1.0 / (1.0 + np.exp(-(1.5 + gene)))
+
+
 @dataclass
 class Genome:
     """I genomi di un gruppo di individui, uno per riga (vedi `Brains`)."""
@@ -51,6 +67,11 @@ class Brains:
     N_TRAITS = 1
     OUT_LABELS = ("spinta", "sterzo")
 
+    @staticmethod
+    def trait_text(traits: np.ndarray, hidden: bool) -> list[str]:
+        """I geni propri di un neurone, in parole."""
+        return [f"soglia {traits[0]:+.3f}"]
+
     def __init__(self, cfg: Config, n: int, n_in: int, n_out: int, seed: int = 0):
         self.n, self.n_in, self.n_out = n, n_in, n_out
         self.n_hidden = h = cfg.net_hidden_max
@@ -88,22 +109,47 @@ class Brains:
     def compile(self) -> None:
         """Da chiamare dopo ogni modifica al genoma: prepara i pesi effettivi,
         azzerando ciò che tocca un neurone interno inesistente."""
-        ones_in = np.ones((self.n, self.n_in), dtype=bool)
         ones_out = np.ones((self.n, self.n_out), dtype=bool)
         self.target_on = np.concatenate([self.active, ones_out], axis=1)
-        source_on = np.concatenate([ones_in, self.active, ones_out], axis=1)
-        self.links = self.conn & self.target_on[:, :, None] & source_on[:, None, :]
+        self.links = live_links(self.conn, self.active, self.n_in)
+        self._subset = None  # copie per `step_some`, da rifare
         self.w_eff = self.weights * self.links
 
     def reset_state(self) -> None:
         self.state = np.zeros((self.n, self.n_hidden + self.n_out))
 
+    # Geni compilati di cui `step_some` usa una copia ridotta.
+    SUBSET = ("w_eff", "bias", "target_on")
+
+    def _rows(self, rows: np.ndarray) -> dict:
+        """Copie dei geni compilati per i soli individui `rows`. Si rifanno
+        solo quando l'insieme cambia (in una generazione chi esce non rientra)."""
+        if self._subset is None or not np.array_equal(self._subset["rows"], rows):
+            self._subset = {"rows": rows, **{k: getattr(self, k)[rows] for k in self.SUBSET}}
+        return self._subset
+
     def step(self, obs: np.ndarray) -> np.ndarray:
         """obs (N, n_in) -> uscite (N, n_out) in [-1, 1]."""
-        x = np.concatenate([obs, self.state], axis=1)
-        z = (self.w_eff @ x[:, :, None])[:, :, 0] + self.bias
-        self.state = np.tanh(z) * self.target_on
-        return self.state[:, self.n_hidden :]
+        self.state, out = self._advance(obs, self.state, self)
+        return out
+
+    def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
+        """Come `step`, ma solo per gli individui `rows` (obs ha una riga per
+        ciascuno): gli altri restano fermi. Ogni rete calcola per conto suo,
+        quindi il risultato per `rows` è identico a quello di `step`."""
+        sub = self._rows(rows)
+        state, out = self._advance(obs, self.state[rows], sub)
+        self.state[rows] = state
+        return out
+
+    def _advance(self, obs, state, g):
+        """Un passo a partire da `state`, con i geni compilati `g` (self o una
+        copia ridotta). Restituisce (nuovo stato, uscite)."""
+        get = g.get if isinstance(g, dict) else lambda k: getattr(g, k)
+        x = np.concatenate([obs, state], axis=1)
+        z = (get("w_eff") @ x[:, :, None])[:, :, 0] + get("bias")
+        state = np.tanh(z) * get("target_on")
+        return state, state[:, self.n_hidden :]
 
 
 class SpikingBrains(Brains):
@@ -135,6 +181,13 @@ class SpikingBrains(Brains):
     N_TRAITS = 3
     OUT_LABELS = ("avanti", "indietro", "destra", "sinistra")
 
+    @staticmethod
+    def trait_text(traits: np.ndarray, hidden: bool) -> list[str]:
+        kind = ("inibitorio" if traits[2] < 0.0 else "eccitatorio") if hidden else "- (solo per gli interni)"
+        return [f"corrente di fondo {traits[0]:+.3f}",
+                f"carica trattenuta {float(retention(traits[1])):.0%} (gene {traits[1]:+.3f})",
+                f"tipo {kind} (gene {traits[2]:+.3f})"]
+
     def __init__(self, cfg: Config, n: int, n_in: int, n_out: int = 4, seed: int = 0):
         self.substeps, self.gain = cfg.spike_substeps, cfg.spike_gain
         self.sensors_excitatory_only = cfg.sensors_excitatory_only
@@ -152,15 +205,15 @@ class SpikingBrains(Brains):
 
     def compile(self) -> None:
         super().compile()
-        # Quota di carica trattenuta a ogni passo di rete: da ~0.5 (neurone
-        # rapido) a ~0.97 (lento), tipicamente ~0.8.
-        self.keep = 1.0 / (1.0 + np.exp(-(1.5 + self.traits[:, :, 1])))
+        self.keep = retention(self.traits[:, :, 1])
         sign = np.ones((self.n, self.n_in + self.n_hidden + self.n_out))
         sign[:, self.n_in : self.n_in + self.n_hidden] = np.where(self.inhibitory, -1.0, 1.0)
         w = np.abs(self.weights) * sign[:, None, :]
         if not self.sensors_excitatory_only:
             w[:, :, : self.n_in] = self.weights[:, :, : self.n_in]
         self.w_eff = w * self.links
+
+    SUBSET = ("w_eff", "bias", "keep", "active")
 
     def reset_state(self) -> None:
         h = self.n_hidden
@@ -172,18 +225,33 @@ class SpikingBrains(Brains):
 
     def step(self, obs: np.ndarray) -> np.ndarray:
         """obs (N, n_in) -> comandi (N, 2) in (-1, 1): spinta e sterzata."""
+        (self.charge, self.spikes, self.state), out = self._advance(
+            obs, (self.charge, self.spikes, self.state), self)
+        return out
+
+    def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
+        sub = self._rows(rows)
+        (charge, spikes, state), out = self._advance(
+            obs, (self.charge[rows], self.spikes[rows], self.state[rows]), sub)
+        self.charge[rows], self.spikes[rows], self.state[rows] = charge, spikes, state
+        return out
+
+    def _advance(self, obs, states, g):
+        get = g.get if isinstance(g, dict) else lambda k: getattr(g, k)
+        w_eff, bias, keep, active = get("w_eff"), get("bias"), get("keep"), get("active")
+        charge, spikes, state = states
         h = self.n_hidden
-        drive = 1.0 - self.keep
+        drive = 1.0 - keep
         for _ in range(self.substeps):
-            x = np.concatenate([obs, self.spikes, self.state[:, h:]], axis=1)
-            current = (self.w_eff @ x[:, :, None])[:, :, 0] + self.bias
+            x = np.concatenate([obs, spikes, state[:, h:]], axis=1)
+            current = (w_eff @ x[:, :, None])[:, :, 0] + bias
             current[:, :h] *= self.gain
-            self.charge = np.maximum(self.keep * self.charge + drive * current, -1.0)
-            inner = self.charge[:, :h]
-            fired = (inner >= 1.0) & self.active
-            inner[fired | ~self.active] = 0.0
-            self.spikes = fired.astype(float)
-            self.state[:, :h] = 0.8 * self.state[:, :h] + 0.2 * self.spikes
-            self.state[:, h:] = np.tanh(np.maximum(self.charge[:, h:], 0.0))
-        m = self.state[:, h:]
-        return np.stack([m[:, 0] - m[:, 1], m[:, 2] - m[:, 3]], axis=1)
+            charge = np.maximum(keep * charge + drive * current, -1.0)
+            inner = charge[:, :h]
+            fired = (inner >= 1.0) & active
+            inner[fired | ~active] = 0.0
+            spikes = fired.astype(float)
+            state[:, :h] = 0.8 * state[:, :h] + 0.2 * spikes
+            state[:, h:] = np.tanh(np.maximum(charge[:, h:], 0.0))
+        m = state[:, h:]
+        return (charge, spikes, state), np.stack([m[:, 0] - m[:, 1], m[:, 2] - m[:, 3]], axis=1)

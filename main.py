@@ -1,24 +1,22 @@
 """Evoluzione di reti che guidano agenti in un'arena 2D.
 
-    uv run main.py                          # evoluzione dal vivo nel viewer
-    uv run main.py --net spike-ei           # a impulsi, neuroni eccitatori o inibitori
-    uv run main.py --load runs/pop.npz      # riprende da un salvataggio
-    uv run main.py --evolve 300             # 300 generazioni senza grafica, poi salva
+    uv run main.py                          # interfaccia grafica: menu, corsa, esploratore delle reti
+    uv run main.py --load runs/pop.npz      # il menu parte con quel salvataggio già scelto
+    uv run main.py --evolve 300             # 300 generazioni nel terminale, poi salva
+    uv run main.py --evolve 300 --select 5  # ... poi i sopravvissuti rifanno la prova 5 volte
     uv run main.py --bench                  # throughput della simulazione senza grafica
+
+Senza --evolve né --bench le altre opzioni precompilano il menu.
 """
 
 import argparse
+import secrets
 import time
-
-import numpy as np
+from pathlib import Path
 
 from evonets import Config, World
-from evonets.config import TUNABLES
 from evonets.evo import Evolution
 from evonets.net import NeuralController
-
-SPEEDS = (1, 2, 4, 8, 16)
-TURBO_BUDGET = 0.08  # s di calcolo per fotogramma in modalità turbo
 
 
 def bench(cfg: Config, n_agents: int, steps: int, seed: int) -> None:
@@ -44,9 +42,10 @@ def start(cfg: Config, seed: int, load: str | None) -> Evolution:
     return Evolution(cfg, seed)
 
 
-def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str) -> None:
+def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str, select: int = 0) -> None:
     evo = start(cfg, seed, load)
-    print(f"{cfg.population} individui, rete {cfg.net_type}, compito: {evo.world.task.name}")
+    seed_text = f"seme {evo.seed}" if evo.seed is not None else "seme sconosciuto (salvataggio vecchio)"
+    print(f"{cfg.population} individui, rete {cfg.net_type}, {seed_text}, compito: {evo.world.task.name}")
     print(" gen  completato  sopravv.  neuroni  collegam.  vita(s)  inibitori  evento")
     t0 = time.perf_counter()
     for _ in range(generations):
@@ -60,152 +59,55 @@ def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str
     el = time.perf_counter() - t0
     evo.save(save)
     print(f"{generations} generazioni in {el:.0f}s ({el / generations:.2f}s l'una), salvato in {save}")
-
-
-def view(cfg: Config, seed: int, load: str | None, save: str) -> None:
-    import pygame
-
-    from evonets.viz.render import DIM, PLAYER, TEXT, Renderer
-
-    pygame.init()
-    evo = start(cfg, seed, load)
-    world = evo.world
-    renderer = Renderer(world)
-    clock = pygame.time.Clock()
-    focus = int(np.argmax(evo.age))
-    manual = paused = turbo = show_consts = False
-    show_rays = True
-    speed_i, tun_i, saved_at = 0, 0, None
-    running = True
-
-    while running:
-        for ev in pygame.event.get():
-            if ev.type == pygame.QUIT:
-                running = False
-            elif ev.type == pygame.MOUSEBUTTONDOWN and renderer.arena.collidepoint(ev.pos):
-                click = np.array(ev.pos) / renderer.scale
-                focus = int(np.argmin(np.linalg.norm(world.pos - click, axis=1)))
-            elif ev.type == pygame.KEYDOWN:
-                if ev.key == pygame.K_ESCAPE:
-                    running = False
-                elif ev.key == pygame.K_SPACE:
-                    paused = not paused
-                elif ev.key == pygame.K_t:
-                    turbo = not turbo
-                elif ev.key == pygame.K_v:
-                    show_rays = not show_rays
-                elif ev.key == pygame.K_m:
-                    manual = not manual
-                elif ev.key == pygame.K_c:
-                    show_consts = not show_consts
-                elif ev.key == pygame.K_s:
-                    evo.save(save)
-                    saved_at = evo.generation
-                elif ev.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS):
-                    speed_i = min(speed_i + 1, len(SPEEDS) - 1)
-                elif ev.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                    speed_i = max(speed_i - 1, 0)
-                elif show_consts and ev.key == pygame.K_TAB:
-                    tun_i = (tun_i + 1) % len(TUNABLES)
-                elif show_consts and ev.key in (pygame.K_LEFTBRACKET, pygame.K_RIGHTBRACKET,
-                                                pygame.K_COMMA, pygame.K_PERIOD):
-                    up = ev.key in (pygame.K_RIGHTBRACKET, pygame.K_PERIOD)
-                    name = TUNABLES[tun_i]
-                    setattr(cfg, name, round(getattr(cfg, name) * (1.1 if up else 1 / 1.1), 4))
-
-        keys = pygame.key.get_pressed()
-        hand = np.array(
-            [
-                (keys[pygame.K_UP] or keys[pygame.K_w]) - (keys[pygame.K_DOWN] or keys[pygame.K_s]),
-                (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a]),
-            ],
-            dtype=float,
-        )
-
-        def advance() -> None:
-            nonlocal focus
-            if evo.finished:
-                evo.next_generation()
-                focus = int(np.argmax(evo.age))  # il sopravvissuto più anziano, se c'è
-            else:
-                evo.step((focus, hand) if manual else None)
-
-        if not paused:
-            if turbo:
-                deadline = time.perf_counter() + TURBO_BUDGET
-                while time.perf_counter() < deadline:
-                    advance()
-            else:
-                for _ in range(SPEEDS[speed_i]):
-                    advance()
-
-        if world.done[focus]:
-            status = "COMPITO COMPLETATO"
-        elif world.alive[focus]:
-            status = "vivo"
-        else:
-            status = "MORTO"
-        pace = "TURBO" if turbo else f"x{SPEEDS[speed_i]}"
-        hud = [
-            (f"generazione {evo.generation}   t={world.t:5.1f}s   {pace}   {clock.get_fps():3.0f} fps"
-             f"{'   PAUSA' if paused else ''}", TEXT),
-            (f"compito: {world.task.name}", TEXT),
-            (f"completato {int(world.done.sum())}/{world.n}   morti {int((~world.alive).sum())}   "
-             f"sopravvissuti in gara {int((evo.age > 0).sum())}", TEXT),
-        ]
-        if evo.history:
-            h = evo.history[-1]
-            note = "" if h["event"] == "normale" else f"   [{h['event']}]"
-            hud.append((f"gen. precedente: {h['completed']}/{world.n} completati, "
-                        f"{h['neurons']:.1f} neuroni e {h['links']:.0f} collegamenti in media{note}", DIM))
-        hud += [
-            ("", TEXT),
-            (f"agente {focus} ({'guidi tu' if manual else 'guida la rete'}), "
-             f"età {evo.age[focus]}: {status}", PLAYER),
-            (f"energia {world.energy[focus]:5.1f}   v={world.speed[focus]:5.1f} u/s   "
-             f"w={world.ang_vel[focus]:+5.2f} rad/s", PLAYER),
-            ("", TEXT),
-        ]
-        if show_consts:
-            for i, name in enumerate(TUNABLES):
-                mark = ">" if i == tun_i else " "
-                hud.append((f"{mark} {name:17s} {getattr(cfg, name):8.3f}", TEXT if i == tun_i else DIM))
-            hud.append(("Tab scegli | , . (o [ ]) regola | C chiudi", DIM))
-        else:
-            hud.append(("+/- velocita' | T turbo | Spazio pausa | S salva | C costanti | Esc esci", DIM))
-            hud.append(("clic segui un agente | M guida manuale (WASD/frecce) | V raggi", DIM))
-        if saved_at is not None:
-            hud.append((f"salvata la generazione {saved_at} in {save}"[:100], DIM))
-        renderer.draw(focus, hud, evo.ctrl, show_rays, evo.age, evo.history)
-        clock.tick(60)
-
-    pygame.quit()
+    if select:
+        n = evo.start_selection(select)
+        if not n:
+            print("selezione finale: nessun sopravvissuto da selezionare")
+            return
+        print(f"selezione finale: {n} sopravvissuti, {select} prove, nessun figlio")
+        while evo.selecting:
+            while not evo.finished:
+                evo.step()
+            r = evo.next_selection_round()
+            print(f"  prova {r['round']}: {r['entered']} in gara, {r['passed']} superano")
+        if evo.selection["note"]:
+            print(f"  {evo.selection['note']}")
+        path = Path(save)
+        path = path.with_name(path.stem + "-selezionati" + path.suffix)
+        evo.save(path)
+        print(f"restano {len(evo.ids)}: {', '.join(f'#{i}' for i in evo.ids)}; salvati in {path}")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--agents", type=int, default=None, help="individui (default: 200; 1000 in --bench)")
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=None,
+                    help="seme della corsa (default: casuale, mostrato a schermo per poterla rifare)")
     ap.add_argument("--net", choices=("rate", "spike-ei"), default="rate",
                     help="tipo di rete: rate = neuroni continui, "
                          "spike-ei = a impulsi con neuroni eccitatori o inibitori")
     ap.add_argument("--evolve", type=int, metavar="G", help="fa evolvere G generazioni senza grafica")
+    ap.add_argument("--select", type=int, default=0, metavar="K",
+                    help="con --evolve: alla fine i sopravvissuti rifanno la prova K volte, senza figli")
     ap.add_argument("--load", metavar="FILE", help="riprende da una popolazione salvata")
-    ap.add_argument("--save", metavar="FILE", default="runs/pop.npz",
-                    help="dove salvare (tasto S nel viewer, fine di --evolve)")
+    ap.add_argument("--save", metavar="FILE",
+                    help="dove salvare (default: runs/pop.npz con --evolve, un nome nuovo nel menu)")
     ap.add_argument("--bench", action="store_true", help="misura il throughput senza grafica")
     ap.add_argument("--steps", type=int, default=5000, help="step per --bench")
     args = ap.parse_args()
     cfg = Config(net_type=args.net)
+    seed = args.seed if args.seed is not None else secrets.randbelow(2**31)
     if args.bench:
-        bench(cfg, args.agents or 1000, args.steps, args.seed)
+        bench(cfg, args.agents or 1000, args.steps, seed)
         return
     if args.agents:
         cfg.population = args.agents
     if args.evolve:
-        evolve(cfg, args.evolve, args.seed, args.load, args.save)
+        evolve(cfg, args.evolve, seed, args.load, args.save or "runs/pop.npz", args.select)
     else:
-        view(cfg, args.seed, args.load, args.save)
+        from evonets.viz.app import App
+
+        App(dict(net=args.net, agents=args.agents, seed=args.seed, load=args.load, save=args.save)).run()
 
 
 if __name__ == "__main__":
