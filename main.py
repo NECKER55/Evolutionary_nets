@@ -73,13 +73,13 @@ def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str
         cfg.exam_every = exam_every
     seed_text = f"seme {evo.seed}" if evo.seed is not None else "seme sconosciuto (salvataggio vecchio)"
     print(f"{cfg.population} individui, rete {cfg.net_type}, {seed_text}, compito: {evo.world.task.name}")
-    print(" gen  completato  sopravv.  neuroni  collegam.  vita(s)  inibitori  evento")
+    print(" gen  completato  sopravv.  recett.  neuroni  collegam.  vita(s)  inibitori  evento")
     t0 = time.perf_counter()
     for _ in range(generations):
         s = evo.run_generation()
         print(
             f"{s['generation']:4d}  {s['completed']:4d} {s['completed'] / cfg.population:5.0%}  "
-            f"{s['survivors']:8d}  {s['neurons']:7.1f}  {s['links']:9.1f}  {s['duration']:7.1f}  "
+            f"{s['survivors']:8d}  {s['receptors']:7.1f}  {s['neurons']:7.1f}  {s['links']:9.1f}  {s['duration']:7.1f}  "
             f"{format(s['inhibitory'], '9.0%') if 'inhibitory' in s else '        -'}  "
             f"{'' if s['event'] == 'normale' else s['event']}"
         )

@@ -16,8 +16,8 @@ import numpy as np
 import pygame
 
 from ..net.anatomy import KIND_NAMES, Anatomy, sizes
-from ..net.sensors import CHANNELS
-from .render import BG, BORDER, DEAD, DIM, EXCITE, HIT, IDLE, INHIBIT, MOCK, PLAYER, TARGET, TEXT
+from .render import (BG, BORDER, DEAD, DIM, EXCITE, GENERALIST, IDLE, INHIBIT, MOCK, PHENOMENON_COLOR, PLAYER,
+                     TARGET, TEXT)
 
 ROW = 20
 LINE = 16
@@ -171,12 +171,12 @@ class NetView:
         head = (f"rete {KIND_NAMES[a.kind]}: {sm['neurons']} interni ({sm['useful_neurons']} utili), "
                 f"{sm['links']} coll. ({sm['useful_links']} utili)")
         s.blit(font.render(head, True, TEXT), (G.x + 8, G.y + 4))
-        sub = (f"sensi {sm['senses_used']}/{a.n_in}, anelli {sm['loops']}, "
-               f"cablaggio {sm['wire_length']:.0f} ({sm['wire_cost']:.2f} en./s)")
+        sub = (f"recettori {sm['receptors']} ({sm['senses_used']} usati), anelli {sm['loops']}, "
+               f"cablaggio {sm['wire_length']:.0f}, costo {sm['upkeep']:.2f} en./s")
         if "inhibitory" in sm:
             sub += f", {sm['neurons'] - sm['inhibitory']} ecc. + {sm['inhibitory']} inib."
         s.blit(font.render(sub, True, DIM), (G.x + 8, G.y + 20))
-        for x, title in ((G.x + 84, "sensi"), (G.centerx - 90, "interni, dove stanno nel cervello"),
+        for x, title in ((G.x + 70, "recettori"), (G.centerx - 90, "interni, dove stanno nel cervello"),
                          (G.right - 92, "motori")):
             s.blit(font.render(title, True, DIM), (x, G.y + 40))
         pygame.draw.rect(s, (30, 33, 44), self.box.inflate(10, 10), 1)  # il cervello
@@ -186,33 +186,56 @@ class NetView:
         pos = {v: (p[0] - ox, p[1] - oy) for v, p in self.pos.items()}
         edges = [(u, v) for u, v in a.edges() if u in pos and v in pos]
         w_max = max((abs(a.weight(u, v)) for u, v in edges), default=1.0)
+        touched = []  # i collegamenti del neurone toccato: si disegnano sopra
         for u, v in edges:
+            if focus is not None and focus in (u, v):
+                touched.append((u, v))
+                continue
             w = a.weight(u, v)
             dim = not (a.useful[u] and a.useful[v])
             color = DEAD if dim else EXCITE if w > 0 else INHIBIT
             strength = abs(w) / w_max
-            alpha = int(30 + 170 * strength)
-            if focus is not None:
-                alpha = 235 if focus in (u, v) else 12
+            alpha = 12 if focus is not None else int(30 + 170 * strength)
             width = 2 if strength > 0.5 and not dim else 1
             p, q = pos[u], pos[v]
             if u == v:
                 pygame.draw.circle(layer, (*color, alpha), (p[0], p[1] - 12), 7, 1)
                 continue
-            pts = [p, q]  # dritto: la lunghezza sul disegno è quella nel cervello
-            pygame.draw.lines(layer, (*color, alpha), False, pts, width)
-            if focus is not None and focus in (u, v):
-                arrow(layer, (*color, alpha), pts[-2], q)
+            # Dritto: la lunghezza sul disegno è quella nel cervello.
+            pygame.draw.line(layer, (*color, alpha), p, q, width)
+        # Collegamenti del neurone toccato, in entrata e in uscita. Il colore è
+        # sempre l'effetto di chi trasmette (arancio eccita, azzurro inibisce:
+        # nelle reti a impulsi lo decide il tipo del neurone di partenza), anche
+        # sui rami morti, che restano solo più tenui. La freccia sta a metà
+        # del collegamento, così si vede il verso sia in entrata sia in uscita.
+        for u, v in touched:
+            w = a.weight(u, v)
+            color = EXCITE if w > 0 else INHIBIT
+            live = a.useful[u] and a.useful[v]
+            alpha = 235 if live else 120
+            width = 1 + round(2 * abs(w) / w_max)
+            p, q = pos[u], pos[v]
+            if u == v:
+                pygame.draw.circle(layer, (*color, alpha), (p[0], p[1] - 12), 7, 2)
+                continue
+            pygame.draw.line(layer, (*color, alpha), p, q, width)
+            mid = (p[0] + 0.55 * (q[0] - p[0]), p[1] + 0.55 * (q[1] - p[1]))
+            arrow(layer, (*color, alpha), p, mid, size=11.0, back=0.0)
         s.blit(layer, G.topleft)
 
+        # Etichette dei recettori dall'alto in basso, spostate quanto basta
+        # per non sovrapporsi (il pallino resta dove sta il nervo).
+        label_y, last = {}, -1e9
+        for v in sorted((v for v in self.pos if v < a.n_in), key=lambda v: self.pos[v][1]):
+            last = label_y[v] = max(self.pos[v][1] - 7, last + 14)
         for v, p in self.pos.items():
             dead = not a.useful[v]
             if v < a.n_in:
-                rim = HIT[v % len(CHANNELS)] if v < a.n_vision else TEXT
+                rim = PHENOMENON_COLOR[a.phenomenon[v]] if a.specialized[v] else GENERALIST
                 pygame.draw.circle(s, IDLE, p, 5)
                 pygame.draw.circle(s, DEAD if dead else rim, p, 5, 1)
                 img = font.render(a.labels[v], True, DEAD if dead else DIM)
-                s.blit(img, (p[0] - img.get_width() - 9, p[1] - 7))
+                s.blit(img, (p[0] - img.get_width() - 9, label_y[v]))
             elif a.is_motor(v):
                 pygame.draw.circle(s, MOCK, p, 11)
                 s.blit(font.render(a.labels[v], True, TEXT), (p[0] + 15, p[1] - 7))
@@ -228,7 +251,7 @@ class NetView:
                 pygame.draw.circle(s, PLAYER, p, 14, 1)
             if v == self.node:
                 pygame.draw.circle(s, PLAYER, p, 16, 1)
-        legend = [("eccita", EXCITE), ("inibisce", INHIBIT), ("frecce = verso", DIM),
+        legend = [("eccita", EXCITE), ("inibisce", INHIBIT), ("freccia a metà = verso", DIM),
                   ("rami morti " + ("nascosti" if self.prune else "grigi") + " [P]", DEAD)]
         if a.inhibitory is not None:
             legend[2:2] = [("bordo = tipo", TEXT)]
@@ -284,7 +307,6 @@ class Explorer:
 
     def __init__(self, evo, source: str | None = None):
         self.evo, self.cfg = evo, evo.cfg
-        self.n_in = evo.ctrl.brains.n_in
         self.source = source or (CHAMPIONS if evo.champions else POPULATION)
         self.list, self.net, self.info = RowList(), NetView(), InfoPanel()
         self.genomes: dict = {}
@@ -302,7 +324,7 @@ class Explorer:
         rows, self.genomes = [], {}
         if self.source in (POPULATION, SURVIVORS):
             genome, age, ids = evo.ctrl.brains.genome, evo.age.copy(), evo.ids.copy()
-            neurons, links = sizes(genome, self.n_in)
+            neurons, links = sizes(genome)
             members = range(len(genome)) if self.source == POPULATION else np.flatnonzero(age > 0)
             for i in sorted(members, key=lambda i: (-age[i], ids[i])):
                 key = (evo.generation, int(i))
@@ -322,7 +344,7 @@ class Explorer:
         else:
             done = {h["generation"]: h["completed"] for h in evo.history}
             for gen, age, g, uid in reversed(evo.champions):
-                neurons, links = sizes(g, self.n_in)
+                neurons, links = sizes(g)
                 pct = f"{done[gen] * 100 / self.cfg.population:3.0f}%" if gen in done else "-"
                 rows.append((f"{gen:>5d} {pct:>5} {age:>4d} {neurons[0]:>4d} {links[0]:>6d}", gen))
                 self.genomes[gen] = (lambda g=g: g, f"campione-gen{gen:04d}",
@@ -459,7 +481,7 @@ class Inspector:
         if sel is None:
             return
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-        _, name, title = sel
+        _, name, title, _ = sel
         path = EXPORT_DIR / f"{name}.txt"
         path.write_text(self.explorer.net.anat.genome_text(f"{self.title}  {title}".strip()))
         self.message = f"genoma scritto in {path}"
@@ -522,7 +544,7 @@ class Inspector:
         self.cell = cw, ch = max(1, 400 // S), max(2, min(8, 280 // T))
         self.heat_rect = r = pygame.Rect(x0, top + 40, S * cw, T * ch)
         s.blit(app.small.render("genoma: un blocco (riga) per neurone", True, TEXT), (x0, top + 4))
-        s.blit(app.small.render("colonne: sensi | interni | motori che lo alimentano", True, DIM), (x0, top + 20))
+        s.blit(app.small.render("colonne: recettori | interni | motori che lo alimentano", True, DIM), (x0, top + 20))
 
         rgb = np.empty((S, T, 3), dtype=np.uint8)
         rgb[:] = (24, 27, 36)

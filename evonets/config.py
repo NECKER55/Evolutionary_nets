@@ -36,10 +36,6 @@ class Config:
     # metabolismo di base. Come in natura, un filo lungo deve valere il suo prezzo.
     wire_cost: float = 0.004
 
-    # Campo visivo
-    vision_rays: int = 9
-    vision_fov_deg: float = 120.0  # apertura totale del ventaglio
-    vision_range: float = 30.0  # u
     # Fisica dei segnali (sim/signals.py), per i recettori universali. Ogni
     # fenomeno ha un asse della "qualità" in [0, 1]: colore, molecola,
     # frequenza, temperatura. Cosa emette ogni oggetto è scritto qui: dare un
@@ -80,21 +76,43 @@ class Config:
     # Recettori: rumore di fondo e saturazione, in "quanti" per passo.
     receptor_dark: float = 1.0
     receptor_saturation: float = 100.0
+    # Costo del corpo e del cervello, energia/s: ogni recettore acceso (la
+    # cellula), la sua sensibilità (somma delle g di tutti i fenomeni) e ogni
+    # neurone interno acceso. Al posto di un numero massimo, un prezzo.
+    receptor_cell_cost: float = 0.002
+    receptor_sens_cost: float = 0.00005
+    neuron_cost: float = 0.01
 
     # Rumore dei sensi: deviazione standard di un disturbo casuale aggiunto a
     # ogni ingresso della rete a ogni passo. 0 = sensi perfetti (lo usa l'esame).
     sensor_noise: float = 0.0
 
-    # Rete: fino a net_hidden_max neuroni interni, liberi di collegarsi in
-    # qualsiasi direzione (anelli compresi). Alla nascita ogni individuo ne ha
-    # attivi un numero casuale e ogni collegamento possibile esiste con
-    # probabilità net_conn_prob.
+    # Rete: neuroni interni liberi di collegarsi in qualsiasi direzione
+    # (anelli compresi), senza numero massimo: ognuno costa (neuron_cost) e se
+    # ne aggiungono per duplicazione. Si parte primordiali (docs/SPEC_FASE_C.md,
+    # sezione 7): nessun neurone interno acceso e pochi recettori generalisti.
     # "rate" = neuroni continui (tanh), ogni collegamento col suo segno;
     # "spike-ei" = a impulsi, ogni neurone interno è tutto eccitatorio o tutto
     # inibitorio.
     net_type: str = "rate"
-    net_hidden_max: int = 32
     net_weight_std: float = 1.0
+    # Posti iniziali (spenti) per neuroni interni e recettori. Non sono limiti:
+    # quando qualcuno ne usa più di pool_fill, tutti ricevono pool_step posti.
+    net_hidden_slots: int = 8
+    receptor_slots: int = 4
+    pool_fill: float = 0.8
+    pool_step: int = 8
+    # Il corpo primordiale: recettori accesi, a ventaglio davanti, generalisti
+    # (sensibilità uguale su tutti i fenomeni, sintonia larga).
+    receptor_initial: int = 2
+    receptor_initial_spread_deg: float = 60.0
+    receptor_initial_aperture_deg: float = 120.0
+    receptor_initial_gain: float = 5.0
+    receptor_initial_width: float = 0.4
+    # Adattamento sensoriale alla partenza: tempo caratteristico (s) e
+    # intensità massima, sottrattiva e divisiva, sorteggiate tra 0 e questo valore.
+    receptor_initial_tau: float = 1.0
+    receptor_initial_adaptation: float = 0.2
     # Geometria (vedi net/geometry.py): il cervello è un quadrato di lato 1,
     # sensi a sinistra, motori a destra. Alla nascita un collegamento esiste con
     # probabilità net_conn_prob * exp(-distanza / net_conn_range): locale quasi
@@ -102,7 +120,7 @@ class Config:
     # tanti collegamenti quanti ne avrebbe con il 15% uniforme, ma lunghi la
     # metà, e quasi sempre almeno un percorso dai sensi ai motori.
     net_conn_prob: float = 0.75  # probabilità a distanza 0
-    net_conn_range: float = 0.3  # portata tipica di un collegamento
+    net_conn_range: float = 0.3  # portata tipica di un collegamento (valore iniziale: poi è un gene)
     net_self_prob: float = 0.05  # un neurone collegato a se stesso: raro, come in natura
     # Solo "spike-ei": passi di rete per ogni passo di fisica, e guadagno della
     # corrente in ingresso ai neuroni interni.
@@ -125,19 +143,26 @@ class Config:
     rescue_share: float = 0.5
     rescue_strength: float = 3.0
 
-    # Riproduzione. Il genoma è una fila di blocchi, uno per neurone interno o
-    # motore: il blocco contiene se il neurone esiste, la sua soglia e tutti i
-    # suoi collegamenti in ingresso con i pesi.
+    # Riproduzione. Il genoma è una fila di blocchi: uno per neurone interno o
+    # motore (esistenza, geni propri, posizione, collegamenti in ingresso),
+    # uno per recettore, uno per il meccanismo di mutazione.
     crossover_rate: float = 0.5  # quota di figli con due genitori (gli altri: copia)
-    mut_weight_prob: float = 0.1  # probabilità che un singolo peso o soglia venga ritoccato
+    # Mutazioni: questi sono solo i valori di PARTENZA. Ogni individuo ha i
+    # suoi tassi come geni, che mutano come tutti gli altri geni (con la
+    # probabilità e l'ampiezza di ritocco dell'individuo stesso) e non scendono
+    # sotto mutation_floor (copiatura mai perfetta).
+    mut_weight_prob: float = 0.1  # probabilità che un peso o gene venga ritoccato
     mut_weight_std: float = 0.3  # ampiezza del ritocco
     # Probabilità che un collegamento assente compaia, tra due neuroni a
-    # distanza 0; cala con la distanza come alla nascita (in media ~0.2%).
+    # distanza 0; cala con la distanza come alla nascita.
     mut_conn_add: float = 0.01
     mut_conn_del: float = 0.01  # probabilità che un collegamento presente sparisca
-    mut_neuron_toggle: float = 0.01  # probabilità che un neurone interno si accenda o si spenga
-    mut_pos_prob: float = 0.1  # probabilità che un neurone interno si sposti
+    mut_neuron_toggle: float = 0.01  # probabilità che un neurone o recettore si accenda o si spenga
+    mut_dup: float = 0.005  # probabilità che un neurone o recettore acceso si duplichi
+    mut_pos_prob: float = 0.1  # probabilità che un neurone (o un nervo) si sposti nel cervello
     mut_pos_std: float = 0.03  # di quanto, in lati del cervello
+    mut_rec_drift: float = 0.05  # deriva dei geni dei recettori (scala: genetics.DRIFT_SCALE)
+    mutation_floor: float = 1e-5
 
     # Compito
     target_radius: float = 3.0
@@ -176,6 +201,5 @@ TUNABLES = (
     "hazard_speed",
     "hazard_drain",
     "hazard_falloff",
-    "vision_fov_deg",
-    "vision_range",
+    "light_attenuation",
 )

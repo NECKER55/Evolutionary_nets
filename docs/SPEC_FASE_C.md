@@ -2,8 +2,17 @@
 
 Stato: **approvata** (2026-10-14), in corso di implementazione.
 - Passo 1 (fisica dei segnali e risposta dei recettori): fatto, in
-  `sim/signals.py` e `net/receptors.py`, con i test; non ancora collegato
-  all'evoluzione. I cicli pesanti sono compilati con Numba.
+  `sim/signals.py` e `net/receptors.py`, con i test. I cicli pesanti sono
+  compilati con Numba.
+- Passo 2 (nuovo genoma: recettori nel genoma, posti che crescono,
+  duplicazione neutra, tassi di mutazione come geni, partenza primordiale,
+  salvataggi formato 3, interfaccia ed esame versione 2): fatto. Il rumore dei
+  recettori riparte dal seme di ogni arena, così una corsa ripresa resta
+  identica.
+- Adattamento sensoriale (sezione 3.3 bis): fatto; salvataggi formato 4.
+- Passo 3: i costi attuali risultano già in linea con l'obiettivo (un occhio di
+  25 recettori ≈ 12% del metabolismo di base); esperimento di validazione in
+  corso (ambiente facile, reti continue e a impulsi, 4 semi ciascuna).
 
 Decisioni già prese (2026-10-14):
 
@@ -247,6 +256,24 @@ Conseguenze, tutte da natura:
 Il rumore usa un generatore casuale proprio del controllore, quindi la corsa
 resta ripetibile con lo stesso seme.
 
+### 3.3 bis Adattamento sensoriale (aggiunto il 2026-10-14)
+
+Ogni recettore tiene una media recente `m` dei suoi quanti (esponenziale, con
+tempo caratteristico τ) e risponde
+
+```
+r = clip((ñ − sott · m) / (n_max + div · m), 0, 1)
+```
+
+- `sott` in [0, 1]: adattamento sottrattivo, come la metilazione dei recettori
+  chimici di *E. coli*: a segnale costante la risposta torna a zero, resta la
+  risposta ai cambiamenti (chemiotassi).
+- `div` ≥ 0: adattamento divisivo, come i fotorecettori (legge di Weber): la
+  risposta segue il contrasto rispetto al livello medio e non satura.
+- τ, `sott` e `div` sono geni del recettore, ereditati e mutati come gli altri.
+  Alla partenza sono deboli e casuali (τ ≈ 1 s, `sott` e `div` tra 0 e 0,2).
+- `m` parte dalla prima lettura di ogni arena (nessuno nasce "abbagliato").
+
 ### 3.4 Costo
 
 ```
@@ -329,16 +356,23 @@ mutazione**, in forma di logaritmi:
 | deriva dei geni dei recettori | nuovo |
 | portata tipica dei collegamenti nuovi λ | `net_conn_range` |
 
-- **Come evolvono.** Prima di mutare un figlio, ognuno di questi geni si
-  ritocca: `nuovo = vecchio · exp(τ · N(0, 1))`, con τ ≈ 0,2. Poi il figlio
-  muta con i suoi tassi. È l'**auto-adattamento** delle strategie evolutive
-  (Schwefel). In natura corrisponde ai "geni mutatori" e all'evoluzione della
-  fedeltà di copiatura (ipotesi della barriera della deriva, Lynch).
+- **Come evolvono.** Sono geni come gli altri e mutano con lo stesso
+  meccanismo: con la probabilità e l'ampiezza di ritocco dell'individuo stesso,
+  in scala logaritmica. In natura i tassi dipendono dalle proteine che copiano e
+  riparano il DNA, i cui geni mutano come tutti gli altri (geni mutatori,
+  ipotesi della barriera della deriva, Lynch). Una nascita usa i tassi
+  ereditati.
+  *Correzione del 2026-10-14*: la prima versione ritoccava ogni tasso a ogni
+  nascita di un fattore e^(0,2·N(0,1)) (`meta_tau`). Era troppo veloce: in
+  centinaia di generazioni i tassi derivavano di oltre 100 volte per puro
+  caso, la duplicazione salì al 2,5% per neurone e in 2 corse su 8 il cervello
+  esplose (220 neuroni, costo 17 volte il metabolismo di base). `meta_tau` è
+  stato tolto.
 - **Nell'incrocio** il blocco si eredita intero da un genitore.
 - **Un minimo fisico.** Nessun tasso scende sotto un errore minimo di
   copiatura (1e-5): la copiatura perfetta non esiste.
-- **Cosa resta fissato da noi, onestamente.** τ, cioè quanto mutano i tassi
-  stessi, perché da qualche parte la catena deve fermarsi. Poi il soccorso
+- **Cosa resta fissato da noi, onestamente.** I valori di partenza, il
+  minimo fisico di copiatura, il soccorso
   quando i genitori sono 0 o 1, la dimensione della popolazione e la regola di
   selezione.
 

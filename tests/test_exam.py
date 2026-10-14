@@ -10,14 +10,14 @@ from evonets.sim.tasks import FarTarget, MovingTarget
 
 
 def small(**kw):
-    return Config(population=12, net_hidden_max=4, **kw)
+    return Config(population=12, net_hidden_slots=4, **kw)
 
 
 def test_exam_environment_does_not_follow_the_run():
     run = small(energy_init=40.0, n_hazards=2, net_type="spike-ei")
     for t in TESTS:
         cfg = exam_config(run, t)
-        assert cfg.net_type == "spike-ei" and cfg.net_hidden_max == 4  # la rete viene dalla corsa
+        assert cfg.net_type == "spike-ei" and cfg.net_hidden_slots == 4  # la rete viene dalla corsa
         for k, v in ENVIRONMENT.items():
             assert getattr(cfg, k) == t.changes.get(k, v)  # l'ambiente dall'esame
     assert run.energy_init == 40.0  # la corsa non viene toccata
@@ -46,10 +46,9 @@ def test_moving_target_moves_and_stays_in_the_arena():
 
 def test_sensor_noise_disturbs_only_when_asked():
     clean, noisy = small(), small(sensor_noise=0.1)
-    w = World(clean, 12, seed=0)
     a = NeuralController(clean, 12, seed=0)
     b = NeuralController(noisy, 12, seed=0)
-    obs = a.senses.observe(w)
+    obs = np.random.default_rng(0).uniform(0.2, 0.8, (12, a.brains.n_in))
     assert np.array_equal(a._noisy(obs), obs)
     assert not np.array_equal(b._noisy(obs), obs)
 

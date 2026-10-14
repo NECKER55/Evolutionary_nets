@@ -3,17 +3,20 @@ import numpy as np
 from evonets import Config
 from evonets.evo import Evolution, crossover, reproduce
 from evonets.net import Brains, NeuralController, SpikingBrains
+from nets import rich
 
 N_IN = 10
 
 
 def brains(n=60, seed=0, **kw):
-    return SpikingBrains(Config(**kw), n, N_IN, 4, seed)
+    return rich(n, seed, R=N_IN, net="spike-ei", **kw)
 
 
 def single(weights_in=0.0, bias=0.0, leak=0.0, substeps=1, gain=1.0):
     """Un individuo con un solo neurone interno (il n. 0) collegato all'ingresso 0."""
-    b = SpikingBrains(Config(net_hidden_max=2, spike_substeps=substeps, spike_gain=gain), 1, 1, 4, 0)
+    cfg = Config(net_hidden_slots=2, receptor_slots=1, receptor_initial=1, spike_substeps=substeps,
+                 spike_gain=gain)
+    b = SpikingBrains(cfg, 1, 4, 0)
     b.weights[:] = 0.0
     b.traits[:] = 0.0  # tipo 0 = eccitatorio
     b.conn[:] = False
@@ -115,12 +118,11 @@ def test_reset_restores_behaviour_and_population_is_reproducible():
 
 
 def test_leak_gene_is_inherited_and_mutated_with_the_rest_of_the_neuron():
-    cfg = Config()
-    g = SpikingBrains(cfg, 20, N_IN, 4, 0).genome
+    b = brains(20)
+    cfg, g = b.cfg, b.genome
     assert g.traits.shape[2] == 3
     kids = reproduce(g.take([0]), 30, cfg, np.random.default_rng(0))
     assert (kids.traits[:, :, 1] != g.traits[0, :, 1]).any()
-    b = SpikingBrains(cfg, 20, N_IN, 4, 0)
     b.set_genome(kids)
     assert np.isfinite(b.step(np.zeros((30, N_IN)))).all()
 
@@ -128,10 +130,10 @@ def test_leak_gene_is_inherited_and_mutated_with_the_rest_of_the_neuron():
 def test_net_type_selects_the_network_and_is_kept_by_save_and_load(tmp_path):
     assert type(NeuralController(Config(), 5).brains) is Brains
     assert type(NeuralController(Config(net_type="spike-ei"), 5).brains) is SpikingBrains
-    e = Evolution(Config(net_type="spike-ei", population=20, net_hidden_max=6), 1)
+    e = Evolution(Config(net_type="spike-ei", population=20, net_hidden_slots=6), 1)
     e.run_generation()
     e.save(tmp_path / "pop.npz")
-    cfg = Config(net_hidden_max=6)  # il tipo viene dal file, non dalla configurazione
+    cfg = Config(net_hidden_slots=6)  # il tipo viene dal file, non dalla configurazione
     loaded = Evolution.load(cfg, tmp_path / "pop.npz")
     assert cfg.net_type == "spike-ei" and type(loaded.ctrl.brains) is SpikingBrains
     assert np.array_equal(loaded.ctrl.brains.traits, e.ctrl.brains.traits)
@@ -186,7 +188,7 @@ def test_flipping_the_type_gene_flips_all_outgoing_links_and_nothing_else():
 def downstream_spikes(sender_inhibitory: bool) -> float:
     """Il neurone 0 scatta di continuo ed è collegato al neurone 1, che riceve
     anche uno stimolo proprio. Conta gli impulsi del neurone 1."""
-    b = SpikingBrains(Config(net_hidden_max=2, spike_gain=1.0), 1, 1, 4, 0)
+    b = SpikingBrains(Config(net_hidden_slots=2, receptor_slots=1, receptor_initial=1, spike_gain=1.0), 1, 4, 0)
     b.weights[:] = 0.0
     b.traits[:] = 0.0
     b.conn[:] = False
@@ -222,13 +224,13 @@ def test_type_travels_with_the_neuron_in_crossover():
 
 
 def test_selectable_evolves_and_survives_save_and_load(tmp_path):
-    cfg = Config(net_type="spike-ei", population=20, net_hidden_max=6)
+    cfg = Config(net_type="spike-ei", population=20, net_hidden_slots=6)
     assert type(NeuralController(cfg, 5).brains) is SpikingBrains
     e = Evolution(cfg, 1)
     s = e.run_generation()
     assert 0.0 <= s["inhibitory"] <= 1.0
     e.save(tmp_path / "pop.npz")
-    cfg2 = Config(net_hidden_max=6)
+    cfg2 = Config(net_hidden_slots=6)
     loaded = Evolution.load(cfg2, tmp_path / "pop.npz")
     assert cfg2.net_type == "spike-ei"
     assert np.array_equal(loaded.ctrl.brains.w_eff, e.ctrl.brains.w_eff)

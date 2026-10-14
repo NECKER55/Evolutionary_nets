@@ -31,21 +31,21 @@ from ..net.brain import Genome
 from ..sim.tasks import FarTarget, MovingTarget, ReachTarget
 from .trial import Trial
 
-VERSION = 1
+VERSION = 2  # 2: recettori universali (la vista non è più un telemetro)
 EXAM_SEED = 2_000_000  # le arene della prova k partono da EXAM_SEED + 10_000 * k
 
-# Ambiente d'esame, fissato al momento della versione 1. Sono i valori di
+# Ambiente d'esame, fissato al momento della versione 2. Sono i valori di
 # default di allora: non seguono i cambi futuri della configurazione.
 ENVIRONMENT = dict(
     arena_w=200.0, arena_h=140.0, dt=1.0 / 60.0,
     agent_radius=1.0, thrust_accel=60.0, reverse_factor=0.5, lin_drag=2.0, lat_drag=8.0,
     turn_accel=40.0, ang_drag=6.0, wall_restitution=0.3,
     energy_init=150.0, metabolism_basal=2.5, metabolism_move=2.5, metabolism_turn=0.5, wire_cost=0.004,
-    vision_fov_deg=120.0, vision_range=30.0, sensor_noise=0.0,
+    sensor_noise=0.0, receptor_cell_cost=0.002, receptor_sens_cost=0.00005, neuron_cost=0.01,
     life_max=90.0, target_radius=3.0,
     hazard_drain=60.0, hazard_falloff=2.0, n_hazards=12, hazard_radius_min=5.0, hazard_radius_max=12.0,
     hazard_omega_min=0.2, hazard_omega_max=0.8, hazard_pulse=0.15, hazard_speed=1.0, spawn_margin=3.0,
-    # Fisica dei segnali dei recettori universali (ancora non usata dalla versione 1).
+    # Fisica dei segnali dei recettori universali.
     light_attenuation=12.0, light_samples=5, wall_color=0.5, wall_color_width=0.3, wall_albedo=0.4,
     target_color=0.85, target_color_width=0.06, target_albedo=1.0,
     hazard_color=0.25, hazard_color_width=0.06, hazard_glow=0.05,
@@ -63,12 +63,14 @@ ENVIRONMENT = dict(
 # l'esame la include (in ENVIRONMENT, con il suo valore d'esame: di solito
 # "spenta" per la versione 1) o se segue la corsa (qui).
 FROM_RUN = frozenset({
-    "vision_rays",  # numero di ingressi della rete: senza, la rete non si costruisce
-    "net_type", "net_hidden_max", "net_weight_std", "net_conn_prob", "net_conn_range", "net_self_prob",
+    "net_type", "net_weight_std", "net_conn_prob", "net_conn_range", "net_self_prob",
+    "net_hidden_slots", "receptor_slots", "pool_fill", "pool_step",
+    "receptor_initial", "receptor_initial_spread_deg", "receptor_initial_aperture_deg",
+    "receptor_initial_gain", "receptor_initial_width", "receptor_initial_tau", "receptor_initial_adaptation",
     "spike_substeps", "spike_gain", "spike_inhibitory_share", "sensors_excitatory_only",
     "population", "max_age", "rescue_share", "rescue_strength", "crossover_rate",
     "mut_weight_prob", "mut_weight_std", "mut_conn_add", "mut_conn_del", "mut_neuron_toggle",
-    "mut_pos_prob", "mut_pos_std", "exam_every",
+    "mut_pos_prob", "mut_pos_std", "mut_dup", "mut_rec_drift", "mutation_floor", "exam_every",
 })
 
 

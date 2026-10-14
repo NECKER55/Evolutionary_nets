@@ -4,15 +4,41 @@ import numpy as np
 
 from ..config import Config
 from .geometry import connect_prob, distances
+from .receptors import P, Prepared, ReceptorGenes
+
+# Geni del meccanismo di mutazione, uno per individuo (vedi genetics.mutate e
+# docs/SPEC_FASE_C.md, sezione 5). Nel genoma stanno come logaritmi.
+META = ("weight_prob", "weight_std", "conn_add", "conn_del", "toggle", "dup", "pos_prob", "pos_std",
+        "rec_drift", "conn_range")
+META_INDEX = {name: k for k, name in enumerate(META)}
 
 
-def live_links(conn: np.ndarray, active: np.ndarray, n_in: int) -> np.ndarray:
+def meta_start(cfg: Config) -> np.ndarray:
+    """I valori di partenza dei geni delle mutazioni (dalla configurazione)."""
+    return np.array([cfg.mut_weight_prob, cfg.mut_weight_std, cfg.mut_conn_add, cfg.mut_conn_del,
+                     cfg.mut_neuron_toggle, cfg.mut_dup, cfg.mut_pos_prob, cfg.mut_pos_std,
+                     cfg.mut_rec_drift, cfg.net_conn_range])
+
+
+PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", "toggle", "dup", "pos_prob")]
+
+
+def clamp_meta(meta: np.ndarray, cfg: Config) -> None:
+    """Sul posto: nessun tasso sotto l'errore minimo di copiatura, nessuna
+    probabilità sopra 1 e nessuna ampiezza sopra 100 (oltre non ha più
+    significato: il cervello ha lato 1, i pesi stanno per lo più entro ±3)."""
+    np.clip(meta, np.log(cfg.mutation_floor), np.log(100.0), out=meta)
+    meta[:, PROBABILITIES] = np.minimum(meta[:, PROBABILITIES], 0.0)
+
+
+def live_links(conn: np.ndarray, active: np.ndarray, r_active: np.ndarray) -> np.ndarray:
     """Collegamenti che contano davvero: presenti nel genoma e tra neuroni
-    esistenti. conn (N, T, S), active (N, H) -> (N, T, S)."""
+    esistenti (recettori e interni accesi, motori sempre).
+    conn (N, T, S), active (N, H), r_active (N, R) -> (N, T, S)."""
     n = len(conn)
     n_out = conn.shape[1] - active.shape[1]
     target_on = np.concatenate([active, np.ones((n, n_out), dtype=bool)], axis=1)
-    source_on = np.concatenate([np.ones((n, n_in), dtype=bool), target_on], axis=1)
+    source_on = np.concatenate([r_active, target_on], axis=1)
     return conn & target_on[:, :, None] & source_on[:, None, :]
 
 
@@ -24,18 +50,64 @@ def retention(gene: np.ndarray) -> np.ndarray:
 
 @dataclass
 class Genome:
-    """I genomi di un gruppo di individui, uno per riga (vedi `Brains`)."""
+    """I genomi di un gruppo di individui, uno per riga.
+
+    Cervello (vedi `Brains`):
+      weights (N, T, S), conn (N, T, S), traits (N, T, K), active (N, H), pos (N, H, 2)
+      con S = R + H + n_out sorgenti (recettori, interni, motori) e
+      T = H + n_out destinatari (interni, motori).
+    Recettori (vedi `receptors.ReceptorGenes`): i campi `r_*`, R posti.
+    Meccanismo di mutazione: `meta` (N, len(META)), logaritmi.
+
+    R e H sono "posti": un recettore o un neurone esiste solo se acceso. Sono
+    uguali per tutta la popolazione e crescono quando servono (`pad`).
+    """
 
     weights: np.ndarray
     traits: np.ndarray
     conn: np.ndarray
     active: np.ndarray
     pos: np.ndarray
+    r_active: np.ndarray
+    r_sens: np.ndarray
+    r_mu: np.ndarray
+    r_width: np.ndarray
+    r_body: np.ndarray
+    r_look: np.ndarray
+    r_aperture: np.ndarray
+    r_y: np.ndarray
+    r_tau: np.ndarray
+    r_sub: np.ndarray
+    r_div: np.ndarray
+    meta: np.ndarray
 
-    FIELDS = ("weights", "traits", "conn", "active", "pos")
+    FIELDS = ("weights", "traits", "conn", "active", "pos", "r_active", "r_sens", "r_mu", "r_width",
+              "r_body", "r_look", "r_aperture", "r_y", "r_tau", "r_sub", "r_div", "meta")
+    RECEPTOR_FIELDS = FIELDS[5:16]
 
     def __len__(self) -> int:
         return len(self.weights)
+
+    @property
+    def n_rec(self) -> int:
+        return self.r_active.shape[1]
+
+    @property
+    def n_hidden(self) -> int:
+        return self.active.shape[1]
+
+    @property
+    def n_out(self) -> int:
+        return self.weights.shape[1] - self.n_hidden
+
+    @property
+    def receptors(self) -> ReceptorGenes:
+        """I geni dei recettori (gli stessi array, non una copia)."""
+        return ReceptorGenes(*(getattr(self, f) for f in self.RECEPTOR_FIELDS))
+
+    def rate(self, name: str) -> np.ndarray:
+        """(N,) un gene del meccanismo di mutazione, nella sua scala naturale."""
+        return np.exp(self.meta[:, META_INDEX[name]])
 
     def take(self, idx) -> "Genome":
         """Copia indipendente degli individui indicati."""
@@ -43,30 +115,99 @@ class Genome:
 
     @staticmethod
     def concat(parts: list["Genome"]) -> "Genome":
+        """Uno sotto l'altro; i posti vengono pareggiati al più grande."""
+        r = max(p.n_rec for p in parts)
+        h = max(p.n_hidden for p in parts)
+        parts = [pad(p, r, h) for p in parts]
         return Genome(*(np.concatenate([getattr(p, f) for p in parts]) for f in Genome.FIELDS))
+
+
+def pad(g: Genome, n_rec: int, n_hidden: int) -> Genome:
+    """Lo stesso genoma con più posti (spenti, geni a zero) per recettori e
+    neuroni interni. Non cambia nulla per l'individuo: i posti nuovi non
+    esistono finché una mutazione non li accende o una duplicazione non li
+    riempie."""
+    dr, dh = n_rec - g.n_rec, n_hidden - g.n_hidden
+    if dr == 0 and dh == 0:
+        return g
+    if dr < 0 or dh < 0:
+        raise ValueError("pad: i posti possono solo crescere")
+    n, r, h = len(g), g.n_rec, g.n_hidden
+
+    def grow(a, axis, at, k):
+        shape = list(a.shape)
+        shape[axis] = k
+        return np.insert(a, [at] * k, np.zeros(shape, dtype=a.dtype), axis=axis) if k else a
+
+    def links(a):  # (N, T, S): righe nuove dopo H, colonne nuove dopo R e dopo R + H
+        a = grow(a, 1, h, dh)
+        a = grow(a, 2, r + h, dh)
+        return grow(a, 2, r, dr)
+
+    rec = {f: grow(getattr(g, f), 1, r, dr) for f in Genome.RECEPTOR_FIELDS}
+    rec["r_body"][:, r:] = rec["r_look"][:, r:] = [1.0, 0.0]  # vettori unitari validi
+    return Genome(
+        links(g.weights), grow(g.traits, 1, h, dh), links(g.conn), grow(g.active, 1, h, dh),
+        np.concatenate([g.pos, np.full((n, dh, 2), 0.5)], axis=1), **rec, meta=g.meta,
+    )
+
+
+def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Generator) -> Genome:
+    """La partenza primordiale (docs/SPEC_FASE_C.md, sezione 7): pochi
+    recettori generalisti, nessun neurone interno acceso, collegamenti
+    secondo la geometria. Gli individui differiscono un poco nei geni."""
+    R, H, std = cfg.receptor_slots, cfg.net_hidden_slots, cfg.net_weight_std
+    on = min(cfg.receptor_initial, R)
+    # Recettori: i primi `on` accesi, distribuiti a ventaglio davanti; gli
+    # altri posti hanno geni a caso ma spenti (pseudogeni).
+    angle = rng.uniform(-np.pi, np.pi, (n, R))
+    if on:
+        spread = np.radians(cfg.receptor_initial_spread_deg)
+        angle[:, :on] = np.linspace(-spread / 2, spread / 2, on) if on > 1 else 0.0
+    unit = np.stack([np.cos(angle), np.sin(angle)], axis=2)
+    r_active = np.zeros((n, R), dtype=bool)
+    r_active[:, :on] = True
+    r_sens = np.log(cfg.receptor_initial_gain) + rng.normal(0.0, 0.2, (n, R, P))
+    r_mu = np.clip(0.5 + rng.normal(0.0, 0.05, (n, R, P)), 0.0, 1.0)
+    r_width = np.log(cfg.receptor_initial_width) + rng.normal(0.0, 0.1, (n, R, P))
+    r_aperture = np.full((n, R), np.log(np.radians(cfg.receptor_initial_aperture_deg)))
+    # Mappa topografica: il nervo entra nel cervello a un'altezza che segue la
+    # direzione in cui il recettore guarda.
+    r_y = np.clip(0.5 + angle / (2.0 * np.pi), 0.0, 1.0)
+    # Adattamento rudimentale fin da subito, diverso da individuo a individuo.
+    r_tau = np.log(cfg.receptor_initial_tau) + rng.normal(0.0, 0.3, (n, R))
+    r_sub = rng.uniform(0.0, cfg.receptor_initial_adaptation, (n, R))
+    r_div = rng.uniform(0.0, cfg.receptor_initial_adaptation, (n, R))
+
+    pos = rng.random((n, H, 2))
+    meta = np.log(meta_start(cfg))[None, :] + rng.normal(0.0, 0.1, (n, len(META)))
+    clamp_meta(meta, cfg)
+    dist = distances(cfg, pos, r_y, n_out)
+    conn = rng.random(dist.shape) < connect_prob(cfg, dist, R, np.exp(meta[:, META_INDEX["conn_range"]]))
+    T, S = H + n_out, R + H + n_out
+    return Genome(
+        weights=rng.normal(0.0, std, (n, T, S)), traits=rng.normal(0.0, std, (n, T, n_traits)),
+        conn=conn, active=np.zeros((n, H), dtype=bool), pos=pos,
+        r_active=r_active, r_sens=r_sens, r_mu=r_mu, r_width=r_width, r_body=unit.copy(), r_look=unit,
+        r_aperture=r_aperture, r_y=r_y, r_tau=r_tau, r_sub=r_sub, r_div=r_div, meta=meta,
+    )
 
 
 class Brains:
     """Le reti di tutta la popolazione, una per riga.
 
-    Ogni rete ha `n_in` ingressi (i sensi), fino a `net_hidden_max` neuroni
-    interni e `n_out` uscite (i motori). I collegamenti sono liberi: qualsiasi
-    neurone (ingresso, interno, uscita) può parlare a qualsiasi neurone interno
-    o di uscita, se stesso compreso. Non esistono strati.
+    Ogni rete ha R recettori (i sensi: vedi receptors.py), H neuroni interni e
+    `n_out` motori. R e H sono posti: contano solo quelli accesi. I
+    collegamenti sono liberi: qualsiasi neurone (recettore, interno, motore)
+    può parlare a qualsiasi neurone interno o motore, se stesso compreso. Non
+    esistono strati.
 
     A ogni passo tutti i neuroni si aggiornano insieme a partire dai valori del
     passo precedente, che restano in `state`: gli anelli sono la memoria.
 
-    Genoma (ciò che l'evoluzione potrà toccare):
-      weights (N, T, S)  peso con segno: >0 eccita, <0 inibisce
-      conn    (N, T, S)  quali collegamenti esistono
-      active  (N, H)     quali neuroni interni esistono
-      traits  (N, T, K)  geni propri di ogni neurone; qui uno solo, la soglia (bias)
-      pos     (N, H, 2)  dove sta ogni neurone interno nel cervello (vedi geometry.py)
-    dove S = n_in + H + n_out sono le sorgenti e T = H + n_out i destinatari.
-
     I collegamenti nascono soprattutto tra neuroni vicini, e ogni collegamento
     effettivo costa energia in proporzione alla sua lunghezza (`wire_length`).
+    Costano anche ogni neurone interno acceso e ogni recettore (`upkeep`).
     """
 
     KIND = "rate"
@@ -78,25 +219,14 @@ class Brains:
         """I geni propri di un neurone, in parole."""
         return [f"soglia {traits[0]:+.3f}"]
 
-    def __init__(self, cfg: Config, n: int, n_in: int, n_out: int, seed: int = 0):
-        self.cfg = cfg
-        self.n, self.n_in, self.n_out = n, n_in, n_out
-        self.n_hidden = h = cfg.net_hidden_max
+    def __init__(self, cfg: Config, n: int, n_out: int = 2, seed: int = 0):
+        self.cfg, self.n_out = cfg, n_out
         rng = np.random.default_rng(seed)
-        targets, sources = h + n_out, n_in + h + n_out
-        std = cfg.net_weight_std
-        self.weights = rng.normal(0.0, std, (n, targets, sources))
-        self.traits = rng.normal(0.0, std, (n, targets, self.N_TRAITS))
-        self.pos = rng.random((n, h, 2))  # gli interni sparsi nel cervello
-        dist = distances(cfg, self.pos, n_in, n_out)
-        self.conn = rng.random((n, targets, sources)) < connect_prob(cfg, dist, n_in)
-        # Ogni individuo nasce con una frazione diversa di neuroni interni attivi.
-        self.active = rng.random((n, h)) < rng.random((n, 1))
-        self._init_genes(cfg, rng)
-        self.compile()
-        self.reset_state()
+        genome = primordial(cfg, n, n_out, self.N_TRAITS, rng)
+        self._init_genes(cfg, rng, genome)
+        self.set_genome(genome)
 
-    def _init_genes(self, cfg: Config, rng: np.random.Generator) -> None:
+    def _init_genes(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
         """Per i tipi di rete che hanno geni con una distribuzione iniziale propria."""
 
     @property
@@ -105,26 +235,39 @@ class Brains:
 
     @property
     def genome(self) -> Genome:
-        return Genome(self.weights, self.traits, self.conn, self.active, self.pos)
+        return self._genome
 
     def set_genome(self, genome: Genome) -> None:
-        """Sostituisce l'intera popolazione (stesso numero di individui o no)."""
-        self.weights, self.traits = genome.weights, genome.traits
-        self.conn, self.active, self.pos = genome.conn, genome.active, genome.pos
-        self.n = len(genome)
+        """Sostituisce l'intera popolazione (stesso numero di individui o no,
+        stessi posti o no)."""
+        self._genome = genome
+        self.weights, self.traits, self.conn = genome.weights, genome.traits, genome.conn
+        self.active, self.pos = genome.active, genome.pos
+        self.n, self.n_in, self.n_hidden = len(genome), genome.n_rec, genome.n_hidden
         self.compile()
         self.reset_state()
 
+    @property
+    def receptors(self) -> ReceptorGenes:
+        return self._genome.receptors
+
     def compile(self) -> None:
         """Da chiamare dopo ogni modifica al genoma: prepara i pesi effettivi,
-        azzerando ciò che tocca un neurone interno inesistente."""
+        azzerando ciò che tocca un neurone o un recettore inesistente."""
+        g, cfg = self._genome, self.cfg
         ones_out = np.ones((self.n, self.n_out), dtype=bool)
         self.target_on = np.concatenate([self.active, ones_out], axis=1)
-        self.links = live_links(self.conn, self.active, self.n_in)
-        self.dist = distances(self.cfg, self.pos, self.n_in, self.n_out)
+        self.links = live_links(self.conn, self.active, g.r_active)
+        self.dist = distances(cfg, self.pos, g.r_y, self.n_out)
         # Lunghezza totale dei collegamenti effettivi di ogni rete: il suo cablaggio.
         self.wire_length = (self.dist * self.links).sum(axis=(1, 2))
+        # Quanto costa mantenere questo corpo e questo cervello, energia/s.
+        gain = self.receptors.gain
+        self.upkeep = (cfg.wire_cost * self.wire_length + cfg.neuron_cost * self.active.sum(axis=1)
+                       + cfg.receptor_cell_cost * g.r_active.sum(axis=1)
+                       + cfg.receptor_sens_cost * gain.sum(axis=(1, 2)))
         self._subset = None  # copie per `step_some`, da rifare
+        self._prepared = None  # recettori pronti per il calcolo, da rifare
         self.w_eff = self.weights * self.links
 
     def reset_state(self) -> None:
@@ -137,11 +280,21 @@ class Brains:
         """Copie dei geni compilati per i soli individui `rows`. Si rifanno
         solo quando l'insieme cambia (in una generazione chi esce non rientra)."""
         if self._subset is None or not np.array_equal(self._subset["rows"], rows):
-            self._subset = {"rows": rows, **{k: getattr(self, k)[rows] for k in self.SUBSET}}
+            self._subset = {"rows": rows, **{k: getattr(self, k)[rows] for k in self.SUBSET},
+                            "receptors": self.prepared().take(rows)}
         return self._subset
 
+    def prepared(self, rows: np.ndarray | None = None) -> Prepared:
+        """I recettori degli individui `rows` (tutti se None), pronti per il
+        calcolo dei sensi."""
+        if rows is not None:
+            return self._rows(rows)["receptors"]
+        if self._prepared is None:
+            self._prepared = Prepared(self.cfg, self._genome.receptors)
+        return self._prepared
+
     def step(self, obs: np.ndarray) -> np.ndarray:
-        """obs (N, n_in) -> uscite (N, n_out) in [-1, 1]."""
+        """obs (N, R) -> uscite (N, n_out) in [-1, 1]."""
         self.state, out = self._advance(obs, self.state, self)
         return out
 
@@ -172,7 +325,7 @@ class SpikingBrains(Brains):
     superata la soglia 1, emettono un impulso e si azzerano. Agli altri neuroni
     arriva solo l'impulso (0 o 1). Ognuno ha un tipo fisso: eccitatorio o
     inibitorio su *tutti* i suoi collegamenti in uscita, come in natura.
-    Sensi: non emettono impulsi, entrano come corrente continua.
+    Recettori: non emettono impulsi, entrano come corrente continua.
     Motori: quattro, a coppie antagoniste. Non emettono impulsi: sommano nel
     tempo ciò che ricevono, come un muscolo, e non possono andare sotto zero.
     Il comando è la differenza nella coppia.
@@ -182,7 +335,7 @@ class SpikingBrains(Brains):
 
     Il peso di un collegamento che parte da un neurone indica solo la forza: se
     ne usa il valore assoluto, e il segno viene dal tipo di chi trasmette. I
-    motori sono sempre eccitatori. I sensi restano liberi (il segno è del
+    motori sono sempre eccitatori. I recettori restano liberi (il segno è del
     collegamento) a meno di `sensors_excitatory_only`. La corrente di fondo non
     è un collegamento e resta con il suo segno.
 
@@ -200,15 +353,15 @@ class SpikingBrains(Brains):
                 f"carica trattenuta {float(retention(traits[1])):.0%} (gene {traits[1]:+.3f})",
                 f"tipo {kind} (gene {traits[2]:+.3f})"]
 
-    def __init__(self, cfg: Config, n: int, n_in: int, n_out: int = 4, seed: int = 0):
+    def __init__(self, cfg: Config, n: int, n_out: int = 4, seed: int = 0):
         self.substeps, self.gain = cfg.spike_substeps, cfg.spike_gain
         self.sensors_excitatory_only = cfg.sensors_excitatory_only
-        super().__init__(cfg, n, n_in, n_out, seed)
+        super().__init__(cfg, n, n_out, seed)
 
-    def _init_genes(self, cfg: Config, rng: np.random.Generator) -> None:
-        strength = np.abs(self.traits[:, :, 2])
+    def _init_genes(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
+        strength = np.abs(genome.traits[:, :, 2])
         inhibitory = rng.random(strength.shape) < cfg.spike_inhibitory_share
-        self.traits[:, :, 2] = np.where(inhibitory, -strength, strength)
+        genome.traits[:, :, 2] = np.where(inhibitory, -strength, strength)
 
     @property
     def inhibitory(self) -> np.ndarray:
@@ -236,7 +389,7 @@ class SpikingBrains(Brains):
         self.state = np.zeros((self.n, h + self.n_out))
 
     def step(self, obs: np.ndarray) -> np.ndarray:
-        """obs (N, n_in) -> comandi (N, 2) in (-1, 1): spinta e sterzata."""
+        """obs (N, R) -> comandi (N, 2) in (-1, 1): spinta e sterzata."""
         (self.charge, self.spikes, self.state), out = self._advance(
             obs, (self.charge, self.spikes, self.state), self)
         return out

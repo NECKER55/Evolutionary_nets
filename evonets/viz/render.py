@@ -1,7 +1,7 @@
 import numpy as np
 import pygame
 
-from ..net.sensors import BODY, CHANNELS
+from ..net import receptors
 from ..sim.world import World
 
 BG = (14, 16, 22)
@@ -17,16 +17,24 @@ TARGET = (80, 200, 230)
 DONE = (235, 240, 250)
 RAY = (60, 66, 84)
 WALL = (200, 204, 215)
-# Colore del punto d'impatto per canale visivo: parete, veleno, bersaglio.
-GOAL = (230, 120, 220)
-HIT = (WALL, HAZARD, TARGET, GOAL)
+# Colore di un recettore secondo il fenomeno a cui è più sensibile (bianco se
+# generalista): luce, sostanze, meccanica, temperatura, magnetismo, interno.
+PHENOMENON_COLOR = ((250, 230, 110), (120, 220, 60), (235, 150, 70), (240, 90, 90), (180, 130, 245),
+                    (150, 160, 185))
+GENERALIST = TEXT
 EXCITE = (255, 160, 50)
 INHIBIT = (70, 150, 255)
 IDLE = (52, 56, 70)
 PANEL_W = 440
 GRAPH_H = 190
-BODY_SHORT = ("avanti", "traverso", "rotaz.", "energia", "dolore", "urto")
 RINGS = 10
+
+
+def receptor_color(genes, i: int, k: int):
+    """Colore del recettore k dell'individuo i: il suo fenomeno dominante se è
+    specializzato (almeno l'80% della sensibilità), altrimenti bianco."""
+    p, share = receptors.dominant(genes, i, k)
+    return PHENOMENON_COLOR[p] if share >= 0.8 else GENERALIST
 
 
 def success_series(history: list[dict], n: int) -> tuple[np.ndarray, np.ndarray]:
@@ -103,19 +111,30 @@ class Renderer:
             pygame.draw.circle(self.screen, TARGET, c, rad, 2)
             pygame.draw.circle(self.screen, TARGET, c, 3)
 
-    def _draw_vision(self, i: int, vision, obs: np.ndarray) -> None:
-        """Raggi dell'agente i: linea fino al limite visivo, un punto per ogni
-        cosa vista (colore = canale)."""
+    def _draw_receptors(self, i: int, genes, obs: np.ndarray) -> None:
+        """I recettori dell'agente i: per ognuno il suo campo (due linee ai
+        bordi dell'apertura) e una linea al centro tanto più luminosa quanto
+        più risponde. Colore = fenomeno a cui è sensibile."""
         w = self.world
-        rng = w.cfg.vision_range
-        o = w.pos[i]
-        for ang, seen in zip(vision.ray_angles(w.heading[i : i + 1])[0], obs[i]):
-            d = np.array([np.cos(ang), np.sin(ang)])
-            # Il raggio si ferma alla parete, se la vede.
-            pygame.draw.line(self.screen, RAY, self._px(o), self._px(o + d * (1.0 - seen[0]) * rng), 1)
-            for close, color in zip(seen, HIT):
-                if close > 0.0:
-                    pygame.draw.circle(self.screen, color, self._px(o + d * (1.0 - close) * rng), 4)
+        h = w.heading[i]
+        c, s_ = np.cos(h), np.sin(h)
+        reach = 1.5 * w.cfg.light_attenuation
+        for k in np.flatnonzero(genes.active[i]):
+            bx, by = genes.body[i, k]
+            o = w.pos[i] + w.cfg.agent_radius * np.array([bx * c - by * s_, bx * s_ + by * c])
+            lx, ly = genes.look[i, k]
+            centre = h + np.arctan2(ly, lx)
+            half = genes.aperture_rad[i, k] / 2.0
+            color = receptor_color(genes, i, k)
+            if half < np.pi * 0.98:
+                for edge in (centre - half, centre + half):
+                    tip = o + reach * np.array([np.cos(edge), np.sin(edge)])
+                    pygame.draw.line(self.screen, RAY, self._px(o), self._px(tip), 1)
+            f = float(np.clip(obs[k], 0.0, 1.0)) ** 0.5
+            shade = tuple(int(a + (b - a) * f) for a, b in zip(RAY, color))
+            tip = o + reach * (0.3 + 0.7 * f) * np.array([np.cos(centre), np.sin(centre)])
+            pygame.draw.line(self.screen, shade, self._px(o), self._px(tip), 2)
+            pygame.draw.circle(self.screen, color, self._px(o), 2)
 
     def _draw_agents(self, player: int | None, ages=None) -> None:
         w = self.world
@@ -171,30 +190,21 @@ class Renderer:
         return tuple(int(a + (b - a) * f) for a, b in zip(IDLE, base))
 
     def _net_layout(self, brains, i: int) -> dict[int, tuple[int, int]]:
-        """Posizione nel pannello di ogni neurone esistente: ingressi in colonna
-        a sinistra (raggruppati per raggio, poi il corpo), interni nella loro
-        posizione nel cervello, uscite a destra."""
-        n_ch, n_vis = len(CHANNELS), brains.n_in - len(BODY)
+        """Posizione nel pannello di ogni neurone esistente, come nel cervello
+        (net/geometry.py): recettori sul bordo sinistro all'altezza del loro
+        nervo, interni nella loro posizione, motori sul bordo destro."""
         h_px = self.net_h
-        pos, y = {}, 44.0
-        body_step = 12.0  # i sensi del corpo hanno un'etichetta ciascuno
-        n_body = brains.n_in - n_vis
-        step = (h_px - 60.0 - 3.0 * (n_vis // n_ch) - 12.0 - body_step * n_body) / n_vis
-        for k in range(brains.n_in):
-            if k and k <= n_vis and k % n_ch == 0:
-                y += 3.0 if k < n_vis else 12.0
-            pos[k] = (78, int(y))
-            y += step if k < n_vis else body_step
-        # Gli interni dove stanno nel cervello (net/geometry.py), tra la colonna
-        # dei sensi e quella dei motori.
-        left, right, top, bottom = 78 + 22, PANEL_W - 70 - 22, 44, h_px - 16
+        left, right, top, bottom = 78, PANEL_W - 70, 44, h_px - 26
+        g = brains.genome
+        pos = {}
+        for k in np.flatnonzero(g.r_active[i]):
+            pos[k] = (left, int(top + g.r_y[i, k] * (bottom - top)))
         for hid in np.flatnonzero(brains.active[i]):
             x, y = brains.pos[i, hid]
-            pos[brains.n_in + hid] = (int(left + x * (right - left)), int(top + y * (bottom - top)))
-        cy = h_px // 2 + 10
+            pos[brains.n_in + hid] = (int(left + 22 + x * (right - left - 44)), int(top + y * (bottom - top)))
         for o in range(brains.n_out):
-            gap = 100 if brains.n_out <= 2 else 62
-            pos[brains.n_in + brains.n_hidden + o] = (PANEL_W - 70, int(cy + (o - (brains.n_out - 1) / 2) * gap))
+            y = (o + 0.5) / brains.n_out
+            pos[brains.n_in + brains.n_hidden + o] = (right, int(top + y * (bottom - top)))
         return pos
 
     def _draw_net(self, brains, i: int, obs: np.ndarray) -> None:
@@ -218,15 +228,13 @@ class Renderer:
             else:
                 pygame.draw.line(layer, (*color, alpha), a, b, 1)
 
-        n_ch, n_vis = len(CHANNELS), brains.n_in - len(BODY)
+        genes = brains.receptors
         for k, p in pos.items():
             pygame.draw.circle(layer, self._signal(values[k]), p, 4)
-            if k < n_vis:  # il bordo dice che tipo di cosa guarda quel neurone
-                pygame.draw.circle(layer, HIT[k % n_ch], p, 4, 1)
-                if k % n_ch == 0:
-                    layer.blit(self.small.render(f"raggio {k // n_ch + 1}", True, DIM), (8, p[1] - 4))
-            elif k < brains.n_in:
-                layer.blit(self.small.render(BODY_SHORT[k - n_vis], True, DIM), (8, p[1] - 6))
+            if k < brains.n_in:  # il bordo dice a cosa è sensibile il recettore
+                pygame.draw.circle(layer, receptor_color(genes, i, k), p, 5, 1)
+                name = receptors.label(genes, i, k).split(" ", 1)[1]
+                layer.blit(self.small.render(name[:11], True, DIM), (4, p[1] - 6))
             else:
                 # Con i tipi fissi il bordo dice se il neurone eccita o inibisce.
                 rim, hid = TEXT, k - brains.n_in
@@ -239,17 +247,22 @@ class Renderer:
             layer.blit(self.small.render(f"{name} {v:+.2f}", True, TEXT), (p[0] - 34, p[1] + 10))
 
         n_hidden = int(brains.active[i].sum())
+        n_rec = int(brains.genome.r_active[i].sum())
         kind = {"rate": "continua", "spike-ei": "a impulsi E/I"}[brains.KIND]
-        head = f"{self.name_of(i)}, rete {kind}: {n_hidden} neuroni, {len(links)} collegamenti"
+        head = f"{self.name_of(i)}, rete {kind}: {n_rec} recettori, {n_hidden} neuroni, {len(links)} colleg."
         if hasattr(brains, "inhibitory"):
             n_inh = int((brains.inhibitory[i] & brains.active[i]).sum())
-            head = f"{self.name_of(i)}, rete {kind}: {n_hidden - n_inh} ecc. + {n_inh} inib., {len(links)} colleg."
+            head = (f"{self.name_of(i)}, {kind}: {n_rec} rec., {n_hidden - n_inh} ecc. + {n_inh} inib., "
+                    f"{len(links)} coll.")
         layer.blit(self.small.render(head, True, TEXT), (8, 8))
-        for x, title in ((60, "sensi"), (228, "interni"), (PANEL_W - 88, "motori")):
-            layer.blit(self.small.render(title, True, DIM), (x, 24))
+        layer.blit(self.small.render(f"costo corpo e cervello {brains.upkeep[i]:.2f} energia/s", True, DIM),
+                   (8, 22))
+        for x, title in ((52, "recettori"), (200, "interni"), (PANEL_W - 88, "motori")):
+            layer.blit(self.small.render(title, True, DIM), (x, 34))
         legend_y = self.net_h - 16
         x = 8
-        for text, color in (("eccita", EXCITE), ("inibisce", INHIBIT)) + tuple(zip(CHANNELS, HIT)):
+        short = ("luce", "sost.", "mecc.", "temp.", "magn.", "int.")
+        for text, color in (("eccita", EXCITE), ("inibisce", INHIBIT)) + tuple(zip(short, PHENOMENON_COLOR)):
             img = self.small.render(text, True, color)
             layer.blit(img, (x, legend_y))
             x += img.get_width() + 8
@@ -279,9 +292,13 @@ class Renderer:
         pygame.draw.rect(self.screen, ARENA, self.arena)
         self._draw_hazards()
         self._draw_task()
-        obs = ctrl.senses.observe(self.world) if ctrl is not None else None
+        # L'ultima lettura dei sensi, senza rileggerli: rileggerli consumerebbe
+        # il rumore dei recettori e cambierebbe la corsa.
+        obs = ctrl.obs if ctrl is not None and len(ctrl.obs) == self.world.n else None
+        if obs is None and ctrl is not None:
+            obs = np.zeros((self.world.n, ctrl.brains.n_in))
         if ctrl is not None and show_rays and self.world.alive[focus]:
-            self._draw_vision(focus, ctrl.senses.vision, ctrl.senses.rays)
+            self._draw_receptors(focus, ctrl.brains.receptors, obs[focus])
         self._draw_agents(focus, ages)
         pygame.draw.rect(self.screen, BG, self.panel)
         pygame.draw.rect(self.screen, BORDER, self.arena, 2)

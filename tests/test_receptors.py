@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from evonets import Config, World
-from evonets.net.receptors import ReceptorGenes, respond, spectral, stimuli
+from evonets.net.receptors import Prepared, ReceptorGenes, respond, spectral, stimuli
 from evonets.sim import signals
 from evonets.sim.signals import CHEMICAL, INTERNAL, LIGHT, MAGNETIC, MECHANICAL, THERMAL
 
@@ -19,6 +19,9 @@ def genes(n=1, R=1, **kw):
         look=np.tile([1.0, 0.0], (n, R, 1)),
         aperture=np.full((n, R), np.log(np.radians(1.0))),
         brain_y=np.full((n, R), 0.5),
+        tau=np.zeros((n, R)),
+        sub=np.zeros((n, R)),
+        div=np.zeros((n, R)),
     )
     for k, v in kw.items():
         getattr(g, k)[...] = v
@@ -181,3 +184,74 @@ def test_wider_aperture_averages_more_directions(aperture):
     w = world(cfg, target=(120.0, 70.0))
     s = stimuli(cfg, w, genes(aperture=np.log(np.radians(aperture))))[0, 0, LIGHT]
     assert 0.0 < s <= 1.0
+
+
+def test_prepared_fast_path_gives_the_same_quanta_as_the_reference():
+    cfg = Config(target_vibration=0.7, hazard_smell=0.3, target_heat=0.4, magnetic_field=0.8)
+    rng = np.random.default_rng(1)
+    n, R = 7, 5
+    g = genes(n=n, R=R)
+    g.sens[:] = rng.normal(1.0, 1.0, g.sens.shape)
+    g.mu[:] = rng.random(g.mu.shape)
+    g.width[:] = np.log(rng.uniform(0.05, 0.5, g.width.shape))
+    angle = rng.uniform(-np.pi, np.pi, (n, R, 2))
+    g.body[:] = np.stack([np.cos(angle[..., 0]), np.sin(angle[..., 0])], axis=-1)
+    g.look[:] = np.stack([np.cos(angle[..., 1]), np.sin(angle[..., 1])], axis=-1)
+    g.aperture[:] = np.log(rng.uniform(0.05, 6.0, (n, R)))
+    g.active[0, 1] = False
+    w = World(cfg, n, seed=2)
+    w.pos[0] = (cfg.agent_radius, 50.0)  # uno appoggiato alla parete
+    w.bump[0] = True
+    w.vel[:] = rng.normal(0, 10, (n, 2))
+    reference = (g.gain * stimuli(cfg, w, g)).sum(axis=2)
+    assert np.allclose(Prepared(cfg, g).quanta(w, np.arange(n)), reference)
+    rows = np.array([2, 5])
+    assert np.allclose(Prepared(cfg, g).take(rows).quanta(w, rows), reference[rows])
+
+
+def _energy_receptor(n=1, quanta=40.0, **kw):
+    """Un recettore sensibile solo all'energia (che vale 1): n quanti costanti."""
+    g = genes(n=n, sens=-50.0, **kw)
+    g.sens[:, :, INTERNAL] = np.log(quanta)
+    g.mu[:, :, INTERNAL], g.width[:, :, INTERNAL] = 0.05, np.log(0.01)
+    return g
+
+
+def test_without_adaptation_the_fast_path_matches_the_reference_response():
+    cfg = Config()
+    w = world(cfg, n=500)
+    g = _energy_receptor(500)
+    ref = respond(cfg, w, g, np.random.default_rng(3))
+    fast, _ = Prepared(cfg, g).respond(w, np.arange(500), np.random.default_rng(3), np.full((500, 1), np.nan))
+    assert np.allclose(ref, fast)
+
+
+def test_subtractive_adaptation_answers_changes_and_forgets_a_constant_signal():
+    cfg = Config(receptor_dark=1e-9)
+    w = world(cfg, n=200)
+    g = _energy_receptor(200, quanta=60.0, sub=1.0, tau=np.log(0.5))
+    w.energy[:] = cfg.energy_init / 3  # il segnale vale 1/3: 20 quanti
+    prep, m, rng = Prepared(cfg, g), np.full((200, 1), np.nan), np.random.default_rng(0)
+    first, m = prep.respond(w, np.arange(200), rng, m)
+    for _ in range(300):  # 5 s a segnale costante: 10 volte τ
+        r, m = prep.respond(w, np.arange(200), rng, m)
+    assert r.mean() < 0.05  # adattato: quasi zero
+    w.energy[:] = cfg.energy_init  # il segnale triplica di colpo: 60 quanti
+    jump, m = prep.respond(w, np.arange(200), rng, m)
+    assert jump.mean() > 0.3  # risponde al cambiamento (40 quanti in più su 100)
+
+
+def test_divisive_adaptation_answers_contrast_not_level():
+    cfg = Config(receptor_dark=1e-9)
+    out = []
+    for level in (1.0, 4.0):  # stesso contrasto (+50%) su due livelli di fondo diversi
+        w = world(cfg, n=400)
+        w.energy[:] = cfg.energy_init / 2
+        g = _energy_receptor(400, quanta=40.0 * level, div=50.0, tau=np.log(0.2))
+        prep, m, rng = Prepared(cfg, g), np.full((400, 1), np.nan), np.random.default_rng(1)
+        for _ in range(200):
+            _, m = prep.respond(w, np.arange(400), rng, m)
+        w.energy[:] = cfg.energy_init * 0.75
+        r, _ = prep.respond(w, np.arange(400), rng, m)
+        out.append(r.mean())
+    assert np.isclose(out[0], out[1], rtol=0.15)  # senza adattamento sarebbero 4 volte diverse

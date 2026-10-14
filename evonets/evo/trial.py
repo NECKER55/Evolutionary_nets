@@ -28,6 +28,7 @@ class Trial:
         self.world = World(cfg, n, seed, task)
         self.ctrl = NeuralController(cfg, n)
         self.ctrl.brains.set_genome(genomes.take(self.owner))
+        self.ctrl.reset(seed)
         self.done_at = np.full(n, np.nan)  # quando ciascuna copia ha completato
         self.completed: list[int] = []  # per arena: copie che hanno completato (tutte le reti)
         self.wins = np.zeros(self.k, dtype=int)  # per rete: copie che hanno completato, in tutto
@@ -50,7 +51,7 @@ class Trial:
         if not self.finished:
             w.seed = self.seed + len(self.completed)
             w.reset()
-            self.ctrl.reset()
+            self.ctrl.reset(w.seed)
             self.done_at[:] = np.nan
 
     def run(self, budget: float) -> None:

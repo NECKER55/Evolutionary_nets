@@ -24,7 +24,7 @@ from ..config import TUNABLES, Config
 from ..evo import Evolution
 from ..evo.evolution import describe_change
 from ..net.anatomy import KIND_NAMES
-from .render import BG, BORDER, DIM, PLAYER, TARGET, TEXT, WALL, Renderer, plot, success_series
+from .render import BG, BORDER, DIM, HAZARD, PLAYER, TARGET, TEXT, WALL, Renderer, plot, success_series
 from .widgets import ROW_H, Button, Choice, Number, Text
 
 SPEEDS = (1, 2, 4, 8, 16)
@@ -837,11 +837,13 @@ class RunScreen(Screen):
                      ("record (gen.)", f"{pct[best]:.0f}% ({hist[best]['generation']})"),
                      ("anziano (età)", self._oldest_tile()),
                      ("neuroni medi", f"{last['neurons']:.1f}"), ("colleg. medi", f"{last['links']:.0f}"),
-                     ("durata ultima", f"{last['duration']:.1f}s"), ("campioni", f"{len(self.evo.champions)}")]
+                     ("durata ultima", f"{last['duration']:.1f}s"),
+                     ("recettori usati/accesi", f"{last.get('used', 0.0):.1f}/{last.get('receptors', 0.0):.1f}")]
         else:
             tiles = [("succ. ultima", "-"), ("succ. media10", "-"), ("record (gen.)", "-"),
                      ("anziano (età)", self._oldest_tile()),
-                     ("neuroni medi", "-"), ("colleg. medi", "-"), ("durata ultima", "-"), ("campioni", "0")]
+                     ("neuroni medi", "-"), ("colleg. medi", "-"), ("durata ultima", "-"),
+                     ("recettori usati/accesi", "-")]
         tw = (area.w - 24) // 4
         for k, (label, value) in enumerate(tiles):
             r = pygame.Rect(x0 + (k % 4) * tw, y + (k // 4) * 40, tw - 6, 36)
@@ -855,12 +857,17 @@ class RunScreen(Screen):
         y += 86
 
         spiking = bool(hist) and "inhibitory" in hist[-1]
+        used_text = ""
+        if hist:  # recettori usati per individuo, per fenomeno, nell'ultima generazione
+            names = ("luce", "sost.", "mecc.", "temp.", "magn.", "int.", "gener.")
+            used_text = "\nusati: " + " ".join(f"{k} {v:.1f}" for k, v in zip(names, hist[-1].get("used_by", [])))
         graphs = [
             ("successi (%): sottile ogni gen., spessa media di 10",
              lambda: ((pct, WALL, 1), (avg, TARGET, 2)), lambda: 100.0, (0, 0.5, 1)),
-            ("reti: arancio neuroni interni, azzurro collegamenti/10",
-             lambda: ((col("neurons"), PLAYER, 2), (col("links") / 10, TARGET, 2)),
-             lambda: max(col("neurons").max(), col("links").max() / 10, 1.0), (0, 0.5, 1)),
+            ("reti: arancio neuroni, azzurro collegamenti/10, verde recettori usati" + used_text,
+             lambda: ((col("neurons"), PLAYER, 2), (col("links") / 10, TARGET, 2), (col("used"), HAZARD, 2)),
+             lambda: max(col("neurons").max(), col("links").max() / 10, col("used").max(), 1.0),
+             (0, 0.5, 1)),
             ("sopravvissuti (bianco), generazioni vinte dal più anziano (arancio)",
              lambda: ((col("survivors"), WALL, 1), (col("oldest"), PLAYER, 2)),
              lambda: max(col("survivors").max(), col("oldest").max(), 1.0), (0, 0.5, 1)),
@@ -870,7 +877,7 @@ class RunScreen(Screen):
         ]
 
         def col(name):
-            return np.array([h[name] for h in hist], dtype=float)
+            return np.array([h.get(name, 0.0) for h in hist], dtype=float)  # campi nuovi: 0 nelle storie vecchie
 
         exams = self.evo.exams
         if exams:  # l'esame prende il posto della durata (o dei neuroni inibitori)

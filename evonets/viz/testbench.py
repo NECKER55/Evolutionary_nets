@@ -32,6 +32,7 @@ class TestScreen:
         self.world = World(cfg, self.k, TRIAL_SEED)
         self.ctrl = NeuralController(cfg, self.k)
         self.ctrl.brains.set_genome(genomes.take(np.arange(self.k)))
+        self.ctrl.reset(TRIAL_SEED)
         self.renderer = Renderer(self.world, app.screen)
         self.renderer.name_of = lambda i: self.labels[i]
         self.arena = 0
@@ -49,7 +50,7 @@ class TestScreen:
         self.arena = k
         self.world.seed = TRIAL_SEED + k
         self.world.reset()
-        self.ctrl.reset()
+        self.ctrl.reset(self.world.seed)
         self.recorded, self.hold = False, 0
 
     @property
