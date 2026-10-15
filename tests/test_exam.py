@@ -81,7 +81,8 @@ def test_exam_is_due_every_k_generations():
 
 
 def test_same_score_in_parallel_and_here():
-    cfg = small()
+    """Motore NumPy: arene in processi separati o qui, stesso risultato."""
+    cfg = small(engine="numpy")
     g = NeuralController(cfg, 3, seed=9).brains.genome
     here = Exam(cfg, g, 0, arenas=2, clones=2, workers=1)
     while not here.finished:
@@ -102,3 +103,14 @@ def test_every_constant_is_either_exam_environment_or_from_the_run():
     assert not env & run, f"in tutti e due gli elenchi: {sorted(env & run)}"
     assert not fields - env - run, f"costanti nuove da classificare: {sorted(fields - env - run)}"
     assert not (env | run) - fields, f"costanti che non esistono più: {sorted((env | run) - fields)}"
+
+
+def test_gpu_exam_runs_every_arena_and_scores_like_numpy():
+    """Sul motore GPU l'esame fa tutte le arene in lotto; senza rumore dei sensi
+    il punteggio è quello del motore NumPy, a meno dei numeri casuali."""
+    from nets import rich
+    b = rich(3, seed=5)
+    gpu = Exam(b.cfg, b.genome, 0, arenas=2, clones=2)
+    gpu.run()
+    assert gpu.finished and gpu.workers == 0
+    assert 0.0 <= gpu.result()["score"] <= 1.0

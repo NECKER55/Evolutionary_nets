@@ -17,8 +17,17 @@ tassi di mutazione, che sono geni. Il progetto completo è in
 
 ## Avvio
 
-Serve [uv](https://docs.astral.sh/uv/). Le dipendenze (NumPy, pygame-ce) si
-installano da sole al primo comando.
+Serve [uv](https://docs.astral.sh/uv/). Le dipendenze (NumPy, Numba, JAX con
+CUDA, pygame-ce) si installano da sole al primo comando: la prima volta JAX
+scarica circa 1 GB di librerie NVIDIA.
+
+**Motore di simulazione.** Di default la simulazione gira sul motore compilato
+con JAX (`engine = "gpu"`): sulla scheda video NVIDIA se c'è, altrimenti sulla
+CPU. Con una RTX 5070 una generazione è circa 20 volte più veloce del motore
+originale, e più semi insieme circa 60 volte. Il motore originale in NumPy
+resta (`--engine numpy`) come riferimento: i test verificano che i due diano
+gli stessi risultati. Ogni nuova forma di rete richiede una compilazione di
+qualche secondo; le compilazioni si conservano in `~/.cache/evonets-jax`.
 
 ```
 uv run main.py                        # interfaccia grafica: menu, corsa, esploratore delle reti
@@ -26,6 +35,8 @@ uv run main.py --evolve 300           # 300 generazioni nel terminale, senza gra
 uv run main.py --evolve 300 --select 5  # ... poi i sopravvissuti rifanno la prova 5 volte, senza figli
 uv run main.py --evolve 300 --exam-every 100  # esame fisso ogni 100 generazioni (default 50; 0 = mai)
 uv run main.py --exam runs/pop.npz    # esame fisso dei più anziani di un salvataggio, aggiunto al file
+uv run main.py --evolve 500 --seeds 4 # 4 semi insieme sulla GPU: runs/pop-s<seme>.npz
+uv run main.py --engine numpy ...     # motore originale (più lento)
 uv run main.py --bench                # misura la velocità della simulazione
 uv run pytest                         # test
 ```
@@ -766,6 +777,11 @@ sempre mostrato e salvato, anche quando è estratto a caso.
 Un risultato si giudica su più corse con semi diversi, non su una sola: una
 corsa è un'estrazione, e la sua fortuna conta.
 
+**I due motori.** Il motore GPU usa numeri a 32 bit e il generatore di numeri
+casuali di JAX: è ripetibile con lo stesso seme, ma non dà gli stessi numeri del
+motore NumPy, quindi una corsa fatta con un motore non si rifà identica con
+l'altro. I salvataggi invece valgono per entrambi.
+
 **La velocità non cambia il risultato.** Il tempo della simulazione non è
 quello dell'orologio: ogni passo vale sempre 1/60 di secondo (`dt`), qualunque
 sia la velocità scelta. x1, x16, turbo, pagina principale, massima velocità,
@@ -889,6 +905,9 @@ evonets/
     evolution.py       ciclo delle generazioni, campioni, salvataggio
     trial.py           valutazione di una rete singola su arene fisse
     exam.py            esame fisso: 7 prove, in parallelo su più processi
+  gpu/               motore di simulazione compilato con JAX (GPU)
+    engine.py          un passo: sensi, rete, plasticità, fisica, come il motore NumPy
+    sim.py             più mondi insieme sulla GPU, e il ritorno negli oggetti NumPy
   viz/               interfaccia (l'unica parte che usa la grafica)
     app.py             finestra, menu e corsa (pagina principale e arena)
     render.py          arena e rete dal vivo, grafici
@@ -944,6 +963,6 @@ Da fare:
   recettori (specifica, sezione 10);
 - l'ambiente che rende utile imparare (fase E: la logica dei neuroni c'è già);
 - oggetto fisico da spingere e zona di consegna (compiti 2 e 3);
-- ottimizzazione delle prestazioni (compilazione dei cicli pesanti, eventualmente GPU);
+- portare sul motore GPU anche il banco di prova dal vivo (oggi usa il motore NumPy);
 - esperimenti sulla forma della rete e del genoma, descritti in
   [docs/NOTE.md](docs/NOTE.md).

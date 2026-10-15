@@ -44,6 +44,31 @@ def code_version() -> str:
         return "sconosciuta"
 
 
+def run_together(evos: list["Evolution"]) -> list[dict]:
+    """Una generazione di più evoluzioni (per esempio più semi dello stesso
+    esperimento) simulate insieme sulla GPU, nello stesso lotto. Servono la
+    stessa popolazione, lo stesso tipo di rete e lo stesso numero di zone di
+    veleno; i posti di recettori e neuroni vengono pareggiati al più grande
+    (posti spenti: non cambia nulla per nessuno). Restituisce le statistiche
+    di ciascuna."""
+    from ..gpu import available
+    from ..gpu.sim import GpuWorlds, supported
+    ok = (all(e.cfg.engine == "gpu" for e in evos) and available()
+          and all(supported(e.world, e.ctrl) for e in evos)
+          and len({(e.world.n, e.cfg.net_type, len(e.world.hazards.pos)) for e in evos}) == 1)
+    if ok:
+        r = max(e.ctrl.brains.n_in for e in evos)
+        h = max(e.ctrl.brains.n_hidden for e in evos)
+        for e in evos:
+            b = e.ctrl.brains
+            if (b.n_in, b.n_hidden) != (r, h):
+                b.set_genome(pad(b.genome, r, h))
+                e.ctrl.reset(e.world.seed)
+                e._sim = None
+        GpuWorlds(evos[0].cfg, [(e.world, e.ctrl) for e in evos], [e.world.seed for e in evos]).run()
+    return [e.run_generation() for e in evos]
+
+
 def receptor_stats(g: Genome, links: np.ndarray) -> dict:
     """Medie per individuo sui recettori: quanti sono accesi, quanti sono
     usati (hanno almeno un collegamento effettivo in uscita) e, tra gli usati,
@@ -121,6 +146,7 @@ class Evolution:
         self.selection: dict | None = None  # fase di selezione finale, se c'è stata
         self.log: list[dict] = [{"generation": 0, "event": "inizio", "code": code_version()}]
         self.exams: list[dict] = []  # risultati degli esami fatti (vedi evo/exam.py)
+        self._sim = None  # la generazione in corso sulla GPU, se il motore è "gpu"
         self.exam: Exam | None = None  # esame in corso
         self._seen = dataclasses.asdict(cfg)  # configurazione già registrata
 
@@ -139,14 +165,41 @@ class Evolution:
         w = self.world
         return not (w.alive & ~w.done).any() or w.t >= self.cfg.life_max
 
+    def gpu(self):
+        """La simulazione della generazione in corso sul motore compilato, o
+        None se si usa il motore NumPy (scelto, o JAX non disponibile, o un
+        compito che il motore GPU non conosce)."""
+        if self.cfg.engine != "gpu":
+            return None
+        if self._sim is None:
+            from ..gpu import available
+            if not available():
+                return None
+            from ..gpu.sim import GpuWorlds, supported
+            if not supported(self.world, self.ctrl):
+                return None
+            self._sim = GpuWorlds(self.cfg, [(self.world, self.ctrl)], [self.world.seed])
+        return self._sim
+
     def step(self, manual: tuple[int, np.ndarray] | None = None) -> None:
         """Un passo di simulazione. `manual` = (agente, comandi) sostituisce
         l'uscita della rete di quell'agente (guida a mano dal viewer)."""
-        actions = self.ctrl.act(self.world)
-        if manual is not None:
-            actions = actions.copy()
-            actions[manual[0]] = manual[1]
-        self.world.step(actions, self.ctrl.upkeep)
+        self.advance(1, manual)
+
+    def advance(self, k: int, manual: tuple[int, np.ndarray] | None = None) -> None:
+        """k passi (meno se la generazione finisce prima)."""
+        sim = self.gpu()
+        if sim is not None:
+            sim.advance(k, manual)
+            return
+        for _ in range(k):
+            if self.finished:
+                return
+            actions = self.ctrl.act(self.world)
+            if manual is not None:
+                actions = actions.copy()
+                actions[manual[0]] = manual[1]
+            self.world.step(actions, self.ctrl.upkeep)
 
     def start_exam(self, **kw) -> Exam:
         """Comincia l'esame dei più anziani della popolazione attuale. Si
@@ -188,6 +241,9 @@ class Evolution:
         return ids
 
     def run_generation(self) -> dict:
+        sim = self.gpu()
+        if sim is not None:
+            sim.run()
         while not self.finished:
             self.step()
         return self.next_generation()
@@ -260,6 +316,7 @@ class Evolution:
         world.seed += 1
         world.reset()
         self.ctrl.reset(world.seed)
+        self._sim = None
         self.generation += 1
         self.history.append(stats)
         return stats
@@ -279,6 +336,7 @@ class Evolution:
         self.world.seed += 1
         self.world.reset()
         self.ctrl.reset(self.world.seed)
+        self._sim = None
 
     def start_selection(self, rounds: int) -> int:
         """Comincia la selezione finale: i sopravvissuti (chi ha vinto l'ultima
@@ -382,6 +440,7 @@ class Evolution:
         if n != cfg.population:
             evo.world.n = n
             evo.world.reset()
+        evo._sim = None
         evo.generation = int(d["generation"])
         evo.seed = int(d["seed"])
         evo.history = json.loads(str(d["history"]))

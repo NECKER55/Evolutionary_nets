@@ -31,6 +31,7 @@ SPEEDS = (1, 2, 4, 8, 16)
 TURBO_BUDGET = 0.08  # s di calcolo per fotogramma guardando l'arena in turbo
 PAGE_BUDGET = 0.05  # s di calcolo per fotogramma con la pagina principale (resta reattiva)
 MAX_BUDGET = 0.5  # s di calcolo per fotogramma alla massima velocità (si ridisegna 2 volte al secondo)
+CHUNK = 60  # passi per chiamata quando si calcola a blocchi (un secondo simulato)
 BACKGROUND_BUDGET = 0.025  # s per fotogramma alla corsa mentre si guarda un'altra schermata
 RUNS = Path("runs")
 
@@ -381,12 +382,12 @@ class RunScreen(Screen):
         p = Path(self.save_path)
         return str(p.with_name(p.stem + "-selezionati" + p.suffix))
 
-    def _advance(self, hand=None) -> bool:
-        """Un passo; False quando bisogna fermarsi (fine delle generazioni o
-        della selezione finale)."""
+    def _advance(self, hand=None, k: int = 1) -> bool:
+        """k passi (meno se la generazione finisce); False quando bisogna
+        fermarsi (fine delle generazioni o della selezione finale)."""
         evo = self.evo
         if not evo.finished:
-            evo.step((self.focus, hand) if self.manual and hand is not None else None)
+            evo.advance(k, (self.focus, hand) if self.manual and hand is not None else None)
             return True
         if evo.selecting:
             evo.next_selection_round()
@@ -492,7 +493,10 @@ class RunScreen(Screen):
     def _compute(self, budget: float, hand=None) -> None:
         start = time.perf_counter()
         deadline = start + budget
-        while time.perf_counter() < deadline and self._advance(hand):
+        # A blocchi: con il motore GPU ogni chiamata ha un costo fisso. Guidando
+        # a mano si va un passo alla volta.
+        chunk = 1 if self.manual else CHUNK
+        while time.perf_counter() < deadline and self._advance(hand, chunk):
             pass
         self.busy += time.perf_counter() - start
 

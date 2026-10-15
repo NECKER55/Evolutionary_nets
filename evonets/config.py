@@ -191,6 +191,12 @@ class Config:
     hazard_speed: float = 1.0  # moltiplicatore globale (leva del curriculum)
     spawn_margin: float = 3.0  # distanza minima dai pericoli allo spawn
 
+    # Motore di simulazione: "gpu" = compilato con JAX (sulla scheda video se
+    # c'è, altrimenti sulla CPU), "numpy" = il motore originale, più lento, che
+    # resta come riferimento. Il risultato è lo stesso a meno dei numeri
+    # casuali e della precisione (32 bit sulla GPU).
+    engine: str = "gpu"
+
     # Esame (evo/exam.py): ogni quante generazioni metterlo in automatico ai
     # più anziani della popolazione; 0 = mai (resta il tasto E). Non cambia
     # l'evoluzione: è solo una misura. Gira in processi separati, su tutti i

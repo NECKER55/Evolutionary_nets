@@ -5,6 +5,7 @@
     uv run main.py --evolve 300             # 300 generazioni nel terminale, poi salva
     uv run main.py --evolve 300 --select 5  # ... poi i sopravvissuti rifanno la prova 5 volte
     uv run main.py --exam runs/pop.npz      # esame fisso dei più anziani di un salvataggio
+    uv run main.py --evolve 500 --seeds 4   # 4 semi insieme sulla GPU: runs/pop-s<seme>.npz
     uv run main.py --bench                  # throughput della simulazione senza grafica
 
 Senza --evolve né --bench le altre opzioni precompilano il menu.
@@ -14,6 +15,8 @@ import argparse
 import secrets
 import time
 from pathlib import Path
+
+import numpy as np
 
 from evonets import Config, World
 from evonets.evo import Evolution
@@ -64,6 +67,39 @@ def exam(cfg: Config, path: str) -> None:
     print_exam(evo.collect_exam())
     evo.save(path)
     print(f"risultato aggiunto al salvataggio ({len(evo.exams)} esami in tutto)")
+
+
+def evolve_many(cfg: Config, generations: int, seed: int, k: int, save: str, exam_every: int | None) -> None:
+    """K semi in parallelo, nello stesso lotto sulla GPU."""
+    import dataclasses
+
+    from evonets.evo.evolution import run_together
+
+    evos = [Evolution(dataclasses.replace(cfg), seed + i) for i in range(k)]
+    if exam_every is not None:
+        for e in evos:
+            e.cfg.exam_every = exam_every
+    path = Path(save)
+    paths = [path.with_name(f"{path.stem}-s{e.seed}{path.suffix}") for e in evos]
+    print(f"{k} semi ({seed}..{seed + k - 1}), {cfg.population} individui ciascuno, rete {cfg.net_type}")
+    print(" gen  completati per seme" + " " * (5 * k - 18) + "  neuroni  recett.")
+    t0 = time.perf_counter()
+    for _ in range(generations):
+        stats = run_together(evos)
+        g = stats[0]["generation"]
+        print(f"{g:4d}  " + " ".join(f"{s['completed']:4d}" for s in stats)
+              + f"  {np.mean([s['neurons'] for s in stats]):7.1f}  {np.mean([s['receptors'] for s in stats]):7.1f}")
+        for e in evos:
+            if e.exam_due():
+                e.start_exam().run()
+                r = e.collect_exam()
+                print(f"  seme {e.seed}: ", end="")
+                print_exam(r)
+    el = time.perf_counter() - t0
+    for e, p in zip(evos, paths):
+        e.save(p)
+    print(f"{generations} generazioni di {k} semi in {el:.0f}s ({el / generations:.2f}s l'una), salvati in "
+          + ", ".join(str(p) for p in paths))
 
 
 def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str, select: int = 0,
@@ -122,13 +158,17 @@ def main() -> None:
     ap.add_argument("--exam-every", type=int, metavar="K",
                     help="con --evolve: esame fisso ogni K generazioni (default 50; 0 = mai)")
     ap.add_argument("--exam", metavar="FILE", help="esame fisso dei più anziani di un salvataggio")
+    ap.add_argument("--seeds", type=int, default=1, metavar="K",
+                    help="con --evolve: K semi (dal seme dato in su) insieme nello stesso lotto sulla GPU")
+    ap.add_argument("--engine", choices=("gpu", "numpy"), default="gpu",
+                    help="motore di simulazione: gpu = compilato con JAX (default), numpy = l'originale")
     ap.add_argument("--load", metavar="FILE", help="riprende da una popolazione salvata")
     ap.add_argument("--save", metavar="FILE",
                     help="dove salvare (default: runs/pop.npz con --evolve, un nome nuovo nel menu)")
     ap.add_argument("--bench", action="store_true", help="misura il throughput senza grafica")
     ap.add_argument("--steps", type=int, default=5000, help="step per --bench")
     args = ap.parse_args()
-    cfg = Config(net_type=args.net)
+    cfg = Config(net_type=args.net, engine=args.engine)
     seed = args.seed if args.seed is not None else secrets.randbelow(2**31)
     if args.bench:
         bench(cfg, args.agents or 1000, args.steps, seed)
@@ -137,6 +177,8 @@ def main() -> None:
         cfg.population = args.agents
     if args.exam:
         exam(cfg, args.exam)
+    elif args.evolve and args.seeds > 1:
+        evolve_many(cfg, args.evolve, seed, args.seeds, args.save or "runs/pop.npz", args.exam_every)
     elif args.evolve:
         evolve(cfg, args.evolve, seed, args.load, args.save or "runs/pop.npz", args.select, args.exam_every)
     else:

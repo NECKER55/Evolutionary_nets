@@ -6,6 +6,11 @@ from ..net.brain import Genome
 from ..net.controllers import NeuralController
 from ..sim.world import World
 
+def _task_args(task) -> dict:
+    """Gli argomenti con cui ricreare un compito dello stesso tipo."""
+    return {k: getattr(task, k) for k in ("min_dist", "speed") if hasattr(task, k)}
+
+
 # Semi delle arene di prova: lontani da quelli dell'evoluzione e sempre gli
 # stessi, così reti diverse si confrontano sulle stesse prove.
 TRIAL_SEED = 1_000_000
@@ -55,10 +60,37 @@ class Trial:
             self.done_at[:] = np.nan
 
     def run(self, budget: float) -> None:
-        """Avanza per circa `budget` secondi di calcolo."""
+        """Avanza per circa `budget` secondi di calcolo. Con il motore GPU fa
+        tutte le arene rimaste in un colpo solo, nello stesso lotto."""
+        if not self.finished and self._run_on_gpu():
+            return
         deadline = time.perf_counter() + budget
         while not self.finished and time.perf_counter() < deadline:
             self.step()
+
+    def _run_on_gpu(self) -> bool:
+        if self.cfg.engine != "gpu" or self.completed:
+            return False
+        from ..gpu import available
+        if not available():
+            return False
+        from ..gpu.sim import GpuWorlds, supported
+        if not supported(self.world, self.ctrl):
+            return False
+        genome = self.ctrl.brains.genome
+        pairs = []
+        for k in range(self.arenas):
+            w = World(self.cfg, len(self.owner), self.seed + k, type(self.world.task)(**_task_args(self.world.task)))
+            c = NeuralController(self.cfg, len(self.owner))
+            c.brains.set_genome(genome)
+            c.reset(self.seed + k)
+            pairs.append((w, c))
+        GpuWorlds(self.cfg, pairs, [self.seed + k for k in range(self.arenas)]).run()
+        for w, _ in pairs:
+            self.completed.append(int(w.done.sum()))
+            self.wins += np.bincount(self.owner[w.done], minlength=self.k)
+            self.times += list(w.done_t[w.done])
+        return True
 
     @property
     def rate(self) -> float:

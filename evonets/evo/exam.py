@@ -72,7 +72,7 @@ FROM_RUN = frozenset({
     "spike_substeps", "spike_gain", "spike_inhibitory_share", "sensors_excitatory_only",
     "population", "max_age", "rescue_share", "rescue_strength", "crossover_rate",
     "mut_weight_prob", "mut_weight_std", "mut_conn_add", "mut_conn_del", "mut_neuron_toggle",
-    "mut_pos_prob", "mut_pos_std", "mut_dup", "mut_rec_drift", "mutation_floor", "exam_every",
+    "mut_pos_prob", "mut_pos_std", "mut_dup", "mut_rec_drift", "mutation_floor", "exam_every", "engine",
 })
 
 
@@ -126,6 +126,11 @@ def _arena(run_cfg: Config, genomes: Genome, i: int, k: int, clones: int) -> np.
     return trial.wins
 
 
+def _gpu_ready() -> bool:
+    from ..gpu import available
+    return available()
+
+
 def default_workers() -> int:
     """Processi per l'esame: tutti i core tranne due, lasciati all'evoluzione
     e all'interfaccia."""
@@ -155,6 +160,19 @@ class Exam:
         self.seconds = 0.0
         self.workers = default_workers() if workers is None else workers
         self._pool, self._futures, self._trial = None, {}, None
+        if run_cfg.engine == "gpu" and _gpu_ready():
+            # Sulla GPU tutte le arene di una prova girano nello stesso lotto:
+            # niente processi separati.
+            self.workers = 0
+            self.todo = []
+            for i, t in enumerate(TESTS):
+                trial = Trial(exam_config(run_cfg, t), genomes, arenas, clones, seed=EXAM_SEED + 10_000 * i,
+                              task=t.task())
+                trial.run(float("inf"))
+                self.wins[i] = trial.wins
+                self.done += arenas
+            self.seconds = time.perf_counter() - self.started
+            return
         if self.workers > 1:
             try:
                 self._pool = ProcessPoolExecutor(min(self.workers, len(self.todo)),
