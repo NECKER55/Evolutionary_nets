@@ -14,11 +14,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ..sim.tasks import FarTarget, MovingTarget, ReachTarget
+from ..sim.tasks import FarTarget, Foraging, MovingTarget, ReachTarget
 from . import engine
 from .engine import F
 
-SUPPORTED_TASKS = (ReachTarget, FarTarget, MovingTarget)
+SUPPORTED_TASKS = (ReachTarget, FarTarget, MovingTarget, Foraging)
 
 
 def supported(world, ctrl) -> bool:
@@ -51,6 +51,11 @@ def pack_params(world, ctrl) -> dict:
     )
     if b.KIND == "spike-ei":
         params.update(keep_n=b.keep, active_n=b.active)
+    if isinstance(task, Foraging):  # le manopole di questo mondo
+        cfg = world.cfg
+        params.update(c_food=p.c_food, c_pred=p.c_pred, food_rad=np.where(task.food_on, task.food_r, 0.0),
+                      pred_rad=np.where(task.pred_on, cfg.predator_radius, 0.0), food_r=task.food_r,
+                      need=task.need, prey_speed=task.prey_speed, pred_speed=task.pred_speed, queue=task.queue)
     return {k: _f(v) for k, v in params.items()}
 
 
@@ -70,6 +75,8 @@ def pack_state(world, ctrl, key) -> dict:
     )
     if b.KIND == "spike-ei":
         state.update(charge=b.charge, spikes=b.spikes)
+    if isinstance(task, Foraging):
+        state.update(food=task.food, pred=task.pred, ptr=task.ptr, eaten=task.eaten)
     state = {k: _f(v) for k, v in state.items()}
     state["key"] = key
     return state
@@ -90,6 +97,10 @@ def unpack(world, ctrl, s: dict) -> None:
         world.task.target = g["target"]
         if hasattr(world.task, "vel"):
             world.task.vel = g["target_vel"]
+    if "food" in g:
+        t = world.task
+        t.food, t.pred = g["food"], g["pred"]
+        t.ptr, t.eaten = g["ptr"].astype(int), g["eaten"].astype(int)
     b.state, ctrl.obs, ctrl.adapt = g["state"], g["obs"], g["m"]
     if b.KIND == "spike-ei":
         b.charge, b.spikes = g["charge"], g["spikes"]
@@ -111,9 +122,10 @@ class GpuWorlds:
         self.state = jax.tree_util.tree_map(lambda *a: jnp.stack(a),
                                             *[pack_state(w, c, k) for (w, c), k in zip(pairs, keys)])
         self.n = pairs[0][0].n
+        self.forage = "food" in self.state
 
     def _fns(self):
-        key = (self.net, self.h, self.cfg.spike_substeps)
+        key = (self.net, self.h, self.cfg.spike_substeps, self.forage)
         if key not in GpuWorlds._compiled:
             step = engine.make_step(self.net, self.h, self.cfg.spike_substeps)
             vstep = jax.vmap(step, in_axes=(None, 0, 0, None))

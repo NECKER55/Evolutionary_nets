@@ -59,3 +59,116 @@ class MovingTarget(ReachTarget):
         out = (self.target < r) | (self.target > hi)
         self.vel = np.where(out, -self.vel, self.vel)
         self.target = np.clip(self.target, r, hi)
+
+
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+
+class Foraging:
+    """Nutrirsi (docs/SPEC_MONDO.md): si riproduce chi mangia almeno N cibi.
+
+    Ogni agente ha la sua copia del mondo: cibo e predatori partono uguali per
+    tutti, poi ognuno li cambia solo nella sua copia (mangiando, facendo
+    fuggire le prede, attirando i predatori). Le manopole della
+    configurazione (`forage_*`) decidono quanti cibi, quanto grandi, quanti ne
+    servono, se fuggono, quanti predatori.
+
+    Il cibo mangiato ricompare nella posizione successiva di una coda estratta
+    a sorte all'inizio dell'arena (comune a tutti, ognuno la scorre per conto
+    suo): niente numeri casuali durante la vita, così i due motori (NumPy e
+    GPU) fanno esattamente la stessa cosa.
+    """
+
+    name = "nutrirsi"
+    QUEUE = 4096  # posizioni di ricomparsa del cibo
+
+    def reset(self, world) -> None:
+        cfg, rng, n = world.cfg, world.rng, world.n
+        self.n_food = int(round(lerp(cfg.food_count_easy, cfg.food_count_hard, cfg.forage_abundance)))
+        self.food_r = lerp(cfg.food_radius_easy, cfg.food_radius_hard, cfg.forage_abundance)
+        self.need = int(round(lerp(cfg.food_need_easy, cfg.food_need_hard, cfg.forage_need)))
+        self.prey_speed = cfg.prey_speed_max * cfg.forage_prey
+        q = cfg.forage_predators
+        self.n_pred = int(np.ceil(cfg.predator_count_max * q)) if q > 0 else 0
+        self.pred_speed = cfg.predator_speed_max * q
+        K, P = cfg.food_count_easy, cfg.predator_count_max  # posti fissi: forma uguale a ogni livello
+        lo = np.array([self.food_r, self.food_r])
+        hi = np.array([cfg.arena_w - self.food_r, cfg.arena_h - self.food_r])
+        food = rng.uniform(lo, hi, (K, 2))
+        self.food = np.broadcast_to(food, (n, K, 2)).copy()
+        self.food_on = np.zeros((n, K), dtype=bool)
+        self.food_on[:, : self.n_food] = True
+        self.queue = rng.uniform(lo, hi, (self.QUEUE, 2))
+        self.ptr = np.zeros(n, dtype=int)
+        r = cfg.predator_radius
+        pred = rng.uniform([r, r], [cfg.arena_w - r, cfg.arena_h - r], (P, 2))
+        self.pred = np.broadcast_to(pred, (n, P, 2)).copy()
+        self.pred_on = np.zeros((n, P), dtype=bool)
+        self.pred_on[:, : self.n_pred] = True
+        self.eaten = np.zeros(n, dtype=int)
+
+    def spawn_ok(self, world, pos: np.ndarray) -> np.ndarray:
+        cfg = world.cfg
+        on = self.food_on[0]
+        d_food = np.linalg.norm(pos[:, None, :] - self.food[0][None, on], axis=2)
+        ok = (d_food >= cfg.food_min_dist).all(axis=1)
+        if self.n_pred:
+            d_pred = np.linalg.norm(pos[:, None, :] - self.pred[0][None, self.pred_on[0]], axis=2)
+            ok &= (d_pred >= cfg.predator_min_dist).all(axis=1)
+        return ok
+
+    def discs(self, world):
+        """Gli oggetti che si vedono, per agente: posizioni (N, O, 2), raggi
+        (N, O) (0 = non c'è) e tipo di ciascuno (O,): 0 cibo, 1 predatore."""
+        cfg = world.cfg
+        pos = np.concatenate([self.food, self.pred], axis=1)
+        radius = np.concatenate([np.where(self.food_on, self.food_r, 0.0),
+                                 np.where(self.pred_on, cfg.predator_radius, 0.0)], axis=1)
+        kinds = np.r_[np.zeros(self.food.shape[1], dtype=int), np.ones(self.pred.shape[1], dtype=int)]
+        return pos, radius, kinds
+
+    def step(self, world) -> None:
+        """Prede e predatori si muovono; chi tocca il cibo lo mangia; chi è
+        toccato da un predatore perde energia. Solo per chi è in gara."""
+        cfg, dt = world.cfg, world.cfg.dt
+        active = world.alive & ~world.done & (world.energy > 0.0)  # chi è morto ora non mangia più
+        me = world.pos[:, None, :]
+        # Prede: fuggono dall'agente quando è vicino, rimbalzando sulle pareti.
+        if self.prey_speed > 0:
+            away = self.food - me
+            d = np.linalg.norm(away, axis=2, keepdims=True)
+            flee = (d < cfg.prey_flee_range) & self.food_on[..., None] & active[:, None, None]
+            step = np.where(flee, away / np.maximum(d, 1e-9) * self.prey_speed * dt, 0.0)
+            r = self.food_r
+            self.food = np.clip(self.food + step, [r, r], [cfg.arena_w - r, cfg.arena_h - r])
+        # Predatori: inseguono l'agente quando è abbastanza vicino.
+        if self.n_pred:
+            toward = me - self.pred
+            d = np.linalg.norm(toward, axis=2, keepdims=True)
+            chase = (d < cfg.predator_range) & self.pred_on[..., None] & active[:, None, None]
+            step = np.where(chase, toward / np.maximum(d, 1e-9) * np.minimum(self.pred_speed * dt, d), 0.0)
+            r = cfg.predator_radius
+            self.pred = np.clip(self.pred + step, [r, r], [cfg.arena_w - r, cfg.arena_h - r])
+            d = np.linalg.norm(world.pos[:, None, :] - self.pred, axis=2)
+            bitten = ((d <= cfg.predator_radius + cfg.agent_radius) & self.pred_on).sum(axis=1)
+            world.energy = np.maximum(world.energy - cfg.predator_damage * dt * bitten * active, 0.0)
+            active &= world.energy > 0.0  # chi è appena morto per un morso non mangia
+        # Mangiare: il cibo toccato sparisce e ricompare altrove (dalla coda).
+        d = np.linalg.norm(world.pos[:, None, :] - self.food, axis=2)
+        eat = (d <= self.food_r + cfg.agent_radius) & self.food_on & active[:, None]
+        if eat.any():
+            for i, k in np.argwhere(eat):
+                a, b = self.queue[self.ptr[i] % self.QUEUE], self.queue[(self.ptr[i] + 1) % self.QUEUE]
+                far = np.linalg.norm(a - world.pos[i]) >= cfg.food_min_dist
+                self.food[i, k] = a if far else b
+                self.ptr[i] += 2
+            n_eat = eat.sum(axis=1)
+            self.eaten += n_eat
+            world.energy = np.minimum(world.energy + cfg.food_energy * n_eat, cfg.energy_init)
+
+    def completed(self, world) -> np.ndarray:
+        return self.eaten >= self.need
+
+
+TASKS = {"bersaglio": ReachTarget, "cibo": Foraging}

@@ -1,6 +1,8 @@
 """Il motore GPU (JAX) deve fare ciò che fa il motore NumPy: si confrontano le
 parti una per una partendo dallo stesso stato, con la tolleranza dei 32 bit."""
 
+import copy
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -10,7 +12,8 @@ from evonets import Config, World
 from evonets.gpu import engine
 from evonets.gpu.sim import GpuWorlds, pack_params, pack_state
 from evonets.net import NeuralController
-from evonets.sim.tasks import MovingTarget
+from evonets.sim import signals
+from evonets.sim.tasks import Foraging, MovingTarget
 from nets import rich
 
 ALL_ON = dict(target_vibration=0.7, hazard_vibration=0.4, hazard_smell=0.3, target_smell=0.5, target_heat=0.4,
@@ -118,3 +121,82 @@ def test_finished_worlds_stand_still_while_others_go_on():
     gw.run()
     t = [w.t for w, _ in pairs]
     assert t[1] < t[0] and all(not (w.alive & ~w.done).any() for w, _ in pairs)
+
+
+# --- Il mondo del cibo (docs/SPEC_MONDO.md) ---------------------------------
+
+FORAGE_ALL = dict(task="cibo", forage_abundance=0.5, forage_need=1.0, forage_prey=1.0, forage_predators=1.0)
+
+
+def forage_setup(net="rate", n=12, **kw):
+    cfg, w, ctrl = setup(net, n=n, task=Foraging(), **kw)
+    cfg = w.cfg = Config(net_type=net, n_hazards=6, **{**FORAGE_ALL, **kw})
+    w.reset()  # il compito prende le manopole dalla configurazione
+    w.vel[:] = np.random.default_rng(0).normal(0, 8, (n, 2))
+    t = w.task
+    rng = np.random.default_rng(5)
+    # Cibo e predatori sparsi vicino agli agenti, diversi in ogni copia.
+    t.food = np.clip(w.pos[:, None, :] + rng.normal(0, 12, t.food.shape), 3.0, 137.0)
+    t.pred = np.clip(w.pos[:, None, :] + rng.normal(0, 15, t.pred.shape), 3.0, 137.0)
+    return cfg, w, ctrl
+
+
+def test_foraging_quanta_match_the_numpy_receptors():
+    cfg, w, ctrl = forage_setup(**ALL_ON)
+    ph, P, s = device(cfg, w, ctrl)
+    ref = ctrl.brains.prepared().quanta(w, np.arange(w.n))
+    got = np.asarray(engine.quanta(ph, P, s))
+    assert np.allclose(got, ref, rtol=2e-4, atol=1e-3)
+    seen = signals.light(cfg, w, w.pos, np.zeros((w.n, 1)), np.arange(w.n))
+    assert seen["cibo"].any() or seen["predatore"].any()  # la prova vede davvero cibo e predatori
+
+
+def test_foraging_physics_matches_the_world():
+    cfg, w, ctrl = forage_setup(n=24)
+    ph, P, s = device(cfg, w, ctrl)
+    rng = np.random.default_rng(2)
+    for _ in range(300):
+        a = rng.uniform(-1, 1, (w.n, 2))
+        w.step(a, ctrl.upkeep)
+        s = {**s, **engine.physics(ph, P, s, jnp.asarray(a, jnp.float32), P["upkeep"])}
+    t = w.task
+    assert t.eaten.sum() > 0 and (w.energy < cfg.energy_init).any()
+    for k, ref in (("pos", w.pos), ("energy", w.energy), ("food", t.food), ("pred", t.pred)):
+        assert np.allclose(np.asarray(s[k]), ref, atol=2e-3), k
+    assert np.array_equal(np.asarray(s["eaten"]), t.eaten) and np.array_equal(np.asarray(s["ptr"]), t.ptr)
+    assert np.array_equal(np.asarray(s["alive"]) > 0, w.alive) and np.array_equal(np.asarray(s["done"]) > 0, w.done)
+
+
+@pytest.mark.parametrize("net", ["rate", "spike-ei"])
+def test_foraging_whole_steps_match_without_noise(net, monkeypatch):
+    cfg, w, ctrl = forage_setup(net, n=16, receptor_dark=0.0)
+    monkeypatch.setattr(engine.jax.random, "normal", lambda key, shape, dtype=None: jnp.zeros(shape, jnp.float32))
+
+    class Zeros:
+        def standard_normal(self, shape):
+            return np.zeros(shape)
+
+    w2, c2 = World(cfg, w.n, seed=0), NeuralController(cfg, w.n)
+    w2.__dict__.update({k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in w.__dict__.items()})
+    w2.task = copy.deepcopy(w.task)
+    gw = GpuWorlds(cfg, [(w, ctrl)], [0])
+    GpuWorlds._compiled.clear()
+    c2.brains.set_genome(ctrl.brains.genome)
+    c2.reset(0)
+    c2.noise_rng = Zeros()
+    for _ in range(60):
+        w2.step(c2.act(w2), c2.upkeep)
+    gw.advance(60)
+    GpuWorlds._compiled.clear()
+    assert np.allclose(w.pos, w2.pos, atol=5e-3) and np.allclose(w.energy, w2.energy, atol=5e-3)
+    assert np.allclose(ctrl.obs, c2.obs, atol=5e-3)
+    assert np.allclose(w.task.food, w2.task.food, atol=5e-3) and np.array_equal(w.task.eaten, w2.task.eaten)
+
+
+def test_a_foraging_generation_runs_to_the_end_on_the_gpu():
+    cfg = Config(task="cibo", n_hazards=0, forage_predators=1.0)
+    pairs = [(World(cfg, 20, seed=k), NeuralController(cfg, 20, seed=k)) for k in range(2)]
+    GpuWorlds(cfg, pairs, [0, 1]).run()
+    for w, _ in pairs:
+        assert not (w.alive & ~w.done).any() or w.t >= cfg.life_max
+        assert np.array_equal(w.done, w.task.eaten >= w.task.need)

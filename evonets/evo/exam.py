@@ -57,6 +57,13 @@ ENVIRONMENT = dict(
     magnetic_field=0.0, magnetic_angle_deg=90.0, receptor_dark=1.0, receptor_saturation=300.0,
     receptor_scale_light=300.0, receptor_scale_chemical=200.0, receptor_scale_mechanical=100.0,
     receptor_scale_thermal=100.0, receptor_scale_magnetic=100.0, receptor_scale_internal=70.0,
+    # Il mondo del cibo (non usato dalla versione 3, che è nel mondo del bersaglio).
+    task='bersaglio', forage_abundance=0.0, forage_need=0.0, forage_prey=0.0, forage_predators=0.0,
+    food_count_easy=12, food_count_hard=3, food_radius_easy=4.0, food_radius_hard=2.0, food_need_easy=1,
+    food_need_hard=5, prey_speed_max=12.0, prey_flee_range=15.0, predator_count_max=3, predator_speed_max=15.0,
+    predator_range=40.0, predator_radius=1.5, predator_damage=60.0, food_energy=40.0, food_min_dist=20.0,
+    predator_min_dist=40.0, food_color=0.85, food_color_width=0.06, food_albedo=1.0, predator_color=0.05,
+    predator_color_width=0.06, predator_albedo=0.8, predator_vibration=0.5, predator_vibration_freq=0.4,
 )
 
 # Le costanti che invece vengono dalla corsa: riguardano la rete (forma,

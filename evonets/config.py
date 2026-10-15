@@ -170,7 +170,7 @@ class Config:
     # Generazioni. Una generazione finisce quando tutti sono morti o hanno
     # completato il compito. Si riproduce solo chi lo ha completato.
     population: int = 1000  # grande abbastanza perché la selezione pesi più del caso
-    life_max: float = 90.0  # s, tetto di sicurezza se il metabolismo è spento
+    life_max: float = 120.0  # s, tetto della vita (mangiando l'energia può durare a lungo)
     # Generazioni che un individuo può vivere al massimo; 0 = nessun limite: un
     # genitore resta finché continua a completare il compito.
     max_age: int = 0
@@ -200,8 +200,46 @@ class Config:
     mut_rec_drift: float = 0.05  # deriva dei geni dei recettori (scala: genetics.DRIFT_SCALE)
     mutation_floor: float = 1e-5
 
-    # Compito
+    # Compito: "cibo" = nutrirsi (docs/SPEC_MONDO.md), "bersaglio" = toccare il
+    # bersaglio una volta (il mondo di prima, per le corse vecchie).
+    task: str = "bersaglio"  # diventerà "cibo" quando il nuovo mondo sarà completo (motore GPU, scala, esame)
     target_radius: float = 3.0
+
+    # Il mondo del cibo. Ogni agente ha la sua copia di cibo e predatori.
+    # Manopole della difficoltà, da 0 (basico) a 1 (complesso); le muove la
+    # progressione adattiva (evo/ladder.py).
+    forage_abundance: float = 0.0  # da 12 cibi di raggio 4 a 3 di raggio 2
+    forage_need: float = 0.0  # cibi da mangiare per riprodursi: da 1 a 5
+    forage_prey: float = 0.0  # da cibo fermo a prede che fuggono a 12 u/s
+    forage_predators: float = 0.0  # da nessuno a 3 predatori a 15 u/s
+    # Estremi delle manopole.
+    food_count_easy: int = 12
+    food_count_hard: int = 3
+    food_radius_easy: float = 4.0
+    food_radius_hard: float = 2.0
+    food_need_easy: int = 1
+    food_need_hard: int = 5
+    prey_speed_max: float = 12.0  # u/s, con la manopola a 1
+    prey_flee_range: float = 15.0  # u: la preda si accorge dell'agente
+    predator_count_max: int = 3
+    predator_speed_max: float = 15.0  # u/s (l'agente arriva a 30)
+    predator_range: float = 40.0  # u: il predatore si accorge dell'agente
+    predator_radius: float = 1.5
+    predator_damage: float = 60.0  # energia/s a contatto
+    # Cibo: energia che dà (fino al massimo energy_init), distanze di nascita.
+    food_energy: float = 40.0
+    food_min_dist: float = 20.0  # gli agenti nascono almeno così lontani dal cibo
+    predator_min_dist: float = 40.0  # e dai predatori
+    # Come appaiono e si sentono: colore (asse della luce), larghezza, albedo;
+    # i predatori vibrano muovendosi.
+    food_color: float = 0.85
+    food_color_width: float = 0.06
+    food_albedo: float = 1.0
+    predator_color: float = 0.05
+    predator_color_width: float = 0.06
+    predator_albedo: float = 0.8
+    predator_vibration: float = 0.5
+    predator_vibration_freq: float = 0.4
 
     # Pericoli (zone tossiche in deriva armonica). Il danno cresce dal bordo
     # (zero) al centro (hazard_drain) come profondità ** hazard_falloff.

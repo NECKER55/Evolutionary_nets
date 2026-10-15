@@ -2,7 +2,7 @@ import numpy as np
 
 from ..config import Config
 from .hazards import HazardField
-from .tasks import ReachTarget
+from .tasks import TASKS
 
 
 class World:
@@ -19,7 +19,7 @@ class World:
 
     def __init__(self, cfg: Config, n_agents: int, seed: int = 0, task=None):
         self.cfg = cfg
-        self.task = task or ReachTarget()
+        self.task = task or TASKS[cfg.task]()
         self.n = n_agents
         self.seed = seed
         self.reset()
@@ -110,10 +110,11 @@ class World:
         ) * active
         spent = (effort + cfg.hazard_drain * toxicity) * dt
         self.energy = np.maximum(self.energy - spent, 0.0)
-        self.alive &= self.energy > 0.0
-
+        # Il compito può cambiare il mondo e l'energia (mangiare, predatori)
+        # prima che si contino i vivi.
         if hasattr(self.task, "step"):
             self.task.step(self)
+        self.alive &= self.energy > 0.0
         self.done |= self.task.completed(self) & self.alive
         self.t += dt
 
