@@ -16,8 +16,8 @@ import numpy as np
 import pygame
 
 from ..net.anatomy import KIND_NAMES, Anatomy, sizes
-from ..net.sensors import CHANNELS
-from .render import BG, BORDER, DEAD, DIM, EXCITE, HIT, IDLE, INHIBIT, MOCK, PLAYER, TARGET, TEXT
+from .render import (BG, BORDER, DEAD, DIM, EXCITE, GENERALIST, IDLE, INHIBIT, MOCK, MODULATOR, PHENOMENON_COLOR,
+                     PLAYER, TARGET, TEXT)
 
 ROW = 20
 LINE = 16
@@ -25,14 +25,6 @@ EXPORT_DIR = Path("runs") / "genomi"
 POPULATION, SURVIVORS, CHAMPIONS = "population", "survivors", "champions"
 SOURCES = (CHAMPIONS, SURVIVORS, POPULATION)
 TAB_LABELS = {CHAMPIONS: "1 campioni", SURVIVORS: "2 sopravv.", POPULATION: "3 tutti"}
-
-
-def bezier(a, b, lift: float, n: int = 16) -> list[tuple[int, int]]:
-    """Arco da a a b che si alza di `lift` pixel: per i collegamenti all'indietro."""
-    mid = ((a[0] + b[0]) / 2.0, min(a[1], b[1]) - lift)
-    t = np.linspace(0.0, 1.0, n)[:, None]
-    pts = (1 - t) ** 2 * np.array(a) + 2 * (1 - t) * t * np.array(mid) + t**2 * np.array(b)
-    return [(int(x), int(y)) for x, y in pts]
 
 
 def arrow(surface, color, a, b, size: float = 9.0, back: float = 11.0) -> None:
@@ -125,54 +117,27 @@ class NetView:
         self.layout()
 
     def layout(self) -> None:
-        """Sensi in colonna a sinistra, motori a destra, neuroni interni su
-        un'ellisse in mezzo: così i collegamenti tra interni sono corde ben
-        visibili. Sull'arco sinistro gli interni che ascoltano soprattutto i
-        sensi, sul destro quelli che parlano soprattutto ai motori; su ogni
-        arco l'ordine dall'alto in basso segue la posizione media di chi li
-        alimenta (meno incroci)."""
+        """Ogni neurone dove sta davvero nel cervello (un quadrato di lato 1,
+        vedi net/geometry.py): sensi sul bordo sinistro, motori sul destro,
+        interni nella loro posizione. Un collegamento lungo sul disegno è
+        lungo anche nel cervello, e costa in proporzione."""
         self.pos = {}
         a, G = self.anat, self.rect
         if a is None:
             return
         show = a.exists & (a.useful if self.prune else True)
         top, bottom = G.y + 64, G.bottom - 30
-
-        def column(nodes, x, gap_max):
-            gap = min(gap_max, (bottom - top) / max(len(nodes), 1))
-            y0 = (top + bottom) / 2 - gap * (len(nodes) - 1) / 2
-            for j, v in enumerate(nodes):
-                self.pos[v] = (int(x), int(y0 + j * gap))
-
-        column([k for k in range(a.n_in) if show[k]], G.x + 104, 24)
-        column(list(range(a.n_in + a.n_hidden, a.n_nodes)), G.right - 72, 70)
-        hidden = [v for v in range(a.n_in, a.n_in + a.n_hidden) if show[v]]
-        if not hidden:
-            return
-        motors = range(a.n_in + a.n_hidden, a.n_nodes)
-
-        def lean(v):  # >0: parla ai motori più di quanto ascolti i sensi
-            ins = [abs(a.weight(s, v)) for s in a.inputs_of(v)]
-            outs = [abs(a.weight(v, d)) for d in a.outputs_of(v)]
-            from_senses = sum(abs(a.weight(s, v)) for s in a.inputs_of(v) if s < a.n_in)
-            to_motors = sum(abs(a.weight(v, d)) for d in a.outputs_of(v) if d in motors)
-            return to_motors / (sum(outs) or 1.0) - from_senses / (sum(ins) or 1.0)
-
-        def bary(v):
-            ys = [self.pos[s][1] for s in a.inputs_of(v) if s < a.n_in and s in self.pos]
-            return np.mean(ys) if ys else (top + bottom) / 2
-
-        ranked = sorted(hidden, key=lean)
-        half = (len(ranked) + 1) // 2
-        left, right = sorted(ranked[:half], key=bary), sorted(ranked[half:], key=bary)
-        lo, hi = G.x + 175, G.right - 135
-        cx, cy = (lo + hi) / 2, (top + bottom) / 2
-        rx, ry = (hi - lo) / 2, (bottom - top) / 2 - 14
-        gap = 0.4  # radianti liberi in cima e in fondo: i due archi non si toccano
-        for nodes, a0, a1 in ((left, 1.5 * np.pi - gap, 0.5 * np.pi + gap), (right, -0.5 * np.pi + gap, 0.5 * np.pi - gap)):
-            angles = np.linspace(a0, a1, len(nodes)) if len(nodes) > 1 else [(a0 + a1) / 2]
-            for v, t in zip(nodes, angles):
-                self.pos[v] = (int(cx + rx * np.cos(t)), int(cy + ry * np.sin(t)))
+        left, right = G.x + 104, G.right - 72
+        for v in range(a.n_nodes):
+            if not show[v]:
+                continue
+            x, y = a.xy[v]
+            if a.is_hidden(v):  # un po' di margine dalle colonne di sensi e motori
+                px = left + 22 + x * (right - left - 44)
+            else:
+                px = left + x * (right - left)
+            self.pos[v] = (int(px), int(top + y * (bottom - top)))
+        self.box = pygame.Rect(left, top, right - left, bottom - top)
 
     def node_at(self, p) -> int | None:
         best, dist = None, 12.0
@@ -206,48 +171,78 @@ class NetView:
         head = (f"rete {KIND_NAMES[a.kind]}: {sm['neurons']} interni ({sm['useful_neurons']} utili), "
                 f"{sm['links']} coll. ({sm['useful_links']} utili)")
         s.blit(font.render(head, True, TEXT), (G.x + 8, G.y + 4))
-        sub = f"sensi usati {sm['senses_used']}/{a.n_in}, anelli {sm['loops']}"
+        sub = (f"recettori {sm['receptors']} ({sm['senses_used']} usati), anelli {sm['loops']}, "
+               f"cablaggio {sm['wire_length']:.0f}, costo {sm['upkeep']:.2f} en./s")
         if "inhibitory" in sm:
             sub += f", {sm['neurons'] - sm['inhibitory']} ecc. + {sm['inhibitory']} inib."
+        if sm["modulators"]:
+            sub += f", {sm['modulators']} modulatori"
         s.blit(font.render(sub, True, DIM), (G.x + 8, G.y + 20))
-        for x, title in ((G.x + 84, "sensi"), (G.x + (175 + G.w - 135) // 2 - 24, "interni"), (G.right - 92, "motori")):
+        for x, title in ((G.x + 70, "recettori"), (G.centerx - 90, "interni, dove stanno nel cervello"),
+                         (G.right - 92, "motori")):
             s.blit(font.render(title, True, DIM), (x, G.y + 40))
+        pygame.draw.rect(s, (30, 33, 44), self.box.inflate(10, 10), 1)  # il cervello
 
         layer = pygame.Surface(G.size, pygame.SRCALPHA)
         ox, oy = G.topleft
         pos = {v: (p[0] - ox, p[1] - oy) for v, p in self.pos.items()}
         edges = [(u, v) for u, v in a.edges() if u in pos and v in pos]
         w_max = max((abs(a.weight(u, v)) for u, v in edges), default=1.0)
+        touched = []  # i collegamenti del neurone toccato: si disegnano sopra
         for u, v in edges:
+            if focus is not None and focus in (u, v):
+                touched.append((u, v))
+                continue
             w = a.weight(u, v)
             dim = not (a.useful[u] and a.useful[v])
             color = DEAD if dim else EXCITE if w > 0 else INHIBIT
             strength = abs(w) / w_max
-            alpha = int(30 + 170 * strength)
-            if focus is not None:
-                alpha = 235 if focus in (u, v) else 12
+            alpha = 12 if focus is not None else int(30 + 170 * strength)
             width = 2 if strength > 0.5 and not dim else 1
             p, q = pos[u], pos[v]
             if u == v:
                 pygame.draw.circle(layer, (*color, alpha), (p[0], p[1] - 12), 7, 1)
                 continue
-            if a.is_motor(u):  # i motori che rimandano il loro valore indietro: un arco
-                pts = bezier(p, q, 40 + 0.15 * abs(q[0] - p[0]))
-            else:
-                pts = [p, q]
-            pygame.draw.lines(layer, (*color, alpha), False, pts, width)
-            if focus is not None and focus in (u, v):
-                arrow(layer, (*color, alpha), pts[-2], q)
+            # Dritto: la lunghezza sul disegno è quella nel cervello.
+            pygame.draw.line(layer, (*color, alpha), p, q, width)
+        # Collegamenti del neurone toccato, in entrata e in uscita. Il colore è
+        # sempre l'effetto di chi trasmette (arancio eccita, azzurro inibisce:
+        # nelle reti a impulsi lo decide il tipo del neurone di partenza), anche
+        # sui rami morti, che restano solo più tenui. La freccia sta a metà
+        # del collegamento, così si vede il verso sia in entrata sia in uscita.
+        for u, v in touched:
+            w = a.weight(u, v)
+            color = EXCITE if w > 0 else INHIBIT
+            live = a.useful[u] and a.useful[v]
+            alpha = 235 if live else 120
+            width = 1 + round(2 * abs(w) / w_max)
+            p, q = pos[u], pos[v]
+            if u == v:
+                pygame.draw.circle(layer, (*color, alpha), (p[0], p[1] - 12), 7, 2)
+                continue
+            pygame.draw.line(layer, (*color, alpha), p, q, width)
+            mid = (p[0] + 0.55 * (q[0] - p[0]), p[1] + 0.55 * (q[1] - p[1]))
+            arrow(layer, (*color, alpha), p, mid, size=11.0, back=0.0)
+        # Un modulatore toccato: linee viola verso i neuroni che raggiunge.
+        if focus is not None and a.is_modulator(focus) and focus in pos:
+            for t, k in a.modulated_by(focus):
+                if t in pos:
+                    pygame.draw.line(layer, (*MODULATOR, int(60 + 180 * k)), pos[focus], pos[t], 1)
         s.blit(layer, G.topleft)
 
+        # Etichette dei recettori dall'alto in basso, spostate quanto basta
+        # per non sovrapporsi (il pallino resta dove sta il nervo).
+        label_y, last = {}, -1e9
+        for v in sorted((v for v in self.pos if v < a.n_in), key=lambda v: self.pos[v][1]):
+            last = label_y[v] = max(self.pos[v][1] - 7, last + 14)
         for v, p in self.pos.items():
             dead = not a.useful[v]
             if v < a.n_in:
-                rim = HIT[v % len(CHANNELS)] if v < a.n_vision else TEXT
+                rim = PHENOMENON_COLOR[a.phenomenon[v]] if a.specialized[v] else GENERALIST
                 pygame.draw.circle(s, IDLE, p, 5)
                 pygame.draw.circle(s, DEAD if dead else rim, p, 5, 1)
                 img = font.render(a.labels[v], True, DEAD if dead else DIM)
-                s.blit(img, (p[0] - img.get_width() - 9, p[1] - 7))
+                s.blit(img, (p[0] - img.get_width() - 9, label_y[v]))
             elif a.is_motor(v):
                 pygame.draw.circle(s, MOCK, p, 11)
                 s.blit(font.render(a.labels[v], True, TEXT), (p[0] + 15, p[1] - 7))
@@ -255,6 +250,8 @@ class NetView:
                 rim = TEXT
                 if a.inhibitory is not None:
                     rim = INHIBIT if a.inhibitory[v - a.n_in] else EXCITE
+                if a.is_modulator(v):
+                    rim = MODULATOR
                 pygame.draw.circle(s, (34, 38, 50), p, 10)
                 pygame.draw.circle(s, DEAD if dead else rim, p, 10, 2)
                 img = font.render(str(v - a.n_in), True, DEAD if dead else TEXT)
@@ -263,10 +260,11 @@ class NetView:
                 pygame.draw.circle(s, PLAYER, p, 14, 1)
             if v == self.node:
                 pygame.draw.circle(s, PLAYER, p, 16, 1)
-        legend = [("eccita", EXCITE), ("inibisce", INHIBIT), ("frecce = verso", DIM),
+        legend = [("eccita", EXCITE), ("inibisce", INHIBIT), ("freccia a metà = verso", DIM),
                   ("rami morti " + ("nascosti" if self.prune else "grigi") + " [P]", DEAD)]
         if a.inhibitory is not None:
             legend[2:2] = [("bordo = tipo", TEXT)]
+        legend.insert(2, ("viola = modulatore", MODULATOR))
         x = G.x + 8
         for text, color in legend:
             img = font.render(text, True, color)
@@ -319,7 +317,6 @@ class Explorer:
 
     def __init__(self, evo, source: str | None = None):
         self.evo, self.cfg = evo, evo.cfg
-        self.n_in = evo.ctrl.brains.n_in
         self.source = source or (CHAMPIONS if evo.champions else POPULATION)
         self.list, self.net, self.info = RowList(), NetView(), InfoPanel()
         self.genomes: dict = {}
@@ -337,7 +334,7 @@ class Explorer:
         rows, self.genomes = [], {}
         if self.source in (POPULATION, SURVIVORS):
             genome, age, ids = evo.ctrl.brains.genome, evo.age.copy(), evo.ids.copy()
-            neurons, links = sizes(genome, self.n_in)
+            neurons, links = sizes(genome)
             members = range(len(genome)) if self.source == POPULATION else np.flatnonzero(age > 0)
             for i in sorted(members, key=lambda i: (-age[i], ids[i])):
                 key = (evo.generation, int(i))
@@ -346,7 +343,7 @@ class Explorer:
                                      f"individuo #{ids[i]}, età {age[i]}", f"#{ids[i]}")
             self.seen = None
             if self.source == SURVIVORS:
-                what = (f"i {len(rows)} rimasti dalla selezione" if evo.selection is not None
+                what = (f"{len(rows)} rimasti dalla selezione" if evo.selection is not None
                         else f"{len(rows)} vincitori della gen. {evo.generation - 1}")
                 self.list.header = [f"{'num.':>6} {'età':>4} {'neur':>4} {'colleg':>6}", what,
                                     "A: tutti insieme in arena"]
@@ -357,7 +354,7 @@ class Explorer:
         else:
             done = {h["generation"]: h["completed"] for h in evo.history}
             for gen, age, g, uid in reversed(evo.champions):
-                neurons, links = sizes(g, self.n_in)
+                neurons, links = sizes(g)
                 pct = f"{done[gen] * 100 / self.cfg.population:3.0f}%" if gen in done else "-"
                 rows.append((f"{gen:>5d} {pct:>5} {age:>4d} {neurons[0]:>4d} {links[0]:>6d}", gen))
                 self.genomes[gen] = (lambda g=g: g, f"campione-gen{gen:04d}",
@@ -494,7 +491,7 @@ class Inspector:
         if sel is None:
             return
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-        _, name, title = sel
+        _, name, title, _ = sel
         path = EXPORT_DIR / f"{name}.txt"
         path.write_text(self.explorer.net.anat.genome_text(f"{self.title}  {title}".strip()))
         self.message = f"genoma scritto in {path}"
@@ -557,7 +554,7 @@ class Inspector:
         self.cell = cw, ch = max(1, 400 // S), max(2, min(8, 280 // T))
         self.heat_rect = r = pygame.Rect(x0, top + 40, S * cw, T * ch)
         s.blit(app.small.render("genoma: un blocco (riga) per neurone", True, TEXT), (x0, top + 4))
-        s.blit(app.small.render("colonne: sensi | interni | motori che lo alimentano", True, DIM), (x0, top + 20))
+        s.blit(app.small.render("colonne: recettori | interni | motori che lo alimentano", True, DIM), (x0, top + 20))
 
         rgb = np.empty((S, T, 3), dtype=np.uint8)
         rgb[:] = (24, 27, 36)

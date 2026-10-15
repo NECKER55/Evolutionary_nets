@@ -48,13 +48,18 @@ class World:
         pos = self.rng.uniform(lo, hi, (self.n, 2))
         for _ in range(100):
             bad = self.hazards.clearance(pos) < r + cfg.spawn_margin
+            if hasattr(self.task, "spawn_ok"):
+                bad |= ~self.task.spawn_ok(self, pos)
             if not bad.any():
                 break
             pos[bad] = self.rng.uniform(lo, hi, (int(bad.sum()), 2))
         return pos
 
-    def step(self, actions: np.ndarray) -> None:
-        """actions: (N, 2) in [-1, 1] -> colonne (spinta, sterzata)."""
+    def step(self, actions: np.ndarray, upkeep: np.ndarray | None = None) -> None:
+        """actions: (N, 2) in [-1, 1] -> colonne (spinta, sterzata).
+        upkeep: (N,) energia/s che ogni agente spende in più per mantenere il
+        proprio corpo (oggi: il cablaggio del cervello). Il mondo non sa da dove
+        viene: lo decide chi controlla gli agenti."""
         cfg = self.cfg
         dt = cfg.dt
         act = np.clip(actions, -1.0, 1.0)
@@ -99,13 +104,16 @@ class World:
         # Metabolismo: si paga lo sforzo comandato, non la velocità raggiunta.
         effort = (
             cfg.metabolism_basal
-            + cfg.metabolism_move * np.abs(act[:, 0])
-            + cfg.metabolism_turn * np.abs(turn)
+            + cfg.metabolism_move * np.abs(act[:, 0]) ** cfg.metabolism_exponent
+            + cfg.metabolism_turn * np.abs(turn) ** cfg.metabolism_exponent
+            + (0.0 if upkeep is None else upkeep)
         ) * active
         spent = (effort + cfg.hazard_drain * toxicity) * dt
         self.energy = np.maximum(self.energy - spent, 0.0)
         self.alive &= self.energy > 0.0
 
+        if hasattr(self.task, "step"):
+            self.task.step(self)
         self.done |= self.task.completed(self) & self.alive
         self.t += dt
 

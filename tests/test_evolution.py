@@ -3,13 +3,16 @@ import numpy as np
 from evonets import Config
 from evonets.evo import Evolution
 from evonets.evo.evolution import NORMAL, ONE_PARENT, RANDOM, RESTART
+from evonets.net.brain import Genome, pad
 
-FIELDS = ("weights", "traits", "conn", "active")
-NO_MUTATION = dict(mut_weight_prob=0.0, mut_conn_add=0.0, mut_conn_del=0.0, mut_neuron_toggle=0.0)
+FIELDS = Genome.FIELDS
+# Tutti i tassi al minimo e nessuna deriva dei tassi stessi: copie esatte.
+NO_MUTATION = dict(mut_weight_prob=1e-12, mut_conn_add=1e-12, mut_conn_del=1e-12, mut_neuron_toggle=1e-12,
+                   mut_dup=1e-12, mut_pos_prob=1e-12, mut_rec_drift=1e-12, mutation_floor=1e-12)
 
 
 def evo(seed=0, **kw):
-    return Evolution(Config(population=30, net_hidden_max=6, **kw), seed)
+    return Evolution(Config(population=30, net_hidden_slots=6, **kw), seed)
 
 
 def individual(genome, i):
@@ -84,39 +87,35 @@ def distance_from(genome, parent_weights):
     return np.abs(genome.weights - parent_weights).mean(axis=(1, 2))
 
 
-def test_single_parent_adds_children_with_stronger_variations():
+def test_a_single_parent_has_ordinary_children_no_rescue():
+    """Con un solo genitore nessun "soccorso": i figli mutano come sempre."""
     e = evo()
     parent = e.ctrl.brains.genome.weights[9].copy()
     s = finish(e, [9])
     assert s["event"] == ONE_PARENT and s["survivors"] == 1
     d = distance_from(e.ctrl.brains.genome, parent)
-    n_strong = int(29 * e.cfg.rescue_share)
-    normal, strong = d[1 : 30 - n_strong], d[30 - n_strong :]
     assert d[0] == 0.0  # il genitore sopravvive identico
-    assert strong.min() > 3 * normal.max()
+    first, second = d[1:15], d[15:]
+    assert 0.5 < np.median(second) / np.median(first) < 2.0  # nessuna metà con mutazioni rinforzate
 
 
-def test_two_parents_get_no_stronger_variations():
-    e = evo(crossover_rate=0.0)
-    g = e.ctrl.brains.genome
-    parents = [g.weights[3].copy(), g.weights[9].copy()]
-    finish(e, [3, 9])
-    new = e.ctrl.brains.genome
-    d = np.minimum(distance_from(new, parents[0]), distance_from(new, parents[1]))
-    assert d[2:].max() < 3 * np.median(d[2:])  # un solo livello di mutazione
+def same_as(genome, i, ref) -> bool:
+    """L'individuo i è `ref` (genoma di una riga), a meno dei posti spenti
+    aggiunti nel frattempo dalla crescita dei posti."""
+    return equal(individual(genome, i), individual(pad(ref, genome.n_rec, genome.n_hidden), 0))
 
 
 def test_by_default_a_parent_lives_as_long_as_it_keeps_completing_the_task():
     e = evo(crossover_rate=0.0)
-    champion = individual(e.ctrl.brains.genome, 5)
+    champion = e.ctrl.brains.genome.take([5])
     where = 5
     for generation in range(1, 9):
         assert finish(e, [where])["survivors"] == 1
         where = 0  # i sopravvissuti stanno in testa
-        assert equal(individual(e.ctrl.brains.genome, 0), champion)
+        assert same_as(e.ctrl.brains.genome, 0, champion)
         assert e.age[0] == generation
     finish(e, [3])  # stavolta fallisce: sparisce, resta solo chi ha completato
-    assert not equal(individual(e.ctrl.brains.genome, 0), champion)
+    assert not same_as(e.ctrl.brains.genome, 0, champion)
     assert e.age[0] == 1 and (e.age[1:] == 0).all()
 
 
@@ -157,7 +156,7 @@ def test_save_and_load_resume_exactly_where_evolution_stopped(tmp_path):
         a.run_generation()
     path = tmp_path / "sub" / "pop.npz"
     a.save(path)
-    b = Evolution.load(Config(net_hidden_max=6), path)
+    b = Evolution.load(Config(), path)
     assert b.cfg.population == 30 and b.generation == 3 and b.history == a.history
     # Dal salvataggio in poi le due evoluzioni vedono le stesse arene e si
     # comportano allo stesso modo (il sorteggio dei figli riparte, quindi si
@@ -168,15 +167,17 @@ def test_save_and_load_resume_exactly_where_evolution_stopped(tmp_path):
     assert np.array_equal(a.world.done, b.world.done) and np.array_equal(a.world.pos, b.world.pos)
 
 
-def test_load_refuses_networks_of_a_different_shape(tmp_path):
+def test_load_restores_the_saved_slots_and_genomes(tmp_path):
     a = evo()
+    a.ctrl.brains.genome.active[0, :] = True  # uno usa tutti i posti: alla prossima generazione crescono
+    a.ctrl.brains.set_genome(a.ctrl.brains.genome)
+    finish(a, [0, 1])
+    assert a.ctrl.brains.n_hidden > 6
     a.save(tmp_path / "pop.npz")
-    try:
-        Evolution.load(Config(net_hidden_max=9), tmp_path / "pop.npz")
-    except ValueError as err:
-        assert "forma" in str(err)
-    else:
-        raise AssertionError("doveva rifiutare il salvataggio")
+    cfg = Config(net_hidden_slots=9)
+    b = Evolution.load(cfg, tmp_path / "pop.npz")
+    assert cfg.net_hidden_slots == 6 and b.ctrl.brains.n_hidden == a.ctrl.brains.n_hidden
+    assert all(np.array_equal(getattr(a.ctrl.brains.genome, f), getattr(b.ctrl.brains.genome, f)) for f in FIELDS)
 
 
 def test_manual_override_replaces_only_that_agents_commands():
@@ -198,7 +199,7 @@ def test_each_generation_with_winners_keeps_its_oldest_winner_as_champion(tmp_pa
     assert [(g, a) for g, a, _, _ in e.champions] == [(0, 0), (2, 5)]
     assert equal(individual(e.champions[1][2], 0), oldest)
     e.save(tmp_path / "pop.npz")
-    b = Evolution.load(Config(net_hidden_max=6), tmp_path / "pop.npz")
+    b = Evolution.load(Config(), tmp_path / "pop.npz")
     assert [(g, a) for g, a, _, _ in b.champions] == [(0, 0), (2, 5)]
     assert equal(individual(b.champions[1][2], 0), oldest)
 
@@ -250,20 +251,21 @@ def test_final_selection_keeps_only_who_wins_every_round_and_makes_no_children(t
     assert e.oldest()["born"] == 0 and e.oldest()["age"] == 3  # la nascita non cambia, le prove si contano
     # Salvati e ricaricati, ripartono in due e la generazione dopo torna piena.
     e.save(tmp_path / "sel.npz")
-    b = Evolution.load(Config(net_hidden_max=6), tmp_path / "sel.npz")
+    b = Evolution.load(Config(), tmp_path / "sel.npz")
     assert b.world.n == 2 and b.cfg.population == 30 and list(b.ids) == list(e.ids)
     b.run_generation()
     assert b.world.n == 30 and len(b.ctrl.brains.genome) == 30
 
 
 def test_watching_does_not_change_the_result():
-    """Il viewer ricalcola i sensi per disegnarli: la corsa deve restare identica."""
+    """Il viewer disegna i sensi leggendo l'ultima lettura (`ctrl.obs`), senza
+    rileggerli: rileggerli consumerebbe il rumore. La corsa resta identica."""
     plain, watched = evo(seed=7), evo(seed=7)
     for _ in range(3):
         plain.run_generation()
     for _ in range(3):
         while not watched.finished:
-            watched.ctrl.senses.observe(watched.world)  # come fa il disegno, a ogni fotogramma
+            _ = watched.ctrl.obs.copy(), watched.ctrl.brains.state.copy()  # come fa il disegno
             watched.step()
         watched.next_generation()
     assert plain.history == watched.history

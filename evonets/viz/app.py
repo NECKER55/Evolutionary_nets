@@ -11,6 +11,7 @@ Una corsa aperta continua in sottofondo anche mentre si guardano le altre
 schermate (B la mette in pausa).
 """
 
+import json
 import secrets
 import time
 from datetime import datetime
@@ -21,14 +22,16 @@ import pygame
 
 from ..config import TUNABLES, Config
 from ..evo import Evolution
+from ..evo.evolution import describe_change
 from ..net.anatomy import KIND_NAMES
-from .render import BG, BORDER, DIM, PLAYER, TARGET, TEXT, WALL, Renderer, plot, success_series
+from .render import BG, BORDER, DIM, HAZARD, PLAYER, TARGET, TEXT, WALL, Renderer, plot, success_series
 from .widgets import ROW_H, Button, Choice, Number, Text
 
 SPEEDS = (1, 2, 4, 8, 16)
 TURBO_BUDGET = 0.08  # s di calcolo per fotogramma guardando l'arena in turbo
 PAGE_BUDGET = 0.05  # s di calcolo per fotogramma con la pagina principale (resta reattiva)
 MAX_BUDGET = 0.5  # s di calcolo per fotogramma alla massima velocità (si ridisegna 2 volte al secondo)
+CHUNK = 60  # passi per chiamata quando si calcola a blocchi (un secondo simulato)
 BACKGROUND_BUDGET = 0.025  # s per fotogramma alla corsa mentre si guarda un'altra schermata
 RUNS = Path("runs")
 
@@ -69,7 +72,7 @@ class App:
         if not len(idx):
             return "nessun sopravvissuto da provare: l'ultima generazione non ha vinto nessuno"
         if evo.selection is not None and not evo.selecting:
-            what = f"i {len(idx)} rimasti dalla selezione finale"
+            what = ("l'unico rimasto" if len(idx) == 1 else f"i {len(idx)} rimasti") + " dalla selezione finale"
         else:
             what = f"i {len(idx)} sopravvissuti (vincitori della gen. {evo.generation - 1})"
         labels = [f"#{i}" for i in evo.ids[idx]]
@@ -118,11 +121,23 @@ def save_info(path) -> str:
     """Una riga che descrive un salvataggio, senza caricarlo per intero."""
     try:
         with np.load(path) as d:
+            if "pos" not in d:
+                return "versione vecchia, senza geometria del cervello: non si può aprire"
             net = str(d["net_type"]) if "net_type" in d else "rate"
             n = len(d["weights"])
             text = f"generazione {int(d['generation'])}, {n} individui, rete {KIND_NAMES.get(net, net)}"
             if "seed" in d:
                 text += f", seme {int(d['seed'])}"
+            if "exams" in d:
+                exams = json.loads(str(d["exams"]))
+                if exams:
+                    text += f", {len(exams)} esami (ultimo {exams[-1]['score']:.0%})"
+            if "log" in d:
+                changes = sum(e["event"] == "cambio" for e in json.loads(str(d["log"])))
+                text += (f", ambiente cambiato {changes} {'volta' if changes == 1 else 'volte'}" if changes
+                         else ", ambiente invariato")
+            else:
+                text += ", formato vecchio senza configurazione (si useranno i valori attuali)"
             if "ch_generation" in d:
                 text += f", {len(d['ch_generation'])} campioni"
             return text
@@ -145,7 +160,7 @@ class Launcher(Screen):
         self.net = Choice("Rete", [("rate", "continua (tanh)"), ("spike-ei", "a impulsi, eccitatori/inibitori")],
                           help="Tipo di neurone. Ignorato se si riprende un salvataggio.")
         self.net.select(defaults.get("net", "rate"))
-        self.agents = Number("Individui", defaults.get("agents") or 200, step=50, low=2,
+        self.agents = Number("Individui", defaults.get("agents") or Config().population, step=50, low=2,
                              help="Dimensione della popolazione. Ignorato se si riprende un salvataggio.")
         fixed = defaults.get("seed") is not None
         self.chance = Choice("Casualità", [("random", "seme casuale, nuovo a ogni corsa"),
@@ -156,6 +171,9 @@ class Launcher(Screen):
                            help="Stesso seme e stesse impostazioni = stessa corsa.")
         self.gens = Number("Generazioni", 0, step=50,
                            help="Dopo quante generazioni fermarsi e salvare. 0 = senza limite.")
+        self.exam_every = Number("Esame ogni", Config().exam_every, step=50,
+                                 help="Ogni quante generazioni mettere all'esame fisso (7 prove) i 20 più "
+                                      "anziani; gira su altri core e non cambia la corsa. 0 = mai.")
         self.select = Number("Selezione finale", 0, step=1,
                              help="Finite le generazioni, i sopravvissuti rifanno la prova questo numero di "
                                   "volte, senza figli: chi fallisce è eliminato. 0 = niente.")
@@ -167,8 +185,8 @@ class Launcher(Screen):
                            on_change=self._loaded)
         self.save = Text("Salva in", defaults.get("save") or self._fresh_name(),
                          help="Dove salvare: tasto S, fine delle generazioni, uscita dalla corsa.")
-        self.fields = [self.mode, self.net, self.agents, self.chance, self.seed, self.gens, self.select,
-                       self.load, self.save]
+        self.fields = [self.mode, self.net, self.agents, self.chance, self.seed, self.gens, self.exam_every,
+                       self.select, self.load, self.save]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
         self.inspect_btn = Button("Esplora reti e genomi del salvataggio", self.explore)
@@ -196,8 +214,11 @@ class Launcher(Screen):
     def _evolution(self) -> Evolution | None:
         cfg = self._config()
         try:
+            cfg.exam_every = self.exam_every.fixed()
             if self.load.value:
-                return Evolution.load(cfg, self.load.value)
+                evo = Evolution.load(cfg, self.load.value)
+                cfg.exam_every = self.exam_every.fixed()  # scelta dal menu: se diversa, va nel registro
+                return evo
             if self.chance.value == "random":
                 self.seed.value = secrets.randbelow(2**31)  # resta visibile nel menu
             return Evolution(cfg, self.seed.fixed())
@@ -348,24 +369,25 @@ class RunScreen(Screen):
                         Button("Continua l'evoluzione  [Spazio]", self._resume),
                         Button("Chiudi  [Invio]", self._close_summary)]
         self.gen0, self.busy = evo.generation, 0.0
+        self.saved_exams = len(evo.exams)
 
     # --- evoluzione --------------------------------------------------------
 
     def _save(self) -> None:
         self.evo.save(self.save_path)
-        self.saved_gen = self.evo.generation
+        self.saved_gen, self.saved_exams = self.evo.generation, len(self.evo.exams)
         self.message = f"salvata la generazione {self.saved_gen} in {self.save_path}"
 
     def _selected_path(self) -> str:
         p = Path(self.save_path)
         return str(p.with_name(p.stem + "-selezionati" + p.suffix))
 
-    def _advance(self, hand=None) -> bool:
-        """Un passo; False quando bisogna fermarsi (fine delle generazioni o
-        della selezione finale)."""
+    def _advance(self, hand=None, k: int = 1) -> bool:
+        """k passi (meno se la generazione finisce); False quando bisogna
+        fermarsi (fine delle generazioni o della selezione finale)."""
         evo = self.evo
         if not evo.finished:
-            evo.step((self.focus, hand) if self.manual and hand is not None else None)
+            evo.advance(k, (self.focus, hand) if self.manual and hand is not None else None)
             return True
         if evo.selecting:
             evo.next_selection_round()
@@ -376,6 +398,8 @@ class RunScreen(Screen):
             self._finish()
             return False
         evo.next_generation()
+        if evo.exam_due():
+            evo.start_exam()
         self.focus = int(np.argmax(evo.age))  # il sopravvissuto più anziano, se c'è
         if self.goal is not None and evo.generation >= self.goal:
             self.goal = None
@@ -409,6 +433,14 @@ class RunScreen(Screen):
             lines.append((f"ultima generazione: {hist[-1]['completed']}/{cfg.population} hanno completato "
                           f"({pct[-1]:.0f}%); media ultime 10: {avg[-1]:.0f}%; record {pct[best]:.0f}% "
                           f"(gen. {hist[best]['generation']})", TEXT))
+        if evo.exams:
+            r = evo.exams[-1]
+            lines.append((f"ultimo esame fisso (gen. {r['generation']}, {r['who']} più anziani): media "
+                          f"{r['score']:.0%}, migliore {r['best']:.0%}; "
+                          + ", ".join(f"{k} {v:.0%}" for k, v in r["scores"].items()), TEXT))
+        if evo.exam is not None:
+            lines.append((f"esame della gen. {evo.exam.generation} in corso ({evo.exam.progress:.0%}): "
+                          "continua anche in pausa", DIM))
         lines.append(("", TEXT))
         sel = evo.selection
         if sel is not None and not evo.selecting:
@@ -434,6 +466,14 @@ class RunScreen(Screen):
         self.summary, self.summary_open = lines, True
         self.message = "esperimento concluso: Invio riapre il riepilogo, A guarda i sopravvissuti in arena"
 
+    def _start_exam(self) -> None:
+        if self.evo.exam is not None:
+            self.message = "c'è già un esame in corso"
+            return
+        self.evo.start_exam()
+        self.message = (f"esame dei {len(self.evo.exam.genomes)} più anziani della gen. {self.evo.generation} "
+                        "avviato: va avanti anche in pausa")
+
     def _test_survivors(self) -> None:
         msg = self.app.test_survivors(self.evo, back=self)
         if msg:
@@ -453,21 +493,41 @@ class RunScreen(Screen):
     def _compute(self, budget: float, hand=None) -> None:
         start = time.perf_counter()
         deadline = start + budget
-        while time.perf_counter() < deadline and self._advance(hand):
+        # A blocchi: con il motore GPU ogni chiamata ha un costo fisso. Guidando
+        # a mano si va un passo alla volta.
+        chunk = 1 if self.manual else CHUNK
+        while time.perf_counter() < deadline and self._advance(hand, chunk):
             pass
         self.busy += time.perf_counter() - start
 
+    def _examine(self, budget: float) -> float:
+        """Porta avanti l'esame in corso, se c'è, con metà del tempo; il resto
+        va all'evoluzione. L'esame va avanti anche in pausa: non è evoluzione.
+        Restituisce il tempo rimasto."""
+        evo = self.evo
+        if evo.exam is None:
+            return budget
+        start = time.perf_counter()
+        evo.exam.run(budget / 2)
+        r = evo.collect_exam()
+        if r is not None:
+            self.message = (f"esame della gen. {r['generation']} concluso: media {r['score']:.0%}, "
+                            f"migliore {r['best']:.0%} (in {r['seconds']:.0f}s)")
+        return max(budget - (time.perf_counter() - start), 0.0)
+
     def background(self, budget: float) -> None:
         """Avanza mentre si guarda un'altra schermata."""
+        budget = self._examine(budget)
         if not self.paused:
             self._compute(budget)
 
     def update(self) -> None:
         self.explorer.refresh()
         if self.paused:
+            self._examine(PAGE_BUDGET)
             return
         if not self.watch:
-            self._compute(MAX_BUDGET if self.full else PAGE_BUDGET)
+            self._compute(self._examine(MAX_BUDGET if self.full else PAGE_BUDGET))
             return
         keys = pygame.key.get_pressed()
         hand = np.array(
@@ -478,8 +538,9 @@ class RunScreen(Screen):
             dtype=float,
         )
         if self.turbo:
-            self._compute(TURBO_BUDGET, hand)
+            self._compute(self._examine(TURBO_BUDGET), hand)
         else:
+            self._examine(PAGE_BUDGET)
             start = time.perf_counter()
             for _ in range(SPEEDS[self.speed_i]):
                 if not self._advance(hand):
@@ -488,7 +549,10 @@ class RunScreen(Screen):
 
     def _leave(self) -> str:
         self.app.active_run = None
-        if self.evo.generation != self.saved_gen:
+        if self.evo.exam is not None:  # esame non finito: si perde
+            self.evo.exam.close()
+            self.evo.exam = None
+        if self.evo.generation != self.saved_gen or len(self.evo.exams) != self.saved_exams:
             self._save()
             return self.message
         return ""
@@ -548,6 +612,8 @@ class RunScreen(Screen):
             self._show_oldest()
         elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_t:
             self.app.test(self.explorer.selected(), back=self)
+        elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_e:
+            self._start_exam()
         elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_z:
             self.full = not self.full
         elif not self.full:
@@ -611,6 +677,16 @@ class RunScreen(Screen):
                     f"in gara {self.world.n} (partiti {sel['entered']}), nessun figlio")
         return f"selezione finale conclusa: restano {self.world.n} su {sel['entered']}"
 
+    def _env_text(self) -> str:
+        """Lo stato del registro dell'ambiente, in una riga."""
+        changes = [e for e in self.evo.log if e["event"] == "cambio"]
+        code = next((e["code"] for e in reversed(self.evo.log) if "code" in e), "sconosciuta")
+        if not changes:
+            return f"ambiente: invariato (registrato nel salvataggio)   codice {code}"
+        last = changes[-1]
+        return (f"ambiente: {len(changes)} {'cambio' if len(changes) == 1 else 'cambi'}, ultimo alla gen. "
+                f"{last['generation']}: {describe_change(last['changes'])}"[:150])
+
     def _rate(self) -> float:
         """Generazioni al minuto di calcolo da quando la corsa è aperta."""
         return (self.evo.generation - self.gen0) * 60.0 / max(self.busy, 1e-9)
@@ -658,6 +734,7 @@ class RunScreen(Screen):
                 mark = ">" if i == self.tun_i else " "
                 hud.append((f"{mark} {name:17s} {getattr(self.cfg, name):8.3f}", TEXT if i == self.tun_i else DIM))
             hud.append(("Tab scegli | , . (o [ ]) regola | C chiudi", DIM))
+            hud.append(("ogni cambio va nel registro dell'ambiente, salvato con la corsa", DIM))
         else:
             hud.append(("+/- velocita' | T turbo | Spazio pausa | S salva | C costanti", DIM))
             hud.append(("clic segui un agente | M guida manuale (WASD/frecce) | V raggi", DIM))
@@ -696,8 +773,13 @@ class RunScreen(Screen):
         s.blit(app.small.render(
             f"{who}   |   in corso: t={world.t:4.1f}s  completato {int(world.done.sum())}  "
             f"morti {int((~world.alive).sum())}", True, DIM), (250, 24))
+        x = 250
         if self._selection_text():
-            s.blit(app.small.render(self._selection_text(), True, PLAYER), (250, 38))
+            x += s.blit(app.small.render(self._selection_text(), True, PLAYER), (x, 38)).w + 24
+        x += s.blit(app.small.render(self._env_text(), True, DIM), (x, 38)).w + 24
+        if evo.exam is not None:
+            s.blit(app.small.render(f"ESAME della gen. {evo.exam.generation} in corso: {evo.exam.progress:.0%}",
+                                    True, PLAYER), (x, 38))
         pygame.draw.line(s, BORDER, (0, 54), (W, 54), 1)
 
         self._draw_stats(s, pygame.Rect(0, 58, 456, H - 112))
@@ -723,7 +805,7 @@ class RunScreen(Screen):
         pygame.draw.line(s, BORDER, (0, H - 50), (W, H - 50), 1)
         pygame.draw.line(s, BORDER, (0, H - 30), (W, H - 30), 1)
         hints = ("F arena | T prova la rete scelta | A sopravvissuti in arena | O più anziano | 1/2/3 elenchi | "
-                 "P rami morti | I genoma | Z max velocità | Spazio pausa | S salva | Esc menu")
+                 "P rami morti | I genoma | E esame | Z max velocità | Spazio pausa | S salva | Esc menu")
         s.blit(app.small.render(hints, True, DIM), (12, H - 22))
         if self.message:
             s.blit(app.small.render(self.message[:190], True, TARGET), (12, H - 44))
@@ -759,11 +841,13 @@ class RunScreen(Screen):
                      ("record (gen.)", f"{pct[best]:.0f}% ({hist[best]['generation']})"),
                      ("anziano (età)", self._oldest_tile()),
                      ("neuroni medi", f"{last['neurons']:.1f}"), ("colleg. medi", f"{last['links']:.0f}"),
-                     ("durata ultima", f"{last['duration']:.1f}s"), ("campioni", f"{len(self.evo.champions)}")]
+                     ("durata ultima", f"{last['duration']:.1f}s"),
+                     ("recettori usati/accesi", f"{last.get('used', 0.0):.1f}/{last.get('receptors', 0.0):.1f}")]
         else:
             tiles = [("succ. ultima", "-"), ("succ. media10", "-"), ("record (gen.)", "-"),
                      ("anziano (età)", self._oldest_tile()),
-                     ("neuroni medi", "-"), ("colleg. medi", "-"), ("durata ultima", "-"), ("campioni", "0")]
+                     ("neuroni medi", "-"), ("colleg. medi", "-"), ("durata ultima", "-"),
+                     ("recettori usati/accesi", "-")]
         tw = (area.w - 24) // 4
         for k, (label, value) in enumerate(tiles):
             r = pygame.Rect(x0 + (k % 4) * tw, y + (k // 4) * 40, tw - 6, 36)
@@ -777,12 +861,17 @@ class RunScreen(Screen):
         y += 86
 
         spiking = bool(hist) and "inhibitory" in hist[-1]
+        used_text = ""
+        if hist:  # recettori usati per individuo, per fenomeno, nell'ultima generazione
+            names = ("luce", "sost.", "mecc.", "temp.", "magn.", "int.", "gener.")
+            used_text = "\nusati: " + " ".join(f"{k} {v:.1f}" for k, v in zip(names, hist[-1].get("used_by", [])))
         graphs = [
             ("successi (%): sottile ogni gen., spessa media di 10",
              lambda: ((pct, WALL, 1), (avg, TARGET, 2)), lambda: 100.0, (0, 0.5, 1)),
-            ("reti: arancio neuroni interni, azzurro collegamenti/10",
-             lambda: ((col("neurons"), PLAYER, 2), (col("links") / 10, TARGET, 2)),
-             lambda: max(col("neurons").max(), col("links").max() / 10, 1.0), (0, 0.5, 1)),
+            ("reti: arancio neuroni, azzurro collegamenti/10, verde recettori usati" + used_text,
+             lambda: ((col("neurons"), PLAYER, 2), (col("links") / 10, TARGET, 2), (col("used"), HAZARD, 2)),
+             lambda: max(col("neurons").max(), col("links").max() / 10, col("used").max(), 1.0),
+             (0, 0.5, 1)),
             ("sopravvissuti (bianco), generazioni vinte dal più anziano (arancio)",
              lambda: ((col("survivors"), WALL, 1), (col("oldest"), PLAYER, 2)),
              lambda: max(col("survivors").max(), col("oldest").max(), 1.0), (0, 0.5, 1)),
@@ -792,15 +881,27 @@ class RunScreen(Screen):
         ]
 
         def col(name):
-            return np.array([h[name] for h in hist], dtype=float)
+            return np.array([h.get(name, 0.0) for h in hist], dtype=float)  # campi nuovi: 0 nelle storie vecchie
+
+        exams = self.evo.exams
+        if exams:  # l'esame prende il posto della durata (o dei neuroni inibitori)
+            last = exams[-1]
+            graphs[3] = (f"ESAME ({len(exams)}, gen. {exams[0]['generation']}-{last['generation']}): arancio media, "
+                         f"bianco migliore\nultimo: " + " ".join(f"{k} {v * 100:.0f}" for k, v in last["scores"].items()),
+                         lambda: ((np.array([e["best"] * 100 for e in exams]), WALL, 1),
+                                  (np.array([e["score"] * 100 for e in exams]), PLAYER, 2)),
+                         lambda: 100.0, (0, 0.5, 1))
 
         sel = self.evo.selection
         if sel is not None:
             graphs = graphs[:3]  # l'ultimo posto va all'esito della selezione
         gh = (area.bottom - y) // (len(graphs) + (sel is not None))
         for title, series, top, ticks in graphs:
-            s.blit(app.small.render(title, True, DIM), (x0, y))
-            box = pygame.Rect(area.x + 50, y + 22, area.w - 64, gh - 44)
+            lines = title.split("\n")
+            for k, line in enumerate(lines):
+                s.blit(app.small.render(line, True, PLAYER if k else DIM), (x0, y + 13 * k))
+            shift = 13 * (len(lines) - 1)
+            box = pygame.Rect(area.x + 50, y + 22 + shift, area.w - 64, gh - 44 - shift)
             if hist:
                 plot(s, box, app.small, series(), top(), ticks)
             else:

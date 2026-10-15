@@ -1,6 +1,6 @@
 # Note di progetto
 
-Idee e direzioni non ancora in programma. Non descrivono il codice attuale.
+Idee e direzioni non ancora in programma (non descrivono il codice attuale), e in fondo gli esperimenti fatti con i loro risultati.
 
 ## Percorso futuro: reti che imparano durante la vita
 
@@ -187,3 +187,36 @@ nell'ordine degli ingressi.
 - **Plasticità**: vedi la sezione "reti che imparano durante la vita" sopra.
 - **Corpo evolvibile**: numero, apertura e portata dei raggi nel genoma, con un
   costo energetico per ogni sensore.
+
+## Esperimenti fatti
+
+### Energia iniziale: 100 contro 150 (2026-10-14)
+
+Domanda: con 100 di energia anche le reti buone hanno il tempo di trovare il
+bersaglio? Alzarla aiuta, o produce solo reti più pigre e sprecone?
+
+- **Il limite è trovare, non raggiungere.** Un "oracolo" che sa dov'è il
+  bersaglio arriva sempre (100% sia con 100 sia con 150, in 3,6 s di media).
+  Un cercatore a regole fisse che usa solo i sensi completa il 46% con 100, il
+  58% con 150, il 67% con 200.
+- **Protocollo**: rete `rate`, geometria e costo del cablaggio 0,004 attivi,
+  120 generazioni, semi 11–14, per ciascuna energia. A fine corsa i 20
+  sopravvissuti più anziani provati su 20 arene fisse × 10 copie, sia con
+  energia 100 sia con 150.
+
+| | evoluta con 100 | evoluta con 150 |
+|---|---|---|
+| provata con 100: media / mediana / migliore | 39% / 43% / 55% | 51% / 52% / 62% |
+| provata con 150: mediana / migliore | 55% / 73% | 69% / 79% |
+| successi in evoluzione, ultime 10 generazioni | 28% | 51% |
+| sopravvissuti a fine corsa | 58 | 95 |
+| generazioni vinte di fila dal più anziano | 4,5 | 13 |
+| neuroni interni / collegamenti / cablaggio | 12,2 / 112 / 49 | 11,4 / 98 / 42 |
+
+- **Conclusione**: con 150 la selezione è meno rumorosa (le reti buone restano
+  genitori per più generazioni) e le reti risultano migliori anche nelle
+  condizioni più dure. Non crescono né sprecano di più: il costo del cablaggio
+  continua a spingere verso reti compatte. Da qui `energy_init` = 150 (e
+  `life_max` portato a 90 s perché resti solo un tetto di sicurezza).
+- **Limiti**: 4 semi soli, 120 generazioni; differenza però coerente seme per
+  seme (la peggiore corsa a 150 batte tre delle quattro a 100).
