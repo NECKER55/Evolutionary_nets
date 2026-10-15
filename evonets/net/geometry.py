@@ -1,7 +1,13 @@
 """Geometria del cervello: dove stanno i neuroni e quanto è probabile che due
 neuroni si colleghino.
 
-Il cervello è un foglio quadrato di lato 1, come un pezzo di corteccia.
+Il cervello è un foglio quadrato, come un pezzo di corteccia, e **cresce con le
+sue cellule**: la superficie è proporzionale al numero di cellule accese
+(recettori, neuroni interni, motori), a densità costante `brain_density` (100
+cellule per unità di superficie: con 100 cellule il lato è 1). Un organismo
+primitivo con poche cellule ha sensi e motori vicini, come la rete nervosa di
+un'idra; un cervello grande li ha lontani, e i collegamenti lunghi costano di
+più. Le posizioni nei geni sono in [0, 1] e vengono scalate al lato vero.
 - I recettori entrano dal bordo sinistro (x = 0), all'altezza data dal loro
   gene `r_y`: all'inizio segue la direzione in cui guardano (una mappa
   topografica), poi deriva con le mutazioni.
@@ -32,15 +38,23 @@ def receptor_anchors(r_y: np.ndarray) -> np.ndarray:
     return np.stack([np.zeros(r_y.shape), r_y], axis=-1)
 
 
-def distances(cfg, pos: np.ndarray, r_y: np.ndarray, n_out: int) -> np.ndarray:
+def brain_side(cfg, r_active: np.ndarray, active: np.ndarray, n_out: int) -> np.ndarray:
+    """(N,) lato del cervello di ogni individuo: √(cellule accese / densità)."""
+    cells = r_active.sum(axis=1) + active.sum(axis=1) + n_out
+    return np.sqrt(cells / cfg.brain_density)
+
+
+def distances(cfg, pos: np.ndarray, r_y: np.ndarray, n_out: int, side: np.ndarray | None = None) -> np.ndarray:
     """pos (N, H, 2) posizioni degli interni, r_y (N, R) dei recettori ->
     (N, T, S) distanza tra ogni destinatario (interni, motori) e ogni sorgente
-    (recettori, interni, motori)."""
+    (recettori, interni, motori), nel cervello di lato `side` (N,) (1 se non
+    dato)."""
     n = len(pos)
     motors = np.broadcast_to(motor_anchors(n_out), (n, n_out, 2))
     targets = np.concatenate([pos, motors], axis=1)
     sources = np.concatenate([receptor_anchors(r_y), targets], axis=1)
-    return np.linalg.norm(targets[:, :, None, :] - sources[:, None, :, :], axis=3)
+    d = np.linalg.norm(targets[:, :, None, :] - sources[:, None, :, :], axis=3)
+    return d if side is None else d * side[:, None, None]
 
 
 def connect_prob(cfg, dist: np.ndarray, n_rec: int, reach: np.ndarray) -> np.ndarray:

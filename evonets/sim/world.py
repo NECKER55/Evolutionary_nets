@@ -104,8 +104,8 @@ class World:
         # Metabolismo: si paga lo sforzo comandato, non la velocità raggiunta.
         effort = (
             cfg.metabolism_basal
-            + cfg.metabolism_move * np.abs(act[:, 0])
-            + cfg.metabolism_turn * np.abs(turn)
+            + cfg.metabolism_move * np.abs(act[:, 0]) ** cfg.metabolism_exponent
+            + cfg.metabolism_turn * np.abs(turn) ** cfg.metabolism_exponent
             + (0.0 if upkeep is None else upkeep)
         ) * active
         spent = (effort + cfg.hazard_drain * toxicity) * dt

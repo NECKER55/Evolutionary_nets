@@ -31,17 +31,18 @@ from ..net.brain import Genome
 from ..sim.tasks import FarTarget, MovingTarget, ReachTarget
 from .trial import Trial
 
-VERSION = 2  # 2: recettori universali (la vista non è più un telemetro)
+VERSION = 3  # 2: recettori universali; 3: sensi calibrati e movimento con il costo naturale
 EXAM_SEED = 2_000_000  # le arene della prova k partono da EXAM_SEED + 10_000 * k
 
-# Ambiente d'esame, fissato al momento della versione 2. Sono i valori di
+# Ambiente d'esame, fissato al momento della versione 3. Sono i valori di
 # default di allora: non seguono i cambi futuri della configurazione.
 ENVIRONMENT = dict(
     arena_w=200.0, arena_h=140.0, dt=1.0 / 60.0,
     agent_radius=1.0, thrust_accel=60.0, reverse_factor=0.5, lin_drag=2.0, lat_drag=8.0,
     turn_accel=40.0, ang_drag=6.0, wall_restitution=0.3,
-    energy_init=150.0, metabolism_basal=2.5, metabolism_move=2.5, metabolism_turn=0.5, wire_cost=0.004,
-    sensor_noise=0.0, receptor_cell_cost=0.002, receptor_sens_cost=0.00005, neuron_cost=0.01,
+    energy_init=150.0, metabolism_basal=2.5, metabolism_move=10.0, metabolism_turn=2.0, metabolism_exponent=2.0,
+    wire_cost=0.004,
+    sensor_noise=0.0, receptor_cell_cost=0.002, receptor_sens_cost=0.008, neuron_cost=0.01,
     life_max=90.0, target_radius=3.0,
     hazard_drain=60.0, hazard_falloff=2.0, n_hazards=12, hazard_radius_min=5.0, hazard_radius_max=12.0,
     hazard_omega_min=0.2, hazard_omega_max=0.8, hazard_pulse=0.15, hazard_speed=1.0, spawn_margin=3.0,
@@ -53,7 +54,9 @@ ENVIRONMENT = dict(
     vibration_range=20.0, target_vibration=0.0, target_vibration_freq=0.6,
     hazard_vibration=0.0, hazard_vibration_freq=0.3,
     ambient_temperature=0.5, heat_range=15.0, target_heat=0.0, hazard_heat=0.0,
-    magnetic_field=0.0, magnetic_angle_deg=90.0, receptor_dark=1.0, receptor_saturation=100.0,
+    magnetic_field=0.0, magnetic_angle_deg=90.0, receptor_dark=1.0, receptor_saturation=300.0,
+    receptor_scale_light=300.0, receptor_scale_chemical=200.0, receptor_scale_mechanical=100.0,
+    receptor_scale_thermal=100.0, receptor_scale_magnetic=100.0, receptor_scale_internal=70.0,
 )
 
 # Le costanti che invece vengono dalla corsa: riguardano la rete (forma,
@@ -64,13 +67,13 @@ ENVIRONMENT = dict(
 # "spenta" per la versione 1) o se segue la corsa (qui).
 FROM_RUN = frozenset({
     "net_type", "net_weight_std", "net_conn_prob", "net_conn_range", "net_self_prob",
-    "net_hidden_slots", "receptor_slots", "pool_fill", "pool_step",
+    "net_hidden_slots", "receptor_slots", "pool_fill", "pool_step", "brain_density",
     "receptor_initial", "receptor_initial_spread_deg", "receptor_initial_aperture_deg",
     "receptor_initial_gain", "receptor_initial_width", "receptor_initial_tau", "receptor_initial_adaptation",
     "plasticity", "plasticity_initial_rate", "plasticity_initial_rule", "modulatory_initial_share",
     "modulation_range", "synapse_max",
     "spike_substeps", "spike_gain", "spike_inhibitory_share", "sensors_excitatory_only",
-    "population", "max_age", "rescue_share", "rescue_strength", "crossover_rate",
+    "population", "max_age", "crossover_rate",
     "mut_weight_prob", "mut_weight_std", "mut_conn_add", "mut_conn_del", "mut_neuron_toggle",
     "mut_pos_prob", "mut_pos_std", "mut_dup", "mut_rec_drift", "mutation_floor", "exam_every", "engine",
 })

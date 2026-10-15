@@ -173,3 +173,31 @@ def test_a_birth_uses_the_inherited_rates_not_the_ones_it_passes_on():
     before = g.take(np.arange(200))
     mutate(g, cfg, np.random.default_rng(11))
     assert not (before.conn & ~g.conn).any()  # ...anche se il gene del tasso muta in questa nascita
+
+
+def test_breaking_is_easier_than_repairing_and_long_genes_break_more():
+    from evonets.evo.genetics import RECEPTOR_GENE_LENGTH, knockout
+    cfg, g = population(n=50, conn=0.0)
+    g.conn[:, 0, :] = True  # il neurone 0 riceve da tutti: gene lungo
+    mu = np.full(50, 0.001)
+    rec, neu = knockout(g, mu)
+    assert np.allclose(rec, 1 - 0.999 ** RECEPTOR_GENE_LENGTH)
+    assert (neu[:, 0] > 3 * neu[:, 1]).all()  # più collegamenti, più fragile (31 geni contro 7)
+    assert (neu[:, 1] > 2 * 0.001).all()  # rompere è più probabile che riparare (μ)
+
+
+def test_without_selection_brains_do_not_grow_by_themselves():
+    cfg = Config()
+    rng = np.random.default_rng(0)
+    g = Brains(cfg, 100, N_OUT, 0).genome
+    for _ in range(80):
+        g = grow(reproduce(g, 100, cfg, rng), cfg)
+    assert g.active.sum(axis=1).mean() < 4 and g.r_active.sum(axis=1).mean() < 4
+
+
+def test_receptor_sensitivity_has_a_physical_maximum():
+    from evonets.evo.genetics import MAX_SENSITIVITY
+    cfg, g = population(n=20)
+    g.r_sens[:] = 50.0  # derivata all'infinito
+    mutate(g, cfg, np.random.default_rng(0))
+    assert np.exp(g.r_sens).max() <= MAX_SENSITIVITY * (1 + 1e-9)

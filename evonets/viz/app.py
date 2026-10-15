@@ -160,7 +160,7 @@ class Launcher(Screen):
         self.net = Choice("Rete", [("rate", "continua (tanh)"), ("spike-ei", "a impulsi, eccitatori/inibitori")],
                           help="Tipo di neurone. Ignorato se si riprende un salvataggio.")
         self.net.select(defaults.get("net", "rate"))
-        self.agents = Number("Individui", defaults.get("agents") or 200, step=50, low=2,
+        self.agents = Number("Individui", defaults.get("agents") or Config().population, step=50, low=2,
                              help="Dimensione della popolazione. Ignorato se si riprende un salvataggio.")
         fixed = defaults.get("seed") is not None
         self.chance = Choice("Casualità", [("random", "seme casuale, nuovo a ogni corsa"),

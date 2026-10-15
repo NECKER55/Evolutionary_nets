@@ -28,8 +28,15 @@ class Config:
     # prova con 100 (vedi docs/NOTE.md, "Energia iniziale").
     energy_init: float = 150.0
     metabolism_basal: float = 2.5  # energia/s solo per esistere
-    metabolism_move: float = 2.5  # energia/s in più a spinta piena (avanti o indietro)
-    metabolism_turn: float = 0.5  # energia/s in più a sterzata piena
+    # Movimento: a spinta piena il consumo totale è 5 volte quello a riposo,
+    # come lo sforzo massimo sostenibile di un pesce ("aerobic scope", da 2-3 a
+    # circa 10, valori tipici 4-5). Il costo cresce con il quadrato del comando
+    # (metabolism_exponent): nella nostra fisica la velocità è proporzionale
+    # alla spinta, e la potenza è forza per velocità. Andare piano costa poco,
+    # scattare molto.
+    metabolism_move: float = 10.0  # energia/s in più a spinta piena (avanti o indietro)
+    metabolism_turn: float = 2.0  # energia/s in più a sterzata piena (stesso rapporto di prima con la spinta)
+    metabolism_exponent: float = 2.0
     # Costo del cablaggio: energia/s per ogni unità di lunghezza di
     # collegamento effettivo (il cervello è un quadrato di lato 1). Una rete
     # iniziale tipica, lunga in tutto ~60, paga ~0.25/s: un decimo del
@@ -73,14 +80,29 @@ class Config:
     # Magnetismo: campo uniforme, come quello di un pianeta. 0 = nessun campo.
     magnetic_field: float = 0.0
     magnetic_angle_deg: float = 90.0
-    # Recettori: rumore di fondo e saturazione, in "quanti" per passo.
+    # Recettori: quanti "quanti" (fotoni, molecole, deformazioni) raccoglie in
+    # un passo una cellula normale (sensibilità 1) da un segnale di intensità 1
+    # di ciascun fenomeno. Sono la fisica dei sensi, non vanno ritoccati per
+    # aggiustare un esperimento. Tarati perché uno stimolo tipico dia circa 100
+    # quanti per passo (rapporto segnale/rumore circa 10), come un fotorecettore
+    # alla luce del giorno: per la luce, un oggetto chiaro a 10 u (segnale circa
+    # 0,3) dà circa 100 quanti; per la tossina, metà profondità nel veleno; per
+    # il corpo, l'energia piena con una sintonia larga.
+    receptor_scale_light: float = 300.0
+    receptor_scale_chemical: float = 200.0
+    receptor_scale_mechanical: float = 100.0
+    receptor_scale_thermal: float = 100.0
+    receptor_scale_magnetic: float = 100.0
+    receptor_scale_internal: float = 70.0
+    # Rumore di fondo (eventi spontanei, come nei coni: circa 60 al secondo) e
+    # saturazione (frequenza massima di risposta), in quanti per passo.
     receptor_dark: float = 1.0
-    receptor_saturation: float = 100.0
+    receptor_saturation: float = 300.0
     # Costo del corpo e del cervello, energia/s: ogni recettore acceso (la
     # cellula), la sua sensibilità (somma delle g di tutti i fenomeni) e ogni
     # neurone interno acceso. Al posto di un numero massimo, un prezzo.
     receptor_cell_cost: float = 0.002
-    receptor_sens_cost: float = 0.00005
+    receptor_sens_cost: float = 0.008  # per unità di sensibilità, sommata sui fenomeni: un "occhio" di 25 cellule ≈ 10% del metabolismo di base
     neuron_cost: float = 0.01
 
     # Rumore dei sensi: deviazione standard di un disturbo casuale aggiunto a
@@ -107,7 +129,7 @@ class Config:
     receptor_initial: int = 2
     receptor_initial_spread_deg: float = 60.0
     receptor_initial_aperture_deg: float = 120.0
-    receptor_initial_gain: float = 5.0
+    receptor_initial_gain: float = 1.0  # moltiplicatore: 1 = cellula normale
     receptor_initial_width: float = 0.4
     # Adattamento sensoriale alla partenza: tempo caratteristico (s) e
     # intensità massima, sottrattiva e divisiva, sorteggiate tra 0 e questo valore.
@@ -119,6 +141,9 @@ class Config:
     # sempre, lungo di rado. Con questi valori una rete casuale ha in media
     # tanti collegamenti quanti ne avrebbe con il 15% uniforme, ma lunghi la
     # metà, e quasi sempre almeno un percorso dai sensi ai motori.
+    # Il cervello cresce con le sue cellule: cellule per unità di superficie
+    # (con 100 cellule il lato è 1). Vedi net/geometry.py.
+    brain_density: float = 100.0
     net_conn_prob: float = 0.75  # probabilità a distanza 0
     net_conn_range: float = 0.3  # portata tipica di un collegamento (valore iniziale: poi è un gene)
     net_self_prob: float = 0.05  # un neurone collegato a se stesso: raro, come in natura
@@ -144,15 +169,11 @@ class Config:
 
     # Generazioni. Una generazione finisce quando tutti sono morti o hanno
     # completato il compito. Si riproduce solo chi lo ha completato.
-    population: int = 200
+    population: int = 1000  # grande abbastanza perché la selezione pesi più del caso
     life_max: float = 90.0  # s, tetto di sicurezza se il metabolismo è spento
     # Generazioni che un individuo può vivere al massimo; 0 = nessun limite: un
     # genitore resta finché continua a completare il compito.
     max_age: int = 0
-    # Con un solo genitore, o nessuno (si riparte dagli ultimi genitori noti),
-    # questa quota di figli nasce con mutazioni più forti.
-    rescue_share: float = 0.5
-    rescue_strength: float = 3.0
 
     # Riproduzione. Il genoma è una fila di blocchi: uno per neurone interno o
     # motore (esistenza, geni propri, posizione, collegamenti in ingresso),
@@ -168,7 +189,11 @@ class Config:
     # distanza 0; cala con la distanza come alla nascita.
     mut_conn_add: float = 0.01
     mut_conn_del: float = 0.01  # probabilità che un collegamento presente sparisca
-    mut_neuron_toggle: float = 0.01  # probabilità che un neurone o recettore si accenda o si spenga
+    # Probabilità di mutazione per elemento genetico che rompe un gene. Un
+    # neurone o recettore acceso si spegne con 1 - (1 - μ)^lunghezza del suo
+    # gene; uno spento si riaccende con μ (serve la mutazione giusta in un punto
+    # solo). Come in natura, rompere è molto più facile che riparare.
+    mut_neuron_toggle: float = 0.001
     mut_dup: float = 0.005  # probabilità che un neurone o recettore acceso si duplichi
     mut_pos_prob: float = 0.1  # probabilità che un neurone (o un nervo) si sposti nel cervello
     mut_pos_std: float = 0.03  # di quanto, in lati del cervello

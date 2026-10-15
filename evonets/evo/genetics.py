@@ -15,7 +15,7 @@ import numpy as np
 
 from ..config import Config
 from ..net.brain import META, META_INDEX, Genome, clamp_meta, pad
-from ..net.geometry import connect_prob, distances
+from ..net.geometry import brain_side, connect_prob, distances
 from ..net.receptors import MAX_APERTURE, MIN_APERTURE
 
 # Deriva dei geni continui dei recettori, in multipli del gene `rec_drift`:
@@ -112,6 +112,29 @@ def _duplicate(g: Genome, rng: np.random.Generator, p: np.ndarray) -> None:
                 active[i, free[0]] = True
 
 
+MAX_SENSITIVITY = 100.0  # volte una cellula normale: limite fisico della cattura dei quanti
+RECEPTOR_GENE_LENGTH = 28  # geni di un recettore: acceso, 6 x (sensibilità, sintonia, larghezza), corpo,
+# direzione, apertura, nervo, adattamento (τ, sottrattivo, divisivo)
+
+
+def knockout(g: Genome, mu: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Probabilità che un recettore (N, R) e un neurone interno (N, H) accesi
+    si rompano in questa nascita.
+
+    Come in natura, rompere un gene si può quasi ovunque: la probabilità è
+    1 − (1 − μ)^L, con μ la probabilità di mutazione per elemento genetico
+    (gene "toggle" dell'individuo) e L la lunghezza del gene. Ripararlo invece
+    richiede la mutazione giusta in un punto solo: probabilità μ. Il rapporto
+    tra rottura e riparazione è quindi circa la lunghezza del gene, e i geni
+    lunghi si rompono più spesso. Per un neurone L sono i suoi geni propri più
+    i collegamenti in ingresso che porta: un neurone più collegato è un gene
+    più lungo e più fragile. Un recettore ha lunghezza fissa."""
+    m = np.minimum(1.0, mu)[:, None]
+    n_traits = g.traits.shape[2]
+    length = n_traits + g.conn[:, : g.n_hidden, :].sum(axis=2)
+    return 1.0 - (1.0 - m) ** RECEPTOR_GENE_LENGTH * np.ones(g.r_active.shape), 1.0 - (1.0 - m) ** length
+
+
 def mutate(genome: Genome, cfg: Config, rng: np.random.Generator, strength: float = 1.0) -> None:
     """Muta sul posto, con i tassi del figlio (ereditati dai genitori).
     `strength` scala frequenza e ampiezza (>1 = variazioni più consistenti,
@@ -154,6 +177,11 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator, strength: floa
         a = getattr(g, field)
         a += chance(a.shape, p_w) * noise(a.shape, drift * DRIFT_SCALE[field])
     np.clip(g.r_mu, 0.0, 1.0, out=g.r_mu)
+    # Una cellula non cattura più quanti di quanti ne arrivano: la sensibilità ha
+    # un massimo fisico (anche nei recettori spenti, che altrimenti derivano
+    # senza limiti e, riaccesi, costerebbero un'energia assurda).
+    np.clip(g.r_sens, None, np.log(MAX_SENSITIVITY), out=g.r_sens)
+    np.clip(g.r_width, np.log(0.005), np.log(10.0), out=g.r_width)
     np.clip(g.r_sub, 0.0, 1.0, out=g.r_sub)
     np.maximum(g.r_div, 0.0, out=g.r_div)
     np.clip(g.r_tau, np.log(cfg.dt), np.log(1000.0), out=g.r_tau)
@@ -165,16 +193,21 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator, strength: floa
     # 4. Collegamenti: uno nuovo compare con una probabilità che cala con la
     # distanza, come alla nascita, con la portata λ dell'individuo.
     n_rec, n_out = g.n_rec, g.n_out
-    dist = distances(cfg, g.pos, g.r_y, n_out)
+    dist = distances(cfg, g.pos, g.r_y, n_out, brain_side(cfg, g.r_active, g.active, n_out))
     shape = connect_prob(cfg, dist, n_rec, base("conn_range")) / cfg.net_conn_prob
     p_add = np.minimum(1.0, rate("conn_add")[:, None, None] * shape)
     appear = ~g.conn & (rng.random(g.conn.shape) < p_add)
     vanish = g.conn & chance(g.conn.shape, rate("conn_del"))
     g.conn ^= appear | vanish
 
-    # 5. Neuroni e recettori si accendono o si spengono; poi le duplicazioni.
-    g.active ^= chance(g.active.shape, rate("toggle"))
-    g.r_active ^= chance(g.r_active.shape, rate("toggle"))
+    # 5. Neuroni e recettori si rompono o (raramente) si riparano; poi le
+    # duplicazioni. Vedi `knockout`.
+    mu = rate("toggle")
+    on, off = knockout(g, mu)
+    g.active = np.where(g.active, rng.random(g.active.shape) >= off,
+                        rng.random(g.active.shape) < np.minimum(1.0, mu)[:, None])
+    g.r_active = np.where(g.r_active, rng.random(g.r_active.shape) >= on,
+                          rng.random(g.r_active.shape) < np.minimum(1.0, mu)[:, None])
     _duplicate(g, rng, np.minimum(1.0, rate("dup")))
 
 

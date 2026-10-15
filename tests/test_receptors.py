@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from evonets import Config, World
-from evonets.net.receptors import Prepared, ReceptorGenes, respond, spectral, stimuli
+from evonets.net.receptors import Prepared, ReceptorGenes, respond, scales, spectral, stimuli
 from evonets.sim import signals
 from evonets.sim.signals import CHEMICAL, INTERNAL, LIGHT, MAGNETIC, MECHANICAL, THERMAL
 
@@ -149,13 +149,13 @@ def test_noise_follows_counting_statistics_and_saturates():
     cfg = Config()
     w = world(cfg, target=(110.0, 70.0))
     g = genes(n=4000, sens=-50.0)  # insensibile a tutto...
-    g.sens[:, :, INTERNAL] = np.log(40.0)  # ...tranne l'energia, che vale 1
+    g.sens[:, :, INTERNAL] = np.log(40.0 / cfg.receptor_scale_internal)  # ...tranne l'energia (vale 1): 40 quanti
     g.mu[:, :, INTERNAL], g.width[:, :, INTERNAL] = 0.05, np.log(0.01)
     w = world(cfg, n=4000, target=(110.0, 70.0))
     r = respond(cfg, w, g, np.random.default_rng(0))[:, 0] * cfg.receptor_saturation
     assert np.isclose(r.mean(), 40.0, rtol=0.01)
     assert np.isclose(r.var(), 40.0 + cfg.receptor_dark, rtol=0.1)
-    g.sens[:, :, INTERNAL] = np.log(1000.0)  # dieci volte la saturazione
+    g.sens[:, :, INTERNAL] = np.log(10 * cfg.receptor_saturation / cfg.receptor_scale_internal)  # 10 volte la saturazione
     assert (respond(cfg, w, g, np.random.default_rng(0)) == 1.0).all()
 
 
@@ -203,7 +203,7 @@ def test_prepared_fast_path_gives_the_same_quanta_as_the_reference():
     w.pos[0] = (cfg.agent_radius, 50.0)  # uno appoggiato alla parete
     w.bump[0] = True
     w.vel[:] = rng.normal(0, 10, (n, 2))
-    reference = (g.gain * stimuli(cfg, w, g)).sum(axis=2)
+    reference = (g.gain * scales(cfg) * stimuli(cfg, w, g)).sum(axis=2)
     assert np.allclose(Prepared(cfg, g).quanta(w, np.arange(n)), reference)
     rows = np.array([2, 5])
     assert np.allclose(Prepared(cfg, g).take(rows).quanta(w, rows), reference[rows])
@@ -212,7 +212,7 @@ def test_prepared_fast_path_gives_the_same_quanta_as_the_reference():
 def _energy_receptor(n=1, quanta=40.0, **kw):
     """Un recettore sensibile solo all'energia (che vale 1): n quanti costanti."""
     g = genes(n=n, sens=-50.0, **kw)
-    g.sens[:, :, INTERNAL] = np.log(quanta)
+    g.sens[:, :, INTERNAL] = np.log(quanta / Config().receptor_scale_internal)
     g.mu[:, :, INTERNAL], g.width[:, :, INTERNAL] = 0.05, np.log(0.01)
     return g
 
@@ -238,7 +238,7 @@ def test_subtractive_adaptation_answers_changes_and_forgets_a_constant_signal():
     assert r.mean() < 0.05  # adattato: quasi zero
     w.energy[:] = cfg.energy_init  # il segnale triplica di colpo: 60 quanti
     jump, m = prep.respond(w, np.arange(200), rng, m)
-    assert jump.mean() > 0.3  # risponde al cambiamento (40 quanti in più su 100)
+    assert jump.mean() > 0.75 * 40.0 / cfg.receptor_saturation  # risponde al cambiamento: 40 quanti in più
 
 
 def test_divisive_adaptation_answers_contrast_not_level():
@@ -247,7 +247,7 @@ def test_divisive_adaptation_answers_contrast_not_level():
     for level in (1.0, 4.0):  # stesso contrasto (+50%) su due livelli di fondo diversi
         w = world(cfg, n=400)
         w.energy[:] = cfg.energy_init / 2
-        g = _energy_receptor(400, quanta=40.0 * level, div=50.0, tau=np.log(0.2))
+        g = _energy_receptor(400, quanta=40.0 * level, div=500.0, tau=np.log(0.2))  # div·m molto più di n_max
         prep, m, rng = Prepared(cfg, g), np.full((400, 1), np.nan), np.random.default_rng(1)
         for _ in range(200):
             _, m = prep.respond(w, np.arange(400), rng, m)

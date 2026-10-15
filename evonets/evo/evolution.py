@@ -9,6 +9,7 @@ from ..config import Config
 from ..net.brain import META, Genome, pad
 from ..net.controllers import NeuralController
 from ..sim.world import World
+from ..net.receptors import scales
 from .exam import Exam, candidates
 from .genetics import grow, reproduce
 
@@ -21,8 +22,11 @@ RANDOM = "nessun genitore: reti casuali"
 # configurazione; 2 = con configurazione completa e registro dell'ambiente;
 # 3 = recettori universali, posti che crescono, mutazioni come geni;
 # 4 = adattamento sensoriale (i file del formato 3 si aprono con l'adattamento spento);
-# 5 = plasticità (i file precedenti si aprono senza plasticità né modulatori).
-FORMAT = 5
+# 5 = plasticità (i file precedenti si aprono senza plasticità né modulatori);
+# 6 = sensi calibrati: la sensibilità è un moltiplicatore della scala fisica di
+#     ogni fenomeno (i file precedenti si convertono a parità di quanti);
+# 7 = il cervello cresce con le sue cellule (le distanze si ricalcolano).
+FORMAT = 7
 # Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
 # nullo, regola a zero, nessun modulatore.
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
@@ -104,10 +108,9 @@ class Evolution:
         successiva, dove dovrà completare di nuovo per restare (`max_age`, se
         impostato, aggiunge un limite di età);
       - i posti restanti vanno ai figli, con genitori sorteggiati alla pari;
-      - con un solo genitore, una quota dei figli nasce con mutazioni più forti;
-      - senza genitori si riparte dagli ultimi genitori noti (tutti figli, una
-        quota con mutazioni più forti) o, se non ce ne sono mai stati, da reti
-        casuali.
+      - senza genitori si riparte dagli ultimi genitori noti (tutti figli) o, se
+        non ce ne sono mai stati, da una popolazione primordiale nuova.
+    Non c'è nessun "soccorso" con mutazioni rinforzate: in natura non esiste.
     Ogni generazione affronta un'arena nuova, uguale per tutti.
 
     `champions` conserva, per ogni generazione con almeno un vincitore, il
@@ -297,12 +300,8 @@ class Evolution:
             fresh = NeuralController(cfg, n, int(self.rng.integers(2**31)))
             new = fresh.brains.genome
         else:
-            n_children = n - len(survivors)
-            n_strong = int(n_children * cfg.rescue_share) if len(winners) <= 1 else 0
-            children = [reproduce(parents, n_children - n_strong, cfg, self.rng)]
-            if n_strong:
-                children.append(reproduce(parents, n_strong, cfg, self.rng, cfg.rescue_strength))
-            new = Genome.concat([survivors, *children])
+            children = reproduce(parents, n - len(survivors), cfg, self.rng)
+            new = Genome.concat([survivors, children])
         stats["survivors"] = len(survivors)
         new = grow(new, cfg)  # posti nuovi se qualcuno li ha quasi finiti
         if self.last_parents is not None:
@@ -422,6 +421,8 @@ class Evolution:
             shape = d[prefix + "r_active"].shape
             g = Genome(*(d[prefix + f] if prefix + f in d else np.full(shape, ADDED_IN_4[f])
                          for f in Genome.FIELDS))
+            if fmt < 6:  # prima la sensibilità era in quanti: stessa risposta, nuova unità
+                g.r_sens = g.r_sens - np.log(scales(cfg))
             if g.traits.shape[2] == base:
                 extra = np.broadcast_to(NO_PLASTICITY, g.traits.shape[:2] + (len(NO_PLASTICITY),))
                 g.traits = np.concatenate([g.traits, extra], axis=2)
@@ -456,9 +457,12 @@ class Evolution:
         resumed = {"generation": evo.generation, "event": "ripresa", "code": code_version()}
         evo.log = json.loads(str(d["log"]))
         if fmt < FORMAT:
-            resumed["note"] = (f"salvataggio di formato {fmt}: convertito"
-                               + (", recettori senza adattamento sensoriale" if fmt == 3 else "")
-                               + ", neuroni senza plasticità né modulatori")
+            parts = ((["recettori senza adattamento sensoriale"] if fmt <= 3 else [])
+                     + (["neuroni senza plasticità né modulatori"] if fmt <= 4 else [])
+                     + (["sensibilità dei recettori convertite in moltiplicatori della scala fisica"] if fmt <= 5
+                        else [])
+                     + ["distanze nel cervello ricalcolate: ora il cervello cresce con le sue cellule"])
+            resumed["note"] = f"salvataggio di formato {fmt}: convertito ({'; '.join(parts)})"
         if unknown:
             resumed["note"] = "costanti salvate che questo codice non conosce più: " + ", ".join(unknown)
         evo.log.append(resumed)

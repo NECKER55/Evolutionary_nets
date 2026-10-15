@@ -5,7 +5,7 @@ from evonets import Config, World
 from evonets.evo import Evolution
 from evonets.evo.genetics import crossover, mutate
 from evonets.net import NeuralController
-from evonets.net.geometry import connect_prob, distances, motor_anchors, receptor_anchors
+from evonets.net.geometry import brain_side, connect_prob, distances, motor_anchors, receptor_anchors
 from nets import rich
 
 R = 10
@@ -43,9 +43,11 @@ def test_new_links_from_mutation_prefer_near_neurons():
     cfg = Config(mut_conn_add=0.5, mut_conn_del=1e-9, mut_pos_prob=1e-9)
     g = rich(300, seed=2).genome
     g.conn[:] = False
+    side = brain_side(cfg, g.r_active, g.active, 2)
     mutate(g, cfg, np.random.default_rng(0))
-    d = distances(cfg, g.pos, g.r_y, 2)
-    assert g.conn[d < 0.15].mean() > 5 * g.conn[d > 0.9].mean()
+    d = distances(cfg, g.pos, g.r_y, 2, side)  # nel cervello della sua grandezza vera
+    near, far = d < np.quantile(d, 0.2), d > np.quantile(d, 0.8)
+    assert g.conn[near].mean() > 2 * g.conn[far].mean()
 
 
 def test_position_is_inherited_with_its_neuron_and_drifts_inside_the_brain():
@@ -90,3 +92,15 @@ def test_saves_of_the_old_format_are_refused(tmp_path):
     np.savez(tmp_path / "old.npz", **data)
     with pytest.raises(ValueError, match="sensi fissi"):
         Evolution.load(Config(), tmp_path / "old.npz")
+
+
+def test_the_brain_grows_with_its_cells():
+    cfg = Config()
+    small = brain_side(cfg, np.ones((1, 2), bool), np.zeros((1, 0), bool), 2)  # 4 cellule
+    big = brain_side(cfg, np.ones((1, 30), bool), np.ones((1, 68), bool), 2)  # 100 cellule
+    assert np.isclose(small[0], 0.2) and np.isclose(big[0], 1.0)
+    # un organismo primordiale ha sensi e motori vicini: collegarli è probabile
+    b = NeuralController(cfg, 500, seed=3).brains
+    reach = np.exp(b.genome.meta[:, 9])
+    p = connect_prob(cfg, b.dist, b.n_in, reach)[:, b.n_hidden:, :2].mean()
+    assert p > 0.25

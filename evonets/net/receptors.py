@@ -8,7 +8,8 @@ conviene: un recettore sensibile a tutto somma segnali diversi in un numero
 solo, e ogni sensibilità costa.
 
 La risposta conta "quanti" con rumore, come i fotorecettori:
-    n = Σ_p g_p · s_p              quanti attesi
+    n = Σ_p scala_p · g_p · s_p    quanti attesi (scala_p: la fisica del
+                                   fenomeno; g_p: il gene, 1 = cellula normale)
     ñ = n + sqrt(n + n_buio) · ε   ε ~ N(0, 1)
     r = clip(ñ / n_max, 0, 1)
 Più sensibilità = meno rumore relativo, ma saturazione prima e più costo.
@@ -82,6 +83,13 @@ class ReceptorGenes:
     @property
     def aperture_rad(self) -> np.ndarray:
         return np.clip(np.exp(self.aperture), MIN_APERTURE, MAX_APERTURE)
+
+
+def scales(cfg) -> np.ndarray:
+    """(P,) quanti per passo che una cellula normale raccoglie da un segnale 1
+    di ciascun fenomeno (la fisica dei sensi, vedi config.py)."""
+    return np.array([cfg.receptor_scale_light, cfg.receptor_scale_chemical, cfg.receptor_scale_mechanical,
+                     cfg.receptor_scale_thermal, cfg.receptor_scale_magnetic, cfg.receptor_scale_internal])
 
 
 def tuning(q, mu, sigma):
@@ -166,7 +174,7 @@ def respond(cfg, world, genes: ReceptorGenes, rng: np.random.Generator, rows=Non
     """(n, R) risposta di ogni recettore in [0, 1], con rumore e saturazione.
     I recettori spenti danno 0."""
     s = stimuli(cfg, world, genes, rows)
-    n = (genes.gain * s).sum(axis=2)
+    n = (genes.gain * scales(cfg) * s).sum(axis=2)
     noisy = n + np.sqrt(n + cfg.receptor_dark) * rng.standard_normal(n.shape)
     return np.clip(noisy / cfg.receptor_saturation, 0.0, 1.0) * genes.active
 
@@ -204,14 +212,14 @@ def describe(genes: ReceptorGenes, i: int, k: int) -> list[str]:
     lines = [
         f"sul corpo a {_deg(genes.body[i, k]):+.0f}° (+ = destra)",
         f"guarda a {_deg(genes.look[i, k]):+.0f}°, apertura {np.degrees(genes.aperture_rad[i, k]):.0f}°",
-        f"sensibilità totale {total:.1f}",
+        f"sensibilità totale x{total:.2f} (1 per fenomeno = cellula normale)",
         f"adattamento: sottr. {genes.sub[i, k]:.2f}, div. {genes.div[i, k]:.2f}, "
         f"in {np.exp(genes.tau[i, k]):.2g}s",
         "fenomeno  g  quota  sintonia",
     ]
     for p in np.argsort(-g):
         tune = "" if p == MAGNETIC else f" {genes.mu[i, k, p]:.2f}±{genes.sigma[i, k, p]:.2f}"
-        lines.append(f"  {SHORT[p]:6s}{g[p]:6.1f} {g[p] / total:4.0%}{tune}")
+        lines.append(f"  {SHORT[p]:6s} x{g[p]:5.2f} {g[p] / total:4.0%}{tune}")
     return lines
 
 
@@ -227,7 +235,7 @@ class Prepared:
 
     def __init__(self, cfg, genes: ReceptorGenes):
         self.cfg, self.active = cfg, genes.active
-        g, mu, sg = genes.gain, genes.mu, genes.sigma
+        g, mu, sg = genes.gain * scales(cfg), genes.mu, genes.sigma
         self.keep = np.exp(-cfg.dt / np.exp(genes.tau))  # quanto della media resta a ogni passo
         self.sub, self.div = genes.sub, genes.div
         self.n, self.R = genes.active.shape

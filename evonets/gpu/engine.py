@@ -38,7 +38,7 @@ F = jnp.float32
 PHYS = (
     "arena_w", "arena_h", "dt", "agent_radius", "thrust_accel", "reverse_factor", "lin_drag", "lat_drag",
     "turn_accel", "ang_drag", "wall_restitution", "energy_init", "metabolism_basal", "metabolism_move",
-    "metabolism_turn", "light_attenuation", "hazard_drain", "hazard_falloff", "hazard_pulse", "hazard_speed",
+    "metabolism_turn", "metabolism_exponent", "light_attenuation", "hazard_drain", "hazard_falloff", "hazard_pulse", "hazard_speed",
     "toxin_molecule", "hazard_smell", "target_molecule", "target_smell", "smell_range", "vibration_range",
     "target_vibration", "target_vibration_freq", "hazard_vibration", "hazard_vibration_freq",
     "ambient_temperature", "heat_range", "target_heat", "hazard_heat", "receptor_dark", "receptor_saturation",
@@ -283,8 +283,8 @@ def physics(ph, P, s, actions, upkeep):
     hz_r = P["base_radius"] * (1.0 + ph["hazard_pulse"] * jnp.sin(pulse))
     d = jnp.sqrt(((pos[:, None, :] - hz_pos[None]) ** 2).sum(-1)) - hz_r[None]
     toxicity = (jnp.clip(-d / hz_r[None], 0.0, 1.0) ** ph["hazard_falloff"]).sum(1) * active
-    effort = (ph["metabolism_basal"] + ph["metabolism_move"] * jnp.abs(act[:, 0])
-              + ph["metabolism_turn"] * jnp.abs(turn) + upkeep) * active
+    effort = (ph["metabolism_basal"] + ph["metabolism_move"] * jnp.abs(act[:, 0]) ** ph["metabolism_exponent"]
+              + ph["metabolism_turn"] * jnp.abs(turn) ** ph["metabolism_exponent"] + upkeep) * active
     energy = jnp.maximum(s["energy"] - (effort + ph["hazard_drain"] * toxicity) * dt, 0.0)
     alive = (s["alive"] > 0) & (energy > 0.0)
     # Il bersaglio (se si muove) e chi lo raggiunge.

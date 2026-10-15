@@ -10,9 +10,15 @@ Stato: **approvata** (2026-10-14), in corso di implementazione.
   recettori riparte dal seme di ogni arena, così una corsa ripresa resta
   identica.
 - Adattamento sensoriale (sezione 3.3 bis): fatto; salvataggi formato 4.
-- Passo 3: i costi attuali risultano già in linea con l'obiettivo (un occhio di
-  25 recettori ≈ 12% del metabolismo di base); esperimento di validazione in
-  corso (ambiente facile, reti continue e a impulsi, 4 semi ciascuna).
+- Passo 3 (2026-10-15): calibrazione fatta. Ogni fenomeno ha una scala fisica
+  in quanti (`receptor_scale_*`: uno stimolo tipico ≈ 100 quanti per passo),
+  il gene della sensibilità è un moltiplicatore (1 = cellula normale),
+  saturazione 300 quanti per passo, costo 0,008 per unità di sensibilità.
+  Motivo: con la sensibilità di partenza 5 in quanti, un recettore primordiale
+  riceveva dal bersaglio tanti quanti quanto il rumore, e in 900 generazioni
+  (esperimento di riferimento) la vista non è nata. Insieme: movimento con
+  costo naturale (5 volte il riposo a spinta piena, quadratico), popolazione
+  1.000, niente soccorso. Esame versione 3.
 
 Decisioni già prese (2026-10-14):
 

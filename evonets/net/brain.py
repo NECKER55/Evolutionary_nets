@@ -4,7 +4,7 @@ from statistics import NormalDist
 import numpy as np
 
 from ..config import Config
-from .geometry import connect_prob, distances
+from .geometry import brain_side, connect_prob, distances
 from .receptors import P, Prepared, ReceptorGenes
 
 # Geni del meccanismo di mutazione, uno per individuo (vedi genetics.mutate e
@@ -191,7 +191,7 @@ def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Ge
     pos = rng.random((n, H, 2))
     meta = np.log(meta_start(cfg))[None, :] + rng.normal(0.0, 0.1, (n, len(META)))
     clamp_meta(meta, cfg)
-    dist = distances(cfg, pos, r_y, n_out)
+    dist = distances(cfg, pos, r_y, n_out, brain_side(cfg, r_active, np.zeros((n, H), dtype=bool), n_out))
     conn = rng.random(dist.shape) < connect_prob(cfg, dist, R, np.exp(meta[:, META_INDEX["conn_range"]]))
     T, S = H + n_out, R + H + n_out
     return Genome(
@@ -298,7 +298,8 @@ class Brains:
         # I modulatori non trasmettono: le loro uscite non esistono (né costano).
         mod = self.modulatory
         self.links[:, :, R : R + H] &= ~mod[:, None, :]
-        self.dist = distances(cfg, self.pos, g.r_y, self.n_out)
+        self.side = brain_side(cfg, g.r_active, self.active, self.n_out)  # il cervello cresce con le cellule
+        self.dist = distances(cfg, self.pos, g.r_y, self.n_out, self.side)
         # Plasticità: M arriva a ogni neurone dai modulatori, per diffusione,
         # calando con la distanza (trasmissione di volume).
         p = self.traits[:, :, self.BASE_TRAITS :]

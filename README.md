@@ -339,8 +339,8 @@ La rete produce due comandi, entrambi tra -1 e 1.
 | Causa | Consumo al secondo |
 |---|---|
 | Esistere | 2,5 (`metabolism_basal`) |
-| Spingere | fino a 2,5 in più, proporzionale al comando di spinta, uguale in avanti e indietro (`metabolism_move`) |
-| Sterzare | fino a 0,5 in più, proporzionale al comando di sterzata (`metabolism_turn`) |
+| Spingere | fino a 10 in più, proporzionale al **quadrato** del comando di spinta, uguale in avanti e indietro (`metabolism_move`, `metabolism_exponent`) |
+| Sterzare | fino a 2 in più, proporzionale al quadrato del comando di sterzata (`metabolism_turn`) |
 | Veleno | da 0 a 60, secondo la profondità nella zona (vedi sotto) |
 | Cablaggio del cervello | 0,004 per ogni unità di lunghezza dei collegamenti effettivi (`wire_cost`) |
 | Neuroni interni | 0,01 per ogni neurone acceso (`neuron_cost`): un neurone consuma anche a riposo |
@@ -349,8 +349,16 @@ La rete produce due comandi, entrambi tra -1 e 1.
 - Si paga lo **sforzo comandato**, non la velocità raggiunta: spingere contro una
   parete costa come correre.
 - Conseguenze: un agente fermo vive circa 60 secondi (un po' meno, per il
-  costo di corpo e cervello); uno sempre a spinta piena circa 30 secondi, in cui percorre al
-  massimo circa 900 unità (quattro larghezze di arena e mezza).
+  costo di corpo e cervello); uno sempre a spinta piena circa 12 secondi (circa
+  360 unità percorse); uno a metà spinta circa 30 secondi.
+- **Perché il movimento costa così.** A spinta piena il consumo totale è 5
+  volte quello a riposo: è lo sforzo massimo sostenibile tipico di un pesce
+  (l'"aerobic scope", da 2–3 a circa 10, con valori tipici 4–5). Il costo cresce
+  con il quadrato del comando perché, nella fisica dell'agente, la velocità è
+  proporzionale alla spinta e la potenza è forza per velocità. Andare piano
+  costa poco, scattare molto, e il costo per unità di strada è minimo a velocità
+  moderata, come per i pesci veri. Vagare alla cieca a tutta velocità non è più
+  quasi gratis.
 - Perché 150: con 100 anche una rete buona fallisce spesso per sfortuna (non
   trova il bersaglio in tempo) e viene eliminata, quindi la selezione è
   rumorosa. In un confronto su 4 semi e 120 generazioni, le reti evolute con 150
@@ -436,8 +444,22 @@ codice dei sensi.
 - dove entra il suo nervo nel **cervello** (sul bordo sinistro).
 
 **La risposta.** Il recettore conta "quanti" (fotoni, molecole) e il conteggio
-è rumoroso, come nella retina: n = Σ g × segnale, e la risposta è
-(n + rumore) / 100, tra 0 e 1, con un rumore che vale √(n + 1). Di conseguenza:
+è rumoroso, come nella retina: n = Σ scala × g × segnale, e la risposta è
+(n + rumore) / 300, tra 0 e 1, con un rumore che vale √(n + 1).
+
+- **scala** è la fisica del fenomeno: quanti quanti raccoglie in un passo una
+  cellula normale da un segnale 1. È tarata perché uno stimolo tipico dia circa
+  100 quanti, come un fotorecettore alla luce del giorno: luce 300, sostanze
+  200, meccanica, temperatura e magnetismo 100, interno 70
+  (`receptor_scale_*`). Non va ritoccata per aggiustare un esperimento: è come
+  la fisica dei fotoni. Se cambi l'ambiente, esprimi le emissioni nella stessa
+  unità (1 = uno stimolo normale per quel fenomeno).
+- **g** è il gene della sensibilità: un moltiplicatore, 1 = cellula normale.
+- Misure con una cellula normale specializzata sul colore del bersaglio
+  (apertura 10°): bersaglio a 2 u circa 220 quanti, a 10 u circa 110 (rapporto
+  segnale/rumore 10), a 20 u circa 50, a 40 u circa 8 (si vede appena).
+
+Di conseguenza:
 
 - più sensibilità vuol dire meno rumore relativo, ma anche saturazione prima e
   più costo: il compromesso lo trova l'evoluzione;
@@ -465,8 +487,11 @@ adattamento rudimentale, che l'evoluzione può rafforzare o spegnere. La media
 riparte dalla prima lettura a ogni arena.
 
 **La partenza è primordiale.** Ogni individuo nasce con 2 recettori
-**generalisti** (sensibili un po' a tutto, sintonia larga, sensibilità bassa
-e quindi molto rumorosi), a ventaglio davanti al muso con un'apertura di 120°.
+**generalisti** (sensibili un po' a tutto: moltiplicatore 1 su ogni fenomeno,
+sintonia larga), a ventaglio davanti al muso con un'apertura di 120°. Sono come
+le prime macchie fotosensibili: un bersaglio a 10 u si distingue (rapporto
+segnale/rumore circa 4 per la sola luce), ma non si sa bene dove sia, e il
+segnale si mescola con quello degli altri fenomeni.
 Occhi, nasi o orecchie non esistono nel codice: possono nascere solo per
 duplicazione e specializzazione dei recettori (punto 15).
 
@@ -667,7 +692,8 @@ posto k del padre.
 
 ### 12. La generazione
 
-- La popolazione è di **200 individui** (`population`) e resta sempre di quella
+- La popolazione è di **1.000 individui** (`population`): abbastanza perché la
+  selezione pesi più del caso. Resta sempre di quella
   dimensione.
 - Tutti gli individui di una generazione vivono nella stessa arena, nello stesso
   momento.
@@ -692,7 +718,7 @@ posto k del padre.
    continua a completare il compito, e sparisce la prima volta che fallisce.
    (`max_age` permette di imporre un massimo di generazioni; 0, il default,
    vuol dire nessun limite.)
-3. **I posti restanti vanno ai figli**: 200 meno i sopravvissuti.
+3. **I posti restanti vanno ai figli**: 1.000 meno i sopravvissuti.
 
 Per ogni figlio:
 
@@ -705,7 +731,7 @@ Per ogni figlio:
 - poi il figlio viene **mutato**.
 
 Di conseguenza il numero di figli per genitore dipende da quanti completano: con
-12 genitori sono circa 16 a testa, con 100 genitori circa 1.
+12 genitori sono circa 80 a testa, con 500 genitori circa 1.
 
 ### 15. Le mutazioni
 
@@ -755,8 +781,11 @@ come in natura:
 | Quanti hanno completato | Cosa succede |
 |---|---|
 | due o più | regole normali |
-| **uno solo** | sopravvive; metà dei figli (`rescue_share`) nasce con mutazioni tre volte più frequenti e più ampie (`rescue_strength`), per ricreare varietà |
-| **nessuno**, ma in passato sì | si riparte dai genitori dell'ultima generazione che ne ha avuti: tutti figli, metà con mutazioni forti; nessuno sopravvive identico |
+| **uno solo** | regole normali: sopravvive e tutti i figli sono suoi |
+| **nessuno**, ma in passato sì | si riparte dai genitori dell'ultima generazione che ne ha avuti: tutti figli, con mutazioni normali; nessuno sopravvive identico |
+
+Non c'è nessun "soccorso" con mutazioni rinforzate quando i genitori sono
+pochi: in natura non esiste.
 | **nessuno**, e mai nessuno prima | popolazione primordiale nuova |
 
 ### 17. Ripetibilità
@@ -941,10 +970,11 @@ popolazione avanza in un solo passo. Gira su CPU.
   Riprendendo una corsa si riparte con la configurazione salvata, non con
   quella attuale. Il registro compare in cima alla pagina principale, nel
   menu accanto al salvataggio e nel terminale con `--load`.
-  Il formato attuale è il 5 (recettori universali con adattamento, posti che
-  crescono, mutazioni come geni, plasticità). Quelli dei formati 3 e 4 si
-  aprono convertiti (senza adattamento, senza plasticità), e il registro lo
-  annota. Quelli precedenti avevano i
+  Il formato attuale è il 6 (recettori universali con adattamento e sensi
+  calibrati, posti che crescono, mutazioni come geni, plasticità). Quelli dei
+  formati 3, 4 e 5 si aprono convertiti (senza adattamento, senza plasticità,
+  sensibilità ricalcolate come moltiplicatori a parità di quanti), con le
+  costanti con cui erano nati, e il registro lo annota. Quelli precedenti avevano i
   sensi fissi e non si possono più aprire.
 
 ## Stato e prossimi passi

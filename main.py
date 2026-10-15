@@ -25,6 +25,20 @@ from evonets.evo.exam import TESTS
 from evonets.net import NeuralController
 
 
+SAVE_EVERY = 25  # generazioni tra un salvataggio e l'altro, con --evolve
+
+
+def stop_requested() -> list:
+    """Una lista che diventa non vuota quando arriva Ctrl+C o una richiesta di
+    terminare: la corsa finisce la generazione, salva ed esce."""
+    import signal
+
+    flag: list = []
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: flag.append(True))
+    return flag
+
+
 def bench(cfg: Config, n_agents: int, steps: int, seed: int) -> None:
     world = World(cfg, n_agents, seed)
     ctrl = NeuralController(cfg, n_agents, seed)
@@ -84,8 +98,15 @@ def evolve_many(cfg: Config, generations: int, seed: int, k: int, save: str, exa
     print(f"{k} semi ({seed}..{seed + k - 1}), {cfg.population} individui ciascuno, rete {cfg.net_type}")
     print(" gen  completati per seme" + " " * (5 * k - 18) + "  neuroni  recett.")
     t0 = time.perf_counter()
+    stop = stop_requested()
     for _ in range(generations):
+        if stop:
+            print("fermata richiesta: salvo e mi fermo")
+            break
         stats = run_together(evos)
+        if evos[0].generation % SAVE_EVERY == 0:
+            for e, p in zip(evos, paths):
+                e.save(p)
         g = stats[0]["generation"]
         print(f"{g:4d}  " + " ".join(f"{s['completed']:4d}" for s in stats)
               + f"  {np.mean([s['neurons'] for s in stats]):7.1f}  {np.mean([s['receptors'] for s in stats]):7.1f}")
@@ -111,8 +132,16 @@ def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str
     print(f"{cfg.population} individui, rete {cfg.net_type}, {seed_text}, compito: {evo.world.task.name}")
     print(" gen  completato  sopravv.  recett.  neuroni  collegam.  vita(s)  inibitori  evento")
     t0 = time.perf_counter()
+    stop = stop_requested()
+    done = 0
     for _ in range(generations):
+        if stop:
+            print("fermata richiesta: salvo e mi fermo")
+            break
         s = evo.run_generation()
+        done += 1
+        if evo.generation % SAVE_EVERY == 0:
+            evo.save(save)  # così una corsa fermata non si perde
         print(
             f"{s['generation']:4d}  {s['completed']:4d} {s['completed'] / cfg.population:5.0%}  "
             f"{s['survivors']:8d}  {s['receptors']:7.1f}  {s['neurons']:7.1f}  {s['links']:9.1f}  {s['duration']:7.1f}  "
@@ -124,8 +153,8 @@ def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str
             print_exam(evo.collect_exam())
     el = time.perf_counter() - t0
     evo.save(save)
-    print(f"{generations} generazioni in {el:.0f}s ({el / generations:.2f}s l'una), salvato in {save}")
-    if select:
+    print(f"{done} generazioni in {el:.0f}s ({el / max(done, 1):.2f}s l'una), salvato in {save}")
+    if select and not stop:
         n = evo.start_selection(select)
         if not n:
             print("selezione finale: nessun sopravvissuto da selezionare")
@@ -145,8 +174,11 @@ def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str
 
 
 def main() -> None:
+    import sys
+
+    sys.stdout.reconfigure(line_buffering=True)  # il registro si legge mentre la corsa va
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--agents", type=int, default=None, help="individui (default: 200; 1000 in --bench)")
+    ap.add_argument("--agents", type=int, default=None, help="individui (default: quelli della configurazione, 1000)")
     ap.add_argument("--seed", type=int, default=None,
                     help="seme della corsa (default: casuale, mostrato a schermo per poterla rifare)")
     ap.add_argument("--net", choices=("rate", "spike-ei"), default="rate",

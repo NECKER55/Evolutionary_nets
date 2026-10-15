@@ -87,27 +87,16 @@ def distance_from(genome, parent_weights):
     return np.abs(genome.weights - parent_weights).mean(axis=(1, 2))
 
 
-def test_single_parent_adds_children_with_stronger_variations():
+def test_a_single_parent_has_ordinary_children_no_rescue():
+    """Con un solo genitore nessun "soccorso": i figli mutano come sempre."""
     e = evo()
     parent = e.ctrl.brains.genome.weights[9].copy()
     s = finish(e, [9])
     assert s["event"] == ONE_PARENT and s["survivors"] == 1
     d = distance_from(e.ctrl.brains.genome, parent)
-    n_strong = int(29 * e.cfg.rescue_share)
-    normal, strong = d[1 : 30 - n_strong], d[30 - n_strong :]
     assert d[0] == 0.0  # il genitore sopravvive identico
-    # I tassi sono geni che variano da figlio a figlio: si confrontano le mediane.
-    assert np.median(strong) > 4 * np.median(normal)
-
-
-def test_two_parents_get_no_stronger_variations():
-    e = evo(crossover_rate=0.0)
-    g = e.ctrl.brains.genome
-    parents = [g.weights[3].copy(), g.weights[9].copy()]
-    finish(e, [3, 9])
-    new = e.ctrl.brains.genome
-    d = np.minimum(distance_from(new, parents[0]), distance_from(new, parents[1]))
-    assert d[2:].max() < 3 * np.median(d[2:])  # un solo livello di mutazione
+    first, second = d[1:15], d[15:]
+    assert 0.5 < np.median(second) / np.median(first) < 2.0  # nessuna metà con mutazioni rinforzate
 
 
 def same_as(genome, i, ref) -> bool:
