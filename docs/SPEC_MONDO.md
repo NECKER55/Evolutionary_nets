@@ -1,8 +1,11 @@
 # Specifica: un mondo nuovo, dal basico al complesso
 
-Stato: **approvata** (2026-10-15). Fatti i punti 1 e 2 dell'ordine di lavoro
-(mondo nel motore NumPy e nel motore GPU, con i test di equivalenza); il
-compito predefinito resta `bersaglio` finché non ci sono scala ed esame.
+Stato: **approvata** (2026-10-15). Fatti i punti 1–4 dell'ordine di lavoro:
+mondo nei due motori con i test di equivalenza; scala adattiva
+(`evo/ladder.py`) e controlli nello stesso lotto (`--task cibo --ladder
+--controls`); esame a livelli (versione 4), lesioni (`--lesion`) e misura
+della fortuna (`luck` nelle statistiche). Mancano interfaccia, taratura e
+primo esperimento; il compito predefinito resta `bersaglio` fino ad allora.
 
 Scelte dell'utente:
 
@@ -143,3 +146,140 @@ proposte, da tarare con le misure.
 - **Prede e predatori sono "stupidi"**: regole fisse, non evolvono. La
   coevoluzione (predatori che evolvono anch'essi) è possibile più avanti.
 - **Le soglie della progressione** sono strumenti di addestramento, non natura.
+
+---
+
+## 8. Stato dei lavori (aggiornato al 2026-10-16)
+
+### Fatto
+
+**Punto 1: il mondo nel motore NumPy** (commit `80dc71b`)
+
+- `sim/tasks.py`, classe `Foraging`. Il cibo mangiato dà energia, fino al
+  massimo `energy_init`, e ricompare da una coda di posizioni estratta
+  all'inizio dell'arena: durante la vita non servono numeri casuali.
+- Le prede fuggono dall'agente vicino. I predatori lo inseguono e a contatto
+  tolgono energia.
+- Ogni agente ha la sua copia di cibo e predatori.
+- `sim/signals.py` e `net/receptors.py`: il cibo e i predatori si vedono
+  (dischi opachi del loro colore) e i predatori si sentono (vibrazioni).
+- `sim/world.py`: il compito si sceglie con `cfg.task` (`"bersaglio"` o
+  `"cibo"`). Il compito agisce sull'energia prima che si contino i vivi.
+- Corretto un difetto: chi muore per un morso non può mangiare nello stesso
+  passo e tornare in vita.
+- Numeri decisi strada facendo:
+  - un cibo vale 40 di energia, così nel mondo basico nutrirsi conviene
+    chiaramente;
+  - la vita ha un tetto di 120 s;
+  - si nasce ad almeno 20 u dal cibo e 40 dai predatori.
+
+**Punto 2: il mondo nel motore GPU** (commit `80dc71b`)
+
+- `gpu/engine.py` e `gpu/sim.py` fanno la stessa fisica e gli stessi sensi.
+- Cibo e predatori entrano nello stato GPU solo nel mondo del cibo: il mondo
+  del bersaglio non rallenta.
+- Le manopole sono parametri di ogni mondo, quindi popolazioni con manopole
+  diverse girano nello stesso lotto.
+- I test di equivalenza con il motore NumPy coprono sensi, fisica con prede e
+  predatori, passi interi con entrambi i tipi di rete e una generazione
+  intera. La prova di fisica comprende migliaia di contatti con i predatori,
+  prede in fuga, cibi mangiati e morti.
+- Velocità invariata: con 1.000 agenti una generazione dura circa 0,4 s.
+
+**Punto 3: scala adattiva e più popolazioni** (non ancora committato)
+
+- `evo/ladder.py`: tutte le manopole si riassumono in una **posizione** x da
+  0 a 3, una unità per stadio. Lo stadio i ha le sue manopole a
+  clip(x − i, 0, 1).
+- Gli stadi, nell'ordine: abbondanza e cibi necessari insieme, poi prede,
+  poi predatori.
+- La posizione si muove con le soglie della sezione 3 (`ladder_*` nella
+  configurazione).
+- Ogni movimento va nel registro dell'ambiente (evento `scala`) con il motivo
+  e la quota che l'ha deciso. Le manopole si salvano con la configurazione.
+- I modi (`cfg.ladder`) sono quattro:
+  - `"scala"`: la progressione adattiva;
+  - `"basico"` e `"complesso"`: i due controlli, con le manopole ferme;
+  - `""`: nessuna scala.
+- Le statistiche di ogni generazione registrano le manopole, la posizione e
+  i cibi mangiati in media.
+- Riga di comando:
+  - `--task cibo` spegne il veleno;
+  - `--ladder` attiva la scala;
+  - `--controls` aggiunge, per ogni seme, le due popolazioni di controllo
+    nello stesso lotto, con lo stesso seme di partenza
+    (file `pop-s<seme>-<modo>.npz`).
+
+**Punto 4: misure** (non ancora committato)
+
+- **Esame a livelli** (versione 4, `evo/exam.py`): 8 livelli alle posizioni
+  0, 3/7, …, 3 della scala, con le manopole scritte nell'esame. Le corse nel
+  mondo del bersaglio continuano a fare l'esame versione 3.
+- **Lesioni** (`--exam FILE --lesion X`): si può togliere un senso (la
+  sensibilità a quel fenomeno viene azzerata in tutti i recettori), i neuroni
+  interni o la plasticità. Il risultato è registrato come esame con
+  lesione. Gli originali non cambiano.
+- **Fortuna**: per ogni generazione, `luck` = quota di chi completa tra il
+  quarto nato più vicino al cibo (`near`) e il quarto nato più lontano
+  (`far`).
+
+Test: 165, tutti superati (12 nuovi in `tests/test_ladder.py`, 10 in
+`tests/test_forage.py`, 5 nuovi in `tests/test_gpu.py`).
+
+### Prima prova: 150 generazioni, seme 7, scala e controlli
+
+Esame alla generazione 150 (i 20 più anziani di ogni popolazione):
+
+| Popolazione | L0 | L1 | L2 | L3 | L4 | L5–L7 |
+|---|---|---|---|---|---|---|
+| scala | 100% | 90% | 31% | 9% | 6% | 0% |
+| sempre basico | 96% | 52% | 7% | 0% | 0% | 0% |
+| sempre complesso | 4% | 0% | 0% | 0% | 0% | 0% |
+
+- **La scala serve**: la popolazione della scala supera il controllo basico a
+  ogni livello, senza perdere i livelli facili. Quella sempre nel mondo
+  complesso non trova mai genitori e riparte ogni volta da reti casuali.
+- **La fortuna non pesa più**:
+
+  | Riuscita | quarto più vicino | quarto più lontano |
+  |---|---|---|
+  | prime generazioni | 51% | 38% |
+  | scala, generazioni 135–150 | 27% | 30% |
+
+  Era il problema da cui siamo partiti.
+- **Lesioni sulla popolazione della scala** (media dell'esame, intatta: 29%):
+
+  | Tolto | Media | L0 |
+  |---|---|---|
+  | neuroni interni | 29% (invariata) | 100% |
+  | vista | 5% | 40% |
+  | senso interno | 25% | 99% |
+
+  Gli agenti usano la vista e quasi nient'altro, e non hanno neuroni interni:
+  il comportamento è ancora un riflesso.
+
+### Problemi aperti, da affrontare nella taratura
+
+1. **La scala si blocca alla fine del primo stadio.** Sale fino a 0,92–0,97 e
+   poi oscilla, con generazioni quasi senza vincitori (una volta 7 su 1.000).
+   Il passo verso "5 cibi da mangiare con 3 cibi in arena" è forse troppo
+   duro per l'energia disponibile. Prede e predatori non arrivano mai.
+2. **Il mondo non chiede ancora più cervello**: in media da 0 a 0,1 neuroni
+   interni.
+3. **Il mondo basico si impara subito** (dal 7% al 59% in 15 generazioni).
+   Le soglie e il passo della scala sono da rivedere.
+4. **Il controllo "sempre complesso" dice poco**: mostra solo che la scala
+   serve, perché la popolazione non si avvia mai.
+5. **La deriva lenta delle prede** quando l'agente è lontano non è ancora
+   fatta.
+
+### Da fare
+
+- **Punto 5, interfaccia.** Oggi `viz/render.py` disegna solo il bersaglio:
+  nel mondo del cibo non si vedono cibo, prede e predatori. Mancano anche le
+  manopole con il loro andamento, il profilo dell'esame, la scia del percorso
+  e le lesioni dall'interfaccia.
+- **Punto 6, taratura**, partendo dai problemi aperti qui sopra.
+- **Punto 7, primo esperimento**: scala e controlli, qualche migliaio di
+  generazioni, 4 semi. Poi il compito predefinito passa da `bersaglio` a
+  `cibo`.

@@ -240,6 +240,15 @@ class Config:
     predator_albedo: float = 0.8
     predator_vibration: float = 0.5
     predator_vibration_freq: float = 0.4
+    # La scala di difficoltà (evo/ladder.py): "" = nessuna, "scala" =
+    # progressione adattiva, "basico" / "complesso" = controlli con le
+    # manopole ferme a 0 / a 1. Le soglie sono strumenti di addestramento.
+    ladder: str = ""
+    ladder_window: int = 10  # generazioni su cui si media la riuscita
+    ladder_up: float = 0.3  # sopra questa quota la scala sale
+    ladder_down: float = 0.1  # sotto questa scende
+    ladder_step: float = 0.02  # di quanto si muove (posizione da 0 a 3)
+    ladder_crash: float = 0.05  # di quanto scende se nessuno completa
 
     # Pericoli (zone tossiche in deriva armonica). Il danno cresce dal bordo
     # (zero) al centro (hazard_drain) come profondità ** hazard_falloff.

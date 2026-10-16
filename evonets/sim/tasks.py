@@ -9,7 +9,8 @@ class ReachTarget:
     `completed(world) -> (N,) bool`; per renderlo più arduo se ne scrive un altro
     con la stessa interfaccia e lo si passa a `World`. Facoltativi:
     `spawn_ok(world, pos) -> (N,) bool` (dove gli agenti possono nascere) e
-    `step(world)` (il compito cambia durante la vita).
+    `step(world)` (il compito cambia durante la vita), `spawned(world)` (dopo
+    la nascita degli agenti).
     """
 
     name = "raggiungi il bersaglio"
@@ -117,6 +118,12 @@ class Foraging:
             d_pred = np.linalg.norm(pos[:, None, :] - self.pred[0][None, self.pred_on[0]], axis=2)
             ok &= (d_pred >= cfg.predator_min_dist).all(axis=1)
         return ok
+
+    def spawned(self, world) -> None:
+        """Dopo la nascita: distanza di ognuno dal cibo più vicino (per
+        misurare quanto pesa la fortuna)."""
+        on = self.food_on[0]
+        self.start_dist = np.linalg.norm(world.pos[:, None, :] - self.food[0][None, on], axis=2).min(axis=1)
 
     def discs(self, world):
         """Gli oggetti che si vedono, per agente: posizioni (N, O, 2), raggi

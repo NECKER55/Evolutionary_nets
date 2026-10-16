@@ -6,6 +6,10 @@
     uv run main.py --evolve 300 --select 5  # ... poi i sopravvissuti rifanno la prova 5 volte
     uv run main.py --exam runs/pop.npz      # esame fisso dei più anziani di un salvataggio
     uv run main.py --evolve 500 --seeds 4   # 4 semi insieme sulla GPU: runs/pop-s<seme>.npz
+    uv run main.py --task cibo --ladder --evolve 2000          # mondo del cibo, scala adattiva
+    uv run main.py --task cibo --ladder --controls --seeds 4 --evolve 2000
+                                            # scala + controlli (sempre basico, sempre complesso), 4 semi
+    uv run main.py --exam runs/pop.npz --lesion neuroni   # esame con i neuroni interni tolti
     uv run main.py --bench                  # throughput della simulazione senza grafica
 
 Senza --evolve né --bench le altre opzioni precompilano il menu.
@@ -21,7 +25,7 @@ import numpy as np
 from evonets import Config, World
 from evonets.evo import Evolution
 from evonets.evo.evolution import describe_change
-from evonets.evo.exam import TESTS
+from evonets.evo.exam import LESIONS, battery
 from evonets.net import NeuralController
 
 
@@ -69,34 +73,44 @@ def start(cfg: Config, seed: int, load: str | None) -> Evolution:
 
 def print_exam(r: dict) -> None:
     scores = "  ".join(f"{k} {v:.0%}" for k, v in r["scores"].items())
-    print(f"  ESAME gen. {r['generation']} ({r['who']} più anziani, {r['seconds']:.0f}s): "
+    lesion = f", senza {r['lesion']}" if r.get("lesion") else ""
+    print(f"  ESAME v{r['version']} gen. {r['generation']} ({r['who']} più anziani{lesion}, {r['seconds']:.0f}s): "
           f"media {r['score']:.0%}, migliore {r['best']:.0%} | {scores}")
 
 
-def exam(cfg: Config, path: str) -> None:
+def exam(cfg: Config, path: str, lesion: str | None = None) -> None:
     evo = Evolution.load(cfg, path)
-    print(f"esame di {path}, generazione {evo.generation}: {len(TESTS)} prove, "
-          f"{'; '.join(f'{t.name} ({t.what})' for t in TESTS)}")
-    evo.start_exam().run()
+    tests = battery(cfg)
+    print(f"esame di {path}, generazione {evo.generation}: {len(tests)} prove, "
+          f"{'; '.join(f'{t.name} ({t.what})' for t in tests)}" + (f"; lesione: {lesion}" if lesion else ""))
+    evo.start_exam(lesion=lesion).run()
     print_exam(evo.collect_exam())
     evo.save(path)
     print(f"risultato aggiunto al salvataggio ({len(evo.exams)} esami in tutto)")
 
 
-def evolve_many(cfg: Config, generations: int, seed: int, k: int, save: str, exam_every: int | None) -> None:
-    """K semi in parallelo, nello stesso lotto sulla GPU."""
+def evolve_many(cfg: Config, generations: int, seed: int, k: int, save: str, exam_every: int | None,
+                controls: bool = False) -> None:
+    """K semi in parallelo, nello stesso lotto sulla GPU. Con `controls`, per
+    ogni seme anche le due popolazioni di controllo della scala (sempre
+    basico, sempre complesso), con lo stesso seme di partenza."""
     import dataclasses
 
     from evonets.evo.evolution import run_together
 
-    evos = [Evolution(dataclasses.replace(cfg), seed + i) for i in range(k)]
+    modes = ("scala", "basico", "complesso") if controls else (cfg.ladder,)
+    evos = [Evolution(dataclasses.replace(cfg, ladder=m), seed + i) for i in range(k) for m in modes]
     if exam_every is not None:
         for e in evos:
             e.cfg.exam_every = exam_every
     path = Path(save)
-    paths = [path.with_name(f"{path.stem}-s{e.seed}{path.suffix}") for e in evos]
-    print(f"{k} semi ({seed}..{seed + k - 1}), {cfg.population} individui ciascuno, rete {cfg.net_type}")
-    print(" gen  completati per seme" + " " * (5 * k - 18) + "  neuroni  recett.")
+    paths = [path.with_name(f"{path.stem}-s{e.seed}{'-' + e.cfg.ladder if controls else ''}{path.suffix}")
+             for e in evos]
+    names = [f"s{e.seed}" + (f"-{e.cfg.ladder}" if controls else "") for e in evos]
+    print(f"{len(evos)} popolazioni ({', '.join(names)}), {cfg.population} individui ciascuna, rete {cfg.net_type}")
+    forage = cfg.task == "cibo"
+    print(" gen  completati per popolazione" + ("  (posizione nella scala 0-3)" if forage else "")
+          + "  neuroni  recett.")
     t0 = time.perf_counter()
     stop = stop_requested()
     for _ in range(generations):
@@ -108,18 +122,19 @@ def evolve_many(cfg: Config, generations: int, seed: int, k: int, save: str, exa
             for e, p in zip(evos, paths):
                 e.save(p)
         g = stats[0]["generation"]
-        print(f"{g:4d}  " + " ".join(f"{s['completed']:4d}" for s in stats)
+        print(f"{g:4d}  " + " ".join(f"{s['completed']:4d}" + (f" ({s['position']:.2f})" if forage else "")
+                                     for s in stats)
               + f"  {np.mean([s['neurons'] for s in stats]):7.1f}  {np.mean([s['receptors'] for s in stats]):7.1f}")
-        for e in evos:
+        for e, name in zip(evos, names):
             if e.exam_due():
                 e.start_exam().run()
                 r = e.collect_exam()
-                print(f"  seme {e.seed}: ", end="")
+                print(f"  {name}: ", end="")
                 print_exam(r)
     el = time.perf_counter() - t0
     for e, p in zip(evos, paths):
         e.save(p)
-    print(f"{generations} generazioni di {k} semi in {el:.0f}s ({el / generations:.2f}s l'una), salvati in "
+    print(f"{generations} generazioni di {len(evos)} popolazioni in {el:.0f}s ({el / generations:.2f}s l'una), salvati in "
           + ", ".join(str(p) for p in paths))
 
 
@@ -147,6 +162,7 @@ def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str
             f"{s['survivors']:8d}  {s['receptors']:7.1f}  {s['neurons']:7.1f}  {s['links']:9.1f}  {s['duration']:7.1f}  "
             f"{format(s['inhibitory'], '9.0%') if 'inhibitory' in s else '        -'}  "
             f"{'' if s['event'] == 'normale' else s['event']}"
+            + (f"  scala {s['position']:.2f}, mangiati {s['eaten']:.1f}" if "position" in s else "")
         )
         if evo.exam_due():
             evo.start_exam().run()
@@ -194,13 +210,28 @@ def main() -> None:
                     help="con --evolve: K semi (dal seme dato in su) insieme nello stesso lotto sulla GPU")
     ap.add_argument("--engine", choices=("gpu", "numpy"), default="gpu",
                     help="motore di simulazione: gpu = compilato con JAX (default), numpy = l'originale")
+    ap.add_argument("--task", choices=("bersaglio", "cibo"), default="bersaglio",
+                    help="compito: bersaglio = toccarlo una volta (il mondo di prima), "
+                         "cibo = nutrirsi (docs/SPEC_MONDO.md; senza veleno)")
+    ap.add_argument("--ladder", action="store_true",
+                    help="con --task cibo: la scala di difficoltà adattiva (evo/ladder.py)")
+    ap.add_argument("--controls", action="store_true",
+                    help="con --ladder e --evolve: per ogni seme anche le popolazioni di controllo "
+                         "(sempre basico, sempre complesso) nello stesso lotto")
+    ap.add_argument("--lesion", choices=LESIONS, help="con --exam: esame con quella parte tolta")
     ap.add_argument("--load", metavar="FILE", help="riprende da una popolazione salvata")
     ap.add_argument("--save", metavar="FILE",
                     help="dove salvare (default: runs/pop.npz con --evolve, un nome nuovo nel menu)")
     ap.add_argument("--bench", action="store_true", help="misura il throughput senza grafica")
     ap.add_argument("--steps", type=int, default=5000, help="step per --bench")
     args = ap.parse_args()
-    cfg = Config(net_type=args.net, engine=args.engine)
+    cfg = Config(net_type=args.net, engine=args.engine, task=args.task)
+    if args.task == "cibo":
+        cfg.n_hazards = 0  # il veleno resta spento in tutta la scala
+    if args.ladder or args.controls:
+        if args.task != "cibo":
+            ap.error("--ladder e --controls valgono solo con --task cibo")
+        cfg.ladder = "scala"
     seed = args.seed if args.seed is not None else secrets.randbelow(2**31)
     if args.bench:
         bench(cfg, args.agents or 1000, args.steps, seed)
@@ -208,9 +239,9 @@ def main() -> None:
     if args.agents:
         cfg.population = args.agents
     if args.exam:
-        exam(cfg, args.exam)
-    elif args.evolve and args.seeds > 1:
-        evolve_many(cfg, args.evolve, seed, args.seeds, args.save or "runs/pop.npz", args.exam_every)
+        exam(cfg, args.exam, args.lesion)
+    elif args.evolve and (args.seeds > 1 or args.controls):
+        evolve_many(cfg, args.evolve, seed, args.seeds, args.save or "runs/pop.npz", args.exam_every, args.controls)
     elif args.evolve:
         evolve(cfg, args.evolve, seed, args.load, args.save or "runs/pop.npz", args.select, args.exam_every)
     else:

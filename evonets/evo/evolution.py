@@ -10,6 +10,7 @@ from ..net.brain import META, Genome, pad
 from ..net.controllers import NeuralController
 from ..sim.world import World
 from ..net.receptors import scales
+from . import ladder
 from .exam import Exam, candidates
 from .genetics import grow, reproduce
 
@@ -52,14 +53,17 @@ def run_together(evos: list["Evolution"]) -> list[dict]:
     """Una generazione di più evoluzioni (per esempio più semi dello stesso
     esperimento) simulate insieme sulla GPU, nello stesso lotto. Servono la
     stessa popolazione, lo stesso tipo di rete e lo stesso numero di zone di
-    veleno; i posti di recettori e neuroni vengono pareggiati al più grande
+    veleno, lo stesso compito (le manopole del mondo del cibo possono essere
+    diverse: la scala e i suoi controlli girano insieme); i posti di
+    recettori e neuroni vengono pareggiati al più grande
     (posti spenti: non cambia nulla per nessuno). Restituisce le statistiche
     di ciascuna."""
     from ..gpu import available
     from ..gpu.sim import GpuWorlds, supported
     ok = (all(e.cfg.engine == "gpu" for e in evos) and available()
           and all(supported(e.world, e.ctrl) for e in evos)
-          and len({(e.world.n, e.cfg.net_type, len(e.world.hazards.pos)) for e in evos}) == 1)
+          and len({(e.world.n, e.cfg.net_type, len(e.world.hazards.pos), e.cfg.task, e.cfg.food_count_easy,
+                    e.cfg.predator_count_max) for e in evos}) == 1)
     if ok:
         r = max(e.ctrl.brains.n_in for e in evos)
         h = max(e.ctrl.brains.n_hidden for e in evos)
@@ -134,6 +138,7 @@ class Evolution:
 
     def __init__(self, cfg: Config, seed: int = 0, task=None):
         self.cfg = cfg
+        ladder.prepare(cfg)  # i controlli hanno le manopole ferme
         self.seed = seed  # il seme con cui è nata la corsa
         self.rng = np.random.default_rng(seed)
         self.world = World(cfg, cfg.population, seed, task)
@@ -277,6 +282,16 @@ class Evolution:
         }
         if hasattr(brains, "inhibitory"):  # quota di inibitori tra i neuroni interni esistenti
             stats["inhibitory"] = float(brains.inhibitory[brains.active].mean()) if brains.active.any() else 0.0
+        if cfg.task == "cibo":
+            stats["dials"] = ladder.dials(cfg)  # le manopole con cui ha vissuto
+            stats["position"] = ladder.position(cfg)
+            stats["eaten"] = float(world.task.eaten.mean())
+            if world.n == len(getattr(world.task, "start_dist", ())):
+                stats["luck"] = ladder.luck(world.task.start_dist, world.done)
+        moved = ladder.update(cfg, self.history + [stats])
+        if moved:  # vale dalla prossima generazione
+            self.log.append({"generation": self.generation + 1, "event": "scala", **moved})
+            self._seen.update(ladder.dials(cfg))
 
         genome = brains.genome
         if len(winners):

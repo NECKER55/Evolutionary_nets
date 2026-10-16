@@ -31,6 +31,8 @@ class World:
         self.hazards = HazardField(cfg, self.rng)
         self.task.reset(self)
         self.pos = self._spawn_positions()
+        if hasattr(self.task, "spawned"):
+            self.task.spawned(self)
         self.heading = self.rng.uniform(-np.pi, np.pi, self.n)
         self.vel = np.zeros((self.n, 2))
         self.ang_vel = np.zeros(self.n)
