@@ -1,10 +1,10 @@
 # Specifica: un mondo nuovo, dal basico al complesso
 
-Stato: **approvata** (2026-10-15). Fatti i punti 1–4 dell'ordine di lavoro:
+Stato: **approvata** (2026-10-15). Fatti i punti 1–5 dell'ordine di lavoro:
 mondo nei due motori con i test di equivalenza; scala adattiva
 (`evo/ladder.py`) e controlli nello stesso lotto (`--task cibo --ladder
 --controls`); esame a livelli (versione 4), lesioni (`--lesion`) e misura
-della fortuna (`luck` nelle statistiche). Mancano interfaccia, taratura e
+della fortuna (`luck` nelle statistiche); interfaccia. Mancano taratura e
 primo esperimento; il compito predefinito resta `bersaglio` fino ad allora.
 
 Scelte dell'utente:
@@ -55,7 +55,7 @@ proposte, da tarare con le misure.
 
 | Manopola | 0 (basico) | 1 (complesso) | Cosa richiede |
 |---|---|---|---|
-| **abbondanza** | 12 cibi, raggio 4 | 3 cibi, raggio 2 | cercare in modo efficiente |
+| **abbondanza** | 12 cibi, raggio 4 | 4 cibi, raggio 2 (era 3: vedi sezione 9) | cercare in modo efficiente |
 | **cibi necessari** (N) | 1 | 5 | affidabilità |
 | **prede** | cibo fermo | il cibo si accorge dell'agente entro 15 u e fugge a 12 u/s, fermandosi contro le pareti (la deriva lenta quando l'agente è lontano è rimandata alla taratura) | inseguire, prevedere, aggirare |
 | **predatori** | nessuno | 3 predatori che inseguono l'agente entro 40 u a 15 u/s (lui arriva a 30 a spinta piena, ma consuma molto); a contatto tolgono 60 energia al secondo | accorgersi in tempo, fuggire, scegliere tra mangiare e scappare |
@@ -149,7 +149,7 @@ proposte, da tarare con le misure.
 
 ---
 
-## 8. Stato dei lavori (aggiornato al 2026-10-16)
+## 8. Stato dei lavori (aggiornato al 2026-10-20)
 
 ### Fatto
 
@@ -186,7 +186,7 @@ proposte, da tarare con le misure.
   prede in fuga, cibi mangiati e morti.
 - Velocità invariata: con 1.000 agenti una generazione dura circa 0,4 s.
 
-**Punto 3: scala adattiva e più popolazioni** (non ancora committato)
+**Punto 3: scala adattiva e più popolazioni** (commit `6ffcff4`)
 
 - `evo/ladder.py`: tutte le manopole si riassumono in una **posizione** x da
   0 a 3, una unità per stadio. Lo stadio i ha le sue manopole a
@@ -210,7 +210,7 @@ proposte, da tarare con le misure.
     nello stesso lotto, con lo stesso seme di partenza
     (file `pop-s<seme>-<modo>.npz`).
 
-**Punto 4: misure** (non ancora committato)
+**Punto 4: misure** (commit `6ffcff4`)
 
 - **Esame a livelli** (versione 4, `evo/exam.py`): 8 livelli alle posizioni
   0, 3/7, …, 3 della scala, con le manopole scritte nell'esame. Le corse nel
@@ -225,6 +225,26 @@ proposte, da tarare con le misure.
 
 Test: 165, tutti superati (12 nuovi in `tests/test_ladder.py`, 10 in
 `tests/test_forage.py`, 5 nuovi in `tests/test_gpu.py`).
+
+**Punto 5: interfaccia**
+
+- **Arena** (`viz/render.py`): cibo (rosso), predatori (blu) con l'area in cui
+  inseguono, anello di fuga delle prede quando sono accese, scia del percorso
+  dell'agente seguito. Si disegna la copia di mondo dell'agente seguito. Nel
+  riquadro in alto: manopole, cibi mangiati su quelli necessari, distanza
+  dal predatore più vicino. Lo stesso nel banco di prova.
+- **Pagina principale** (`viz/app.py`): grafico della scala (posizione 0–3 con
+  gli stadi, cibi mangiati medi, manopole di adesso, fortuna vicini/lontani);
+  riquadro dei cibi medi; esame a livelli con l'andamento della media e il
+  profilo dell'ultimo esame (tacca bianca = primo esame, punto viola = ultima
+  lesione). Gli esami con lesione restano fuori dalla media e non bloccano
+  l'esame automatico.
+- **Lesioni dall'interfaccia**: tasto `L`, poi un numero per scegliere cosa
+  togliere.
+- **Menu**: righe "Mondo" (bersaglio o cibo) e "Scala" (adattiva, ferma al
+  basico, ferma al complesso). I due controlli insieme alla scala nello
+  stesso lotto restano dal terminale (`--controls`): l'interfaccia segue una
+  popolazione sola.
 
 ### Prima prova: 150 generazioni, seme 7, scala e controlli
 
@@ -275,11 +295,109 @@ Esame alla generazione 150 (i 20 più anziani di ogni popolazione):
 
 ### Da fare
 
-- **Punto 5, interfaccia.** Oggi `viz/render.py` disegna solo il bersaglio:
-  nel mondo del cibo non si vedono cibo, prede e predatori. Mancano anche le
-  manopole con il loro andamento, il profilo dell'esame, la scia del percorso
-  e le lesioni dall'interfaccia.
 - **Punto 6, taratura**, partendo dai problemi aperti qui sopra.
 - **Punto 7, primo esperimento**: scala e controlli, qualche migliaio di
   generazioni, 4 semi. Poi il compito predefinito passa da `bersaglio` a
   `cibo`.
+
+---
+
+## 9. Taratura 1: il gradino dei cibi e gli odori (2026-10-20)
+
+### Cosa non quadrava
+
+La corsa `corsa-20261020-130439` (rete a impulsi, 700 individui, scala
+adattiva, 1.537 generazioni) si è fermata per 1.300 generazioni attorno alla
+posizione 0,94, e l'esame non migliorava più dalla generazione 200.
+
+| Cibi in arena | Da mangiare | Generazioni | Riescono |
+|---|---|---|---|
+| 5 | 4 | 39 | 26% |
+| 4 | 5 | 769 | 25% |
+| 3 | 5 | 510 | 14% |
+| 3, prede accese | 5 | 175 | 15% |
+
+- **Un gradino, non una salita**: togliere un cibo su 4 tagliava la riuscita
+  di quasi metà. La scala saliva con 4 cibi e ricadeva con 3.
+- **Il cibo non si vedeva**: con l'attenuazione della luce a 12 u il cibo è
+  visibile entro 20–30 u, ma con 3 cibi il più vicino è in media a 54 u (entro
+  20 u solo nel 12% dei casi). La ricerca era quasi alla cieca, quindi un
+  cervello più grande non serviva.
+- Il corpo era rimasto minimo (un recettore usato, generalista; 1–2 neuroni) e
+  i tassi di mutazione erano scesi (ritocco dei pesi da 10% a 0,6%).
+
+### Scelte dell'utente
+
+- **Il primo stadio si ferma a 4 cibi** (`food_count_hard` = 4).
+- **Odori**: il cibo rilascia una molecola sua (0,6), i predatori un'altra
+  (0,35). Nube stabile `forza · e^(−d/λ)`, d dal bordo, λ = 25 u
+  (`odor_range`); le nubi si sommano. È la forma di equilibrio tra diffusione
+  e degradazione (come la "ficosfera" attorno alle alghe).
+- **La nube che sfugge è una difficoltà** (`forage_scent`, nello stadio 2
+  insieme alle prede): a 0 la nube è sempre in equilibrio; salendo, la nube di
+  un cibo appena comparso si forma come 1 − e^(−t/τ) e quella di un cibo
+  mangiato resta dov'era e svanisce come e^(−t/τ), con τ = manopola × 3 s
+  (`scent_time_max`).
+- Nessun gene nuovo: un recettore sensibile alle sostanze con l'adattamento
+  sottrattivo (gene già esistente) risponde ai cambiamenti, come il naso di un
+  batterio.
+
+### Cosa cambia nel codice
+
+- `sim/tasks.py`: `Foraging.odors` (le nubi nei punti del corpo di ogni
+  agente, nella sua copia di mondo) e `Foraging.scent` (forza di nube e
+  traccia); per ogni posto di cibo l'età, la traccia e da quanto è stata
+  lasciata.
+- `sim/signals.py`, `net/receptors.py`: le sostanze ricevono anche gli odori
+  del compito.
+- `gpu/engine.py`, `gpu/sim.py`: lo stesso, con i test di equivalenza.
+- `evo/ladder.py`: lo stadio 2 è "prede e odore che sfugge".
+- `evo/exam.py`: **esame a livelli versione 5** (4 cibi al massimo, odori
+  accesi, nube che sfugge nei livelli dello stadio 2). I punteggi della
+  versione 4 non si confrontano: la panoramica confronta solo esami della
+  stessa versione.
+- Salvataggi fatti prima degli odori: riprendono con gli odori spenti e il
+  registro lo annota (`ABSENT_CONFIG` in `evo/evolution.py`). Quelli con 3
+  cibi restano con 3 cibi (è nella loro configurazione).
+- Interfaccia: aloni d'odore e tracce nell'arena; la nube nello stato della
+  scala.
+
+### Da fare
+
+- Misurare, con una popolazione primordiale, quanto aiuta l'odore nel mondo
+  difficile (prima di lanciare un esperimento lungo).
+
+---
+
+## 10. Taratura 2: dare peso alla bravura (2026-10-20)
+
+### Cosa non quadrava
+
+Nella corsa `corsa-20261020-144156` (con odori, 2.701 generazioni) la scala si
+è fermata a 1,7 per 2.000 generazioni e l'esame non migliorava. Misurando ogni
+individuo su 30 arene (bravura vera):
+
+- la bravura vera variava di appena ±5% tra individui, ma la difficoltà
+  dell'arena di una generazione andava dal 2% al 53%;
+- in una prova sola i vincitori erano più bravi dei perdenti di 3 punti: la
+  selezione vedeva quasi solo la fortuna, e i figli perdevano per mutazione
+  quello che i genitori guadagnavano (equilibrio, e tassi di mutazione che
+  crollano perché mutare fa quasi solo danni);
+- l'odore non era usato (esame senza sostanze identico), un solo recettore
+  (un occhio a sensibilità 60), 0–1 neuroni.
+
+### Scelte dell'utente e misure
+
+| Cambio | Misura sulla popolazione di quella corsa |
+|---|---|
+| **un'arena per agente** (`forage_own_arena`) | dev. std della riuscita tra arene di una generazione: da 12,6% a 1,6% |
+| **fascia della scala 30–50%** (era 10–30%) | correlazione tra esito di una prova e bravura vera: 0,13 al 42% di riuscita contro 0,07 al 19% |
+| **vite più lunghe, fino a 10 cibi in 240 s** | da sola nessun effetto: si moriva di fame verso i 50 s (2,6 cibi in 120 s come in 240 s) |
+| **cibo da 100 di energia** (era 40) | 5,3 cibi in una vita; con 10 cibi necessari il 20% ce la fa: la cima è raggiungibile |
+
+Limite: la prova singola non diventa più informativa con vite più lunghe (0,14
+a parità di riuscita) finché la popolazione è quasi uniforme. Il collo di
+bottiglia è anche la poca varietà.
+
+Esame a livelli versione 6 (fino a 10 cibi in 240 s, cibo da 100, arena per
+agente). Le corse salvate prima riprendono con l'arena uguale per tutti.
