@@ -85,13 +85,19 @@ evonets/
     controllers.py     recettori -> rete -> comandi
     anatomy.py         struttura di una singola rete, genoma in testo
   evo/               evoluzione
-    genetics.py        incrocio, mutazione, duplicazione, crescita
-    evolution.py       ciclo delle generazioni, salvataggio
+    genetics.py        incrocio tra omologhi, mutazione, duplicazione, crescita
+    evolution.py       ciclo delle generazioni, campioni, selezione finale
+    saves.py           salvataggi: formato, scrittura sicura, ripresa con le regole recenti
     ladder.py          scala di difficoltà del mondo del cibo
     trial.py           valutazione di una rete su arene fisse
     exam.py            esame fisso e lesioni, in parallelo su più processi
   gpu/               motore compilato con JAX
   viz/               interfaccia (l'unica parte che usa la grafica)
+    app.py             finestra e corsa (pagina principale, arena)
+    launcher.py        menu
+    overview.py        panoramica della corsa, scritta a parole
+    render.py          arena e rete dal vivo
+    inspector.py       reti e genomi; testbench.py banco di prova; widgets.py controlli
 main.py              avvio: interfaccia, terminale, benchmark
 tests/               un file di test per ciascun gruppo
 ```

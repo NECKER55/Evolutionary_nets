@@ -28,7 +28,6 @@ from evonets.evo.evolution import describe_change
 from evonets.evo.exam import LESIONS, battery
 from evonets.net import NeuralController
 
-
 SAVE_EVERY = 25  # generazioni tra un salvataggio e l'altro, con --evolve
 
 

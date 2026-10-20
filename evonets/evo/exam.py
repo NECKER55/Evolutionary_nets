@@ -30,6 +30,7 @@ davvero.
 import dataclasses
 import multiprocessing
 import os
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, wait
 from dataclasses import dataclass, field
@@ -250,18 +251,16 @@ class Exam:
         self.seconds = 0.0
         self.workers = default_workers() if workers is None else workers
         self._pool, self._futures, self._trial = None, {}, None
+        self._thread, self._error = None, None
         if run_cfg.engine == "gpu" and _gpu_ready():
-            # Sulla GPU tutte le arene di una prova girano nello stesso lotto:
-            # niente processi separati.
+            # Sulla GPU tutte le arene di una prova girano nello stesso lotto,
+            # in un filo a parte: chi ha lanciato l'esame (l'interfaccia, la
+            # corsa) non si ferma ad aspettarlo. Niente processi separati: ognuno
+            # occuperebbe la scheda video per conto suo.
             self.workers = 0
             self.todo = []
-            for i, t in enumerate(self.tests):
-                trial = Trial(exam_config(run_cfg, t), genomes, arenas, clones, seed=EXAM_SEED + 10_000 * i,
-                              task=t.task())
-                trial.run(float("inf"))
-                self.wins[i] = trial.wins
-                self.done += arenas
-            self.seconds = time.perf_counter() - self.started
+            self._thread = threading.Thread(target=self._run_on_gpu, name="esame", daemon=True)
+            self._thread.start()
             return
         if self.workers > 1:
             try:
@@ -289,9 +288,27 @@ class Exam:
             self.seconds = time.perf_counter() - self.started
             self.close()
 
+    def _run_on_gpu(self) -> None:
+        try:
+            for i, t in enumerate(self.tests):
+                trial = Trial(exam_config(self.run_cfg, t), self.genomes, self.arenas, self.clones,
+                              seed=EXAM_SEED + 10_000 * i, task=t.task())
+                trial.run(float("inf"))
+                self.wins[i] = trial.wins
+                self.seconds = time.perf_counter() - self.started
+                self.done += self.arenas
+        except Exception as err:  # riportato a chi raccoglie il risultato
+            self._error = err
+
     def run(self, budget: float = float("inf")) -> None:
-        """In parallelo: raccoglie le arene finite (con `budget` infinito
-        aspetta tutte). Qui: avanza per circa `budget` secondi di calcolo."""
+        """In parallelo (processi o, sulla GPU, un filo a parte): raccoglie le
+        arene finite (con `budget` infinito aspetta tutte). Qui: avanza per
+        circa `budget` secondi di calcolo."""
+        if self._thread is not None:
+            self._thread.join(None if budget == float("inf") else 0.0)
+            if self._error is not None:
+                raise self._error
+            return
         if self._pool is not None:
             ready = wait(self._futures, timeout=None if budget == float("inf") else 0).done
             for f in ready:
@@ -312,7 +329,8 @@ class Exam:
                 self._record(i, trial.wins)
 
     def close(self) -> None:
-        """Ferma i processi (anche a esame non finito: il risultato si perde)."""
+        """Ferma i processi (anche a esame non finito: il risultato si perde).
+        Un esame sulla GPU finisce da solo in sottofondo e viene scartato."""
         if self._pool is not None:
             self._pool.shutdown(wait=False, cancel_futures=True)
             self._pool = None

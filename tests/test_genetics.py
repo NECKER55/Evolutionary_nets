@@ -109,16 +109,6 @@ def test_mutation_touches_every_kind_of_gene():
     assert (g.active != before.active).any() and (g.r_active != before.r_active).any()
 
 
-def test_strength_makes_mutations_more_frequent_and_larger():
-    cfg, a = population(n=200)
-    _, b = population(n=200)
-    start = a.take(np.arange(200))
-    mutate(a, cfg, np.random.default_rng(5), strength=1.0)
-    mutate(b, cfg, np.random.default_rng(5), strength=4.0)
-    assert (b.conn != start.conn).sum() > 2.5 * (a.conn != start.conn).sum()
-    assert np.abs(b.weights - start.weights).mean() > 6 * np.abs(a.weights - start.weights).mean()
-
-
 def test_same_rng_seed_gives_the_same_children():
     cfg, parents = population()
     a = reproduce(parents, 50, cfg, np.random.default_rng(6))
@@ -190,7 +180,7 @@ def test_slots_grow_when_someone_fills_them():
 
 def test_children_are_working_networks():
     cfg, parents = population()
-    kids = reproduce(parents.take([0, 1, 2]), 60, cfg, np.random.default_rng(7), strength=3.0)
+    kids = reproduce(parents.take([0, 1, 2]), 60, cfg, np.random.default_rng(7))
     brains = Brains(cfg, 4, N_OUT, 0)
     brains.set_genome(kids)
     assert brains.n == 60 and brains.state.shape == (60, brains.n_hidden + N_OUT)

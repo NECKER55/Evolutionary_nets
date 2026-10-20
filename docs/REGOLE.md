@@ -704,6 +704,10 @@ indicativi.
 
 ## 21. I salvataggi
 
+I salvataggi (`evo/saves.py`) si scrivono in modo sicuro: prima un file
+temporaneo, poi lo si mette al posto del vecchio in un colpo solo. Se il
+programma si interrompe a metà, il salvataggio precedente resta intatto.
+
 I salvataggi contengono la popolazione, la storia e il campione di ogni
 generazione (circa 20 KB l'uno: una corsa di migliaia di generazioni occupa
 qualche decina di MB, in memoria e su disco). Contengono anche la

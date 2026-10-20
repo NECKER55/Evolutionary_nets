@@ -6,6 +6,7 @@ from ..net.brain import Genome
 from ..net.controllers import NeuralController
 from ..sim.world import World
 
+
 def _task_args(task) -> dict:
     """Gli argomenti con cui ricreare un compito dello stesso tipo."""
     return {k: getattr(task, k) for k in ("min_dist", "speed") if hasattr(task, k)}

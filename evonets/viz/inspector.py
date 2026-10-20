@@ -16,8 +16,22 @@ import numpy as np
 import pygame
 
 from ..net.anatomy import KIND_NAMES, Anatomy, sizes
-from .render import (BG, BORDER, DEAD, DIM, EXCITE, GENERALIST, IDLE, INHIBIT, MOCK, MODULATOR, PHENOMENON_COLOR,
-                     PLAYER, TARGET, TEXT)
+from .render import (
+    BG,
+    BORDER,
+    DEAD,
+    DIM,
+    EXCITE,
+    GENERALIST,
+    IDLE,
+    INHIBIT,
+    MOCK,
+    MODULATOR,
+    PHENOMENON_COLOR,
+    PLAYER,
+    TARGET,
+    TEXT,
+)
 
 ROW = 20
 LINE = 16

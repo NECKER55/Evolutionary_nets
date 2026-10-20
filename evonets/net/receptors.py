@@ -27,7 +27,15 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..sim import signals
-from ..sim.signals import CHEMICAL, INTERNAL, LIGHT, MAGNETIC, MECHANICAL, PHENOMENA, THERMAL
+from ..sim.signals import (
+    CHEMICAL,
+    INTERNAL,
+    LIGHT,
+    MAGNETIC,
+    MECHANICAL,
+    PHENOMENA,
+    THERMAL,
+)
 
 P = len(PHENOMENA)
 MIN_APERTURE = np.radians(1.0)

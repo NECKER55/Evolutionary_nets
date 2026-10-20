@@ -206,7 +206,7 @@ class Config:
 
     # Compito: "cibo" = nutrirsi (docs/SPEC_MONDO.md), "bersaglio" = toccare il
     # bersaglio una volta (il mondo di prima, per le corse vecchie).
-    task: str = "bersaglio"  # diventerà "cibo" quando il nuovo mondo sarà completo (motore GPU, scala, esame)
+    task: str = "bersaglio"  # il mondo predefinito; "cibo" è completo (docs/SPEC_MONDO.md) e si sceglie da menu o --task
     target_radius: float = 3.0
 
     # Il mondo del cibo. Ogni agente ha la sua copia di cibo e predatori.

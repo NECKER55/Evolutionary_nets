@@ -14,7 +14,19 @@ import pygame
 
 from ..evo import ladder
 from ..net.anatomy import KIND_NAMES
-from .render import BORDER, DIM, FOOD, IDLE, MODULATOR, PLAYER, PREDATOR, TARGET, TEXT, WALL, plot
+from .render import (
+    BORDER,
+    DIM,
+    FOOD,
+    IDLE,
+    MODULATOR,
+    PLAYER,
+    PREDATOR,
+    TARGET,
+    TEXT,
+    WALL,
+    plot,
+)
 
 PANEL = (22, 25, 33)
 BAND = (46, 52, 38)

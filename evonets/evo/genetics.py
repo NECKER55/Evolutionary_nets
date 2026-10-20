@@ -276,10 +276,8 @@ def knockout(g: Genome, mu: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return 1.0 - (1.0 - m) ** RECEPTOR_GENE_LENGTH * np.ones(g.r_active.shape), 1.0 - (1.0 - m) ** length
 
 
-def mutate(genome: Genome, cfg: Config, rng: np.random.Generator, strength: float = 1.0) -> None:
-    """Muta sul posto, con i tassi del figlio (ereditati dai genitori).
-    `strength` scala frequenza e ampiezza (>1 = variazioni più consistenti,
-    per il soccorso)."""
+def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
+    """Muta sul posto, con i tassi del figlio (ereditati dai genitori)."""
     g = genome
     n = len(g)
     inherited = np.exp(g.meta)  # i tassi di questa nascita: quelli ereditati
@@ -288,7 +286,7 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator, strength: floa
         return inherited[:, META_INDEX[name]]
 
     def rate(name):
-        return base(name) * strength
+        return base(name)
 
     def chance(shape, p):
         return rng.random(shape) < np.minimum(1.0, p).reshape((n,) + (1,) * (len(shape) - 1))
@@ -300,20 +298,20 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator, strength: floa
     # questi ultimi sono geni come gli altri (in scala logaritmica: un ritocco
     # cambia un tasso di un fattore, non di una quantità fissa). I tassi usati
     # in questa nascita sono quelli ereditati, letti prima del ritocco.
-    p_w, std_w = rate("weight_prob"), base("weight_std") * strength
+    p_w, std_w = rate("weight_prob"), base("weight_std")
     for values in (g.weights, g.traits, g.meta):
         values += chance(values.shape, p_w) * noise(values.shape, std_w)
     clamp_meta(g.meta, cfg)
 
     # 2. Posizioni nel cervello: interni e ingressi dei recettori.
-    p_pos, std_pos = rate("pos_prob"), base("pos_std") * strength
+    p_pos, std_pos = rate("pos_prob"), base("pos_std")
     g.pos += chance(g.pos.shape[:2], p_pos)[:, :, None] * noise(g.pos.shape, std_pos)
     np.clip(g.pos, 0.0, 1.0, out=g.pos)
     g.r_y += chance(g.r_y.shape, p_pos) * noise(g.r_y.shape, std_pos)
     np.clip(g.r_y, 0.0, 1.0, out=g.r_y)
 
     # 3. Geni dei recettori: ognuno deriva nella sua scala.
-    drift = base("rec_drift") * strength
+    drift = base("rec_drift")
     for field in ("r_sens", "r_mu", "r_width", "r_aperture", "r_tau", "r_sub", "r_div"):
         a = getattr(g, field)
         a += chance(a.shape, p_w) * noise(a.shape, drift * DRIFT_SCALE[field])
@@ -352,8 +350,7 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator, strength: floa
     _duplicate(g, rng, np.minimum(1.0, rate("dup")), cfg.receptor_dup_split)
 
 
-def reproduce(parents: Genome, n_children: int, cfg: Config, rng: np.random.Generator,
-              strength: float = 1.0) -> Genome:
+def reproduce(parents: Genome, n_children: int, cfg: Config, rng: np.random.Generator) -> Genome:
     """`n_children` figli da genitori scelti tutti con la stessa probabilità.
 
     Ogni figlio ha una madre; con la probabilità scritta nel gene "sex" della
@@ -368,7 +365,7 @@ def reproduce(parents: Genome, n_children: int, cfg: Config, rng: np.random.Gene
         # Uno scarto tra 1 e n-1 garantisce un padre diverso dalla madre.
         fathers[two] = (mothers[two] + rng.integers(1, n_parents, int(two.sum()))) % n_parents
     children = crossover(parents, mothers, fathers, rng, cfg.receptor_dup_split)
-    mutate(children, cfg, rng, strength)
+    mutate(children, cfg, rng)
     return children
 
 
