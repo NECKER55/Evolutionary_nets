@@ -292,3 +292,13 @@ def test_how_often_mothers_mate_is_their_own_gene():
 
     assert clones(1e-9) == 200  # madri che non si accoppiano mai: solo copie
     assert clones(1.0) < 20  # madri che si accoppiano sempre
+
+
+def test_more_food_more_children():
+    cfg, parents = population(n=3, **FROZEN)
+    parents.meta[:, META_INDEX["sex"]] = np.log(1e-9)  # solo copie: si conta di chi è ogni figlio
+    kids = reproduce(parents, 900, cfg, np.random.default_rng(2), fecundity=np.array([1.0, 2.0, 6.0]))
+    counts = [sum(same(kids.take([k]), parents.take([p]), ("weights", "conn")) for k in range(900))
+              for p in range(3)]
+    assert sum(counts) == 900 and counts[0] < counts[1] < counts[2]
+    assert abs(counts[2] / 900 - 6 / 9) < 0.06

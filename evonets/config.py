@@ -27,6 +27,12 @@ class Config:
     # rumorosa; con 150 le reti evolute riescono meglio anche se poi messe alla
     # prova con 100 (vedi docs/NOTE.md, "Energia iniziale").
     energy_init: float = 150.0
+    # Riserve: quanta energia si può accumulare mangiando (oltre si spreca) e
+    # quanto pesa quella oltre la partenza: il costo del movimento cresce di
+    # reserve_mass volte la quota in più (energia in più / energy_init), come
+    # il peso del grasso. Con energy_max = energy_init niente riserve.
+    energy_max: float = 450.0  # con 150 (nessuna riserva) la bravura spiegava il 17% del successo, con 450 il 36%
+    reserve_mass: float = 0.5  # riserve piene: il movimento costa il doppio
     metabolism_basal: float = 2.5  # energia/s solo per esistere
     # Movimento: a spinta piena il consumo totale è 5 volte quello a riposo,
     # come lo sforzo massimo sostenibile di un pesce ("aerobic scope", da 2-3 a
@@ -179,6 +185,11 @@ class Config:
     # motore (esistenza, geni propri, posizione, collegamenti in ingresso),
     # uno per recettore, uno per il meccanismo di mutazione.
     crossover_rate: float = 0.5  # valore di partenza del gene "sex": quota di figli con un partner
+    # Riproduzione come in natura (mondo del cibo): chi ha completato il compito
+    # è maturo e fa figli in proporzione al cibo mangiato in tutta la vita
+    # (anche il partner è scelto così); la sua vita continua dopo la maturità.
+    fecundity_by_food: bool = True
+    mature_keep_living: bool = True
     # Mutazioni: questi sono solo i valori di PARTENZA. Ogni individuo ha i
     # suoi tassi come geni, che mutano come tutti gli altri geni (con la
     # probabilità e l'ampiezza di ritocco dell'individuo stesso) e non scendono

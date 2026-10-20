@@ -48,6 +48,7 @@ def pack_params(world, ctrl) -> dict:
         anchor=hz.anchor.reshape(-1, 2), amp=hz.amp.reshape(-1, 2), omega=hz.omega.reshape(-1, 2),
         pulse_omega=hz.pulse_omega, base_radius=hz.base_radius,
         target_r=task.radius if has_target else 0.0, has_target=float(has_target),
+        keep_living=float(world.keep_living),
     )
     if b.KIND == "spike-ei":
         params.update(keep_n=b.keep, active_n=b.active)
@@ -132,18 +133,18 @@ class GpuWorlds:
         if key not in GpuWorlds._compiled:
             step = engine.make_step(self.net, self.h, self.cfg.spike_substeps)
             vstep = jax.vmap(step, in_axes=(None, 0, 0, None))
-            vrun = jax.vmap(engine.running, in_axes=(None, 0))
+            vrun = jax.vmap(engine.running, in_axes=(None, 0, 0))
 
             def advance(ph, P, s, manual, k):
                 """k passi (o meno, se tutti i mondi finiscono): i mondi finiti
                 restano fermi."""
                 def cond(c):
                     i, s = c
-                    return (i < k) & vrun(ph, s).any()
+                    return (i < k) & vrun(ph, P, s).any()
 
                 def body(c):
                     i, s = c
-                    live = vrun(ph, s)
+                    live = vrun(ph, P, s)
                     new = vstep(ph, P, s, manual)
                     s = jax.tree_util.tree_map(
                         lambda a, b: jnp.where(live.reshape((-1,) + (1,) * (a.ndim - 1)), a, b), new, s)

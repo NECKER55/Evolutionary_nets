@@ -247,5 +247,5 @@ def body(cfg, world, rows: np.ndarray) -> np.ndarray:
     def pos(x):
         return np.clip(x, 0.0, 1.0)
 
-    return np.stack([np.clip(world.energy[rows] / cfg.energy_init, 0.0, 1.0),
+    return np.stack([np.clip(world.energy[rows] / cfg.energy_max, 0.0, 1.0),
                      pos(fwd), pos(-fwd), pos(lat), pos(-lat), pos(rot), pos(-rot)], axis=1)

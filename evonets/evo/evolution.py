@@ -138,7 +138,7 @@ class Evolution:
     @property
     def finished(self) -> bool:
         w = self.world
-        return not (w.alive & ~w.done).any() or w.t >= self.cfg.life_max
+        return w.over
 
     def gpu(self):
         """La simulazione della generazione in corso sul motore compilato, o
@@ -268,12 +268,19 @@ class Evolution:
                                    int(self.ids[champion])))
             parents = genome.take(winners)
             self.last_parents = parents
-            keep = winners if cfg.max_age <= 0 else winners[self.age[winners] + 1 < cfg.max_age]
+            # Fecondità: come in natura, più cibo mangiato in tutta la vita, più figli.
+            fecundity = None
+            if cfg.fecundity_by_food and hasattr(world.task, "eaten"):
+                fecundity = world.task.eaten[winners].astype(float)
+            # Sopravvivono i maturi ancora vivi (con la vita che continua si può
+            # morire anche dopo essere diventati maturi).
+            keep = winners[world.alive[winners]]
+            keep = keep if cfg.max_age <= 0 else keep[self.age[keep] + 1 < cfg.max_age]
             survivors, survivor_age, survivor_ids = genome.take(keep), self.age[keep] + 1, self.ids[keep]
             survivor_born = self.born[keep]
             stats["event"] = NORMAL if len(winners) > 1 else ONE_PARENT
         else:
-            parents = self.last_parents
+            parents, fecundity = self.last_parents, None
             survivors, survivor_age, survivor_ids = genome.take([]), np.zeros(0, dtype=int), self.ids[:0]
             survivor_born = self.born[:0]
             stats["event"] = RESTART if parents is not None else RANDOM
@@ -282,7 +289,7 @@ class Evolution:
             fresh = NeuralController(cfg, n, int(self.rng.integers(2**31)))
             new = fresh.brains.genome
         else:
-            children = reproduce(parents, n - len(survivors), cfg, self.rng)
+            children = reproduce(parents, n - len(survivors), cfg, self.rng, fecundity)
             new = Genome.concat([survivors, children])
         stats["survivors"] = len(survivors)
         new = grow(new, cfg)  # posti nuovi se qualcuno li ha quasi finiti

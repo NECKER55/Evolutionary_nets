@@ -56,7 +56,7 @@ class TestScreen:
     @property
     def over(self) -> bool:
         w = self.world
-        return not (w.alive & ~w.done).any() or w.t >= self.cfg.life_max
+        return w.over
 
     def handle(self, ev) -> None:
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and self.renderer.arena.collidepoint(ev.pos):
@@ -137,7 +137,7 @@ class TestScreen:
         ]
         if self.k > 1:
             hud.append((f"in questa arena: completato {int(w.done.sum())}/{self.k}   "
-                        f"morti {int((~w.alive).sum())}   in corsa {int((w.alive & ~w.done).sum())}", TEXT))
+                        f"morti {int((~w.alive).sum())}   in corsa {int(w.racing.sum())}", TEXT))
         hud += [
             (f"seguito: {self.labels[i]}: {status}   energia {w.energy[i]:5.1f}   v={w.speed[i]:5.1f} u/s", PLAYER),
             *([(self.renderer.task_line(i), PLAYER)] if self.renderer.task_line(i) else []),

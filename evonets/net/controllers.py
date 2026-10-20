@@ -78,10 +78,11 @@ class NeuralController:
 
     def act(self, world) -> np.ndarray:
         """Comandi di tutti gli agenti. Si calcolano solo per chi è ancora in
-        gara: per i morti e per chi ha completato la fisica ignora i comandi,
-        quindi danno 0 e la loro rete resta ferma. Il risultato della corsa non
-        cambia, il calcolo si alleggerisce man mano che la gara si sfoltisce."""
-        racing = world.alive & ~world.done
+        gara (`World.racing`): per i morti e per chi ha completato e si ferma
+        la fisica ignora i comandi, quindi danno 0 e la loro rete resta ferma.
+        Il risultato della corsa non cambia, il calcolo si alleggerisce man mano
+        che la gara si sfoltisce."""
+        racing = world.racing
         if self.obs.shape != (world.n, self.brains.n_in):
             self.obs = np.zeros((world.n, self.brains.n_in))
         if racing.all():

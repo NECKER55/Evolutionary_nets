@@ -350,20 +350,37 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     _duplicate(g, rng, np.minimum(1.0, rate("dup")), cfg.receptor_dup_split)
 
 
-def reproduce(parents: Genome, n_children: int, cfg: Config, rng: np.random.Generator) -> Genome:
-    """`n_children` figli da genitori scelti tutti con la stessa probabilità.
+def reproduce(parents: Genome, n_children: int, cfg: Config, rng: np.random.Generator,
+              fecundity: np.ndarray | None = None) -> Genome:
+    """`n_children` figli dai genitori.
 
     Ogni figlio ha una madre; con la probabilità scritta nel gene "sex" della
-    madre nasce con un partner (un altro genitore a caso), altrimenti è una sua
-    copia. Poi tutti vengono mutati.
+    madre nasce con un partner (un altro genitore), altrimenti è una sua
+    copia. Poi tutti vengono mutati. Madri e partner si scelgono con
+    probabilità proporzionale a `fecundity` (per esempio il cibo mangiato in
+    tutta la vita: più risorse, più figli, come in natura); senza, tutti i
+    genitori valgono uguale.
     """
     n_parents = len(parents)
-    mothers = rng.integers(0, n_parents, n_children)
+    if fecundity is not None and not np.sum(fecundity) > 0:
+        fecundity = None  # nessuno ha risorse da contare: tutti uguali
+    if fecundity is None:
+        mothers = rng.integers(0, n_parents, n_children)
+    else:
+        weight = np.asarray(fecundity, dtype=float) / np.sum(fecundity)
+        mothers = rng.choice(n_parents, n_children, p=weight)
     fathers = mothers.copy()
     if n_parents > 1:
         two = rng.random(n_children) < parents.rate("sex")[mothers]
-        # Uno scarto tra 1 e n-1 garantisce un padre diverso dalla madre.
-        fathers[two] = (mothers[two] + rng.integers(1, n_parents, int(two.sum()))) % n_parents
+        if fecundity is None:
+            # Uno scarto tra 1 e n-1 garantisce un padre diverso dalla madre.
+            fathers[two] = (mothers[two] + rng.integers(1, n_parents, int(two.sum()))) % n_parents
+        else:
+            for c in np.flatnonzero(two):  # il partner: un altro genitore, secondo la sua fecondità
+                w = weight.copy()
+                w[mothers[c]] = 0.0
+                if w.sum() > 0:
+                    fathers[c] = rng.choice(n_parents, p=w / w.sum())
     children = crossover(parents, mothers, fathers, rng, cfg.receptor_dup_split)
     mutate(children, cfg, rng)
     return children

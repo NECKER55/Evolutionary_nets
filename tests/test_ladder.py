@@ -137,3 +137,14 @@ def test_a_lesion_exam_does_not_replace_the_scheduled_exam():
     assert evo.exam_due()  # la lesione è un'altra misura: l'esame della corsa va fatto lo stesso
     evo.exams.append({"generation": 10, "lesion": None})
     assert not evo.exam_due()
+
+
+def test_only_mature_agents_still_alive_survive_and_children_follow_the_food():
+    evo = Evolution(forage(engine="numpy"), 3)
+    w = evo.world
+    w.done[:] = False
+    w.done[:4] = True
+    w.alive[3] = False  # maturo, ma morto dopo
+    w.task.eaten[:4] = [10, 10, 10, 30]
+    s = evo.next_generation()
+    assert s["survivors"] == 3 and s["completed"] == 4

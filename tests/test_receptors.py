@@ -146,7 +146,7 @@ def test_internal_receptor_reads_the_body():
 
 
 def test_noise_follows_counting_statistics_and_saturates():
-    cfg = Config()
+    cfg = Config(energy_max=150.0)  # il senso dell'energia vale 1 a energia di partenza
     w = world(cfg, target=(110.0, 70.0))
     g = genes(n=4000, sens=-50.0)  # insensibile a tutto...
     g.sens[:, :, INTERNAL] = np.log(40.0 / cfg.receptor_scale_internal)  # ...tranne l'energia (vale 1): 40 quanti
@@ -227,7 +227,7 @@ def test_without_adaptation_the_fast_path_matches_the_reference_response():
 
 
 def test_subtractive_adaptation_answers_changes_and_forgets_a_constant_signal():
-    cfg = Config(receptor_dark=1e-9)
+    cfg = Config(receptor_dark=1e-9, energy_max=150.0)
     w = world(cfg, n=200)
     g = _energy_receptor(200, quanta=60.0, sub=1.0, tau=np.log(0.5))
     w.energy[:] = cfg.energy_init / 3  # il segnale vale 1/3: 20 quanti
@@ -242,7 +242,7 @@ def test_subtractive_adaptation_answers_changes_and_forgets_a_constant_signal():
 
 
 def test_divisive_adaptation_answers_contrast_not_level():
-    cfg = Config(receptor_dark=1e-9)
+    cfg = Config(receptor_dark=1e-9, energy_max=150.0)
     out = []
     for level in (1.0, 4.0):  # stesso contrasto (+50%) su due livelli di fondo diversi
         w = world(cfg, n=400)

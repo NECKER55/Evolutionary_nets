@@ -61,7 +61,7 @@ def test_energy_does_not_exceed_the_full_stomach():
     cfg, w = forage()
     w.pos[0] = w.task.food[0, 0]
     w.step(np.zeros((w.n, 2)))
-    assert w.energy[0] <= cfg.energy_init
+    assert w.energy[0] <= cfg.energy_max
 
 
 def test_more_food_is_needed_when_the_dial_says_so():
@@ -166,3 +166,24 @@ def test_without_the_scent_dial_the_cloud_is_always_formed():
     w.task.age[:] = 0.0
     on, trace = w.task.scent()
     assert (on == 1.0).all() and (trace == 0.0).all()
+
+
+def test_a_mature_agent_keeps_living_and_eating():
+    cfg, w = forage(forage_need=0.0)  # ne basta uno
+    t = w.task
+    w.pos[0] = t.food[0, 0]
+    w.step(np.array([[1.0, 0.0]] * w.n))
+    assert w.done[0] and w.keep_living and w.racing[0]
+    before = w.pos[0].copy()
+    w.step(np.array([[1.0, 0.0]] * w.n))
+    assert not np.allclose(w.pos[0], before)  # continua a muoversi
+    w.pos[0] = t.food[0, 1]
+    w.step(np.zeros((w.n, 2)))
+    assert t.eaten[0] == 2  # e a mangiare
+
+
+def test_without_keep_living_a_mature_agent_stops_as_before():
+    cfg, w = forage(forage_need=0.0, mature_keep_living=False)
+    w.pos[0] = w.task.food[0, 0]
+    w.step(np.zeros((w.n, 2)))
+    assert w.done[0] and not w.racing[0]

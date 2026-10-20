@@ -49,7 +49,7 @@ class Trial:
         before = w.done.copy()
         w.step(self.ctrl.act(w), self.ctrl.upkeep)
         self.done_at[w.done & ~before] = w.t
-        if (w.alive & ~w.done).any() and w.t < self.cfg.life_max:
+        if not w.over:
             return
         self.completed.append(int(w.done.sum()))
         self.wins += np.bincount(self.owner[w.done], minlength=self.k)

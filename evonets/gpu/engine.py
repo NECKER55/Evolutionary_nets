@@ -37,7 +37,8 @@ F = jnp.float32
 # compilati dentro), così cambiarle dal vivo non richiede di ricompilare.
 PHYS = (
     "arena_w", "arena_h", "dt", "agent_radius", "thrust_accel", "reverse_factor", "lin_drag", "lat_drag",
-    "turn_accel", "ang_drag", "wall_restitution", "energy_init", "metabolism_basal", "metabolism_move",
+    "turn_accel", "ang_drag", "wall_restitution", "energy_init", "energy_max", "reserve_mass",
+    "metabolism_basal", "metabolism_move",
     "metabolism_turn", "metabolism_exponent", "light_attenuation", "hazard_drain", "hazard_falloff", "hazard_pulse", "hazard_speed",
     "toxin_molecule", "hazard_smell", "target_molecule", "target_smell", "smell_range", "vibration_range",
     "target_vibration", "target_vibration_freq", "hazard_vibration", "hazard_vibration_freq",
@@ -219,7 +220,7 @@ def body(ph, s):
     def pos(x):
         return jnp.clip(x, 0.0, 1.0)
 
-    return jnp.stack([jnp.clip(s["energy"] / ph["energy_init"], 0.0, 1.0),
+    return jnp.stack([jnp.clip(s["energy"] / ph["energy_max"], 0.0, 1.0),
                       pos(fwd), pos(-fwd), pos(lat), pos(-lat), pos(rot), pos(-rot)], 1)
 
 
@@ -320,7 +321,7 @@ def physics(ph, P, s, actions, upkeep):
     v_fwd = (v_fwd + thrust * ph["thrust_accel"] * dt) * jnp.exp(-ph["lin_drag"] * dt)
     k = jnp.exp(-ph["lat_drag"] * dt)
     vel = jnp.stack([v_fwd * fx + lx * k, v_fwd * fy + ly * k], 1)
-    active = (s["alive"] > 0) & (s["done"] <= 0)
+    active = in_race(P, s)
     vel = jnp.where(active[:, None], vel, 0.0)
     ang_vel = jnp.where(active, ang_vel, 0.0)
     pos = s["pos"] + vel * dt
@@ -338,8 +339,9 @@ def physics(ph, P, s, actions, upkeep):
     hz_r = P["base_radius"] * (1.0 + ph["hazard_pulse"] * jnp.sin(pulse))
     d = jnp.sqrt(((pos[:, None, :] - hz_pos[None]) ** 2).sum(-1)) - hz_r[None]
     toxicity = (jnp.clip(-d / hz_r[None], 0.0, 1.0) ** ph["hazard_falloff"]).sum(1) * active
-    effort = (ph["metabolism_basal"] + ph["metabolism_move"] * jnp.abs(act[:, 0]) ** ph["metabolism_exponent"]
-              + ph["metabolism_turn"] * jnp.abs(turn) ** ph["metabolism_exponent"] + upkeep) * active
+    mass = 1.0 + ph["reserve_mass"] * jnp.maximum(s["energy"] - ph["energy_init"], 0.0) / ph["energy_init"]
+    effort = (ph["metabolism_basal"] + mass * ph["metabolism_move"] * jnp.abs(act[:, 0]) ** ph["metabolism_exponent"]
+              + mass * ph["metabolism_turn"] * jnp.abs(turn) ** ph["metabolism_exponent"] + upkeep) * active
     energy = jnp.maximum(s["energy"] - (effort + ph["hazard_drain"] * toxicity) * dt, 0.0)
     forage = {}
     if "food" in s:
@@ -412,7 +414,7 @@ def foraging(ph, P, s, pos, energy, active):
     ghost = jnp.where(eat[..., None], food, s["ghost"])  # la nube del cibo mangiato resta lì e svanisce
     food = jnp.where(eat[..., None], jnp.where(far[..., None], a, b), food)
     n_eat = eat.sum(1)
-    energy = jnp.where(n_eat > 0, jnp.minimum(energy + ph["food_energy"] * n_eat, ph["energy_init"]), energy)
+    energy = jnp.where(n_eat > 0, jnp.minimum(energy + ph["food_energy"] * n_eat, ph["energy_max"]), energy)
     age = jnp.where(eat, 0.0, s["age"] + dt)
     ghost_t = jnp.where(eat, 0.0, s["ghost_t"] + dt)
     return energy, dict(food=food, pred=pred, ptr=s["ptr"] + 2 * n_eat, eaten=s["eaten"] + n_eat, age=age,
@@ -424,7 +426,7 @@ def make_step(net_type: str, n_hidden: int, substeps: int):
     attivo) sostituisce i comandi di un agente (guida a mano)."""
 
     def step(ph, P, s, manual):
-        racing = ((s["alive"] > 0) & (s["done"] <= 0)).astype(F)
+        racing = in_race(P, s).astype(F)
         key, sub = jax.random.split(s["key"])
         obs, m = respond(ph, P, s, sub, racing)
         if net_type == "rate":
@@ -440,6 +442,11 @@ def make_step(net_type: str, n_hidden: int, substeps: int):
     return step
 
 
-def running(ph, s):
+def in_race(P, s):
+    """Come `World.racing`: vivi, e non arrivati (o arrivati ma la vita continua)."""
+    return (s["alive"] > 0) & ((s["done"] <= 0) | (P["keep_living"] > 0))
+
+
+def running(ph, P, s):
     """Il mondo è ancora in corso? (qualcuno in gara e tempo non finito)."""
-    return ((s["alive"] > 0) & (s["done"] <= 0)).any() & (s["t"] < ph["life_max"])
+    return in_race(P, s).any() & (s["t"] < ph["life_max"])

@@ -55,7 +55,7 @@ ENVIRONMENT = dict(
     arena_w=200.0, arena_h=140.0, dt=1.0 / 60.0,
     agent_radius=1.0, thrust_accel=60.0, reverse_factor=0.5, lin_drag=2.0, lat_drag=8.0,
     turn_accel=40.0, ang_drag=6.0, wall_restitution=0.3,
-    energy_init=150.0, metabolism_basal=2.5, metabolism_move=10.0, metabolism_turn=2.0, metabolism_exponent=2.0,
+    energy_init=150.0, energy_max=150.0, reserve_mass=0.0, metabolism_basal=2.5, metabolism_move=10.0, metabolism_turn=2.0, metabolism_exponent=2.0,
     wire_cost=0.004,
     sensor_noise=0.0, receptor_cell_cost=0.002, receptor_sens_cost=0.008, neuron_cost=0.01,
     life_max=90.0, target_radius=3.0,
@@ -81,6 +81,7 @@ ENVIRONMENT = dict(
     predator_color_width=0.06, predator_albedo=0.8, predator_vibration=0.5, predator_vibration_freq=0.4,
     forage_scent=0.0, food_molecule=0.6, food_smell=0.0, predator_molecule=0.35, predator_smell=0.0,
     odor_range=25.0, scent_time_max=3.0, forage_own_arena=False,
+    mature_keep_living=False,  # l'esame misura chi diventa maturo: lì la prova finisce
 )
 
 # Il mondo del cibo dell'esame a livelli (versione 5): scritto qui, non letto
@@ -105,7 +106,7 @@ FROM_RUN = frozenset({
     "spike_substeps", "spike_gain", "spike_inhibitory_share", "sensors_excitatory_only",
     "population", "max_age", "crossover_rate",
     "mut_weight_prob", "mut_weight_std", "mut_conn_add", "mut_conn_del", "mut_neuron_toggle",
-    "mut_pos_prob", "mut_pos_std", "mut_dup", "receptor_dup_split", "mut_rec_drift", "mutation_floor", "exam_every", "engine",
+    "mut_pos_prob", "mut_pos_std", "mut_dup", "receptor_dup_split", "fecundity_by_food", "mut_rec_drift", "mutation_floor", "exam_every", "engine",
     "ladder", "ladder_window", "ladder_up", "ladder_down", "ladder_step", "ladder_crash",
 })
 

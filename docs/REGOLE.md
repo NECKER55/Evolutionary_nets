@@ -44,8 +44,12 @@ La rete produce due comandi, entrambi tra -1 e 1.
 
 - Ogni agente nasce con **150 di energia** (`energy_init`). Nel mondo del bersaglio
   **non si ricarica mai**; nel mondo del cibo ogni cibo mangiato ne restituisce 100
-  (`food_energy`), senza superare 150. Così chi sa cercare si mantiene e vive
-  a lungo; chi cerca male muore di fame.
+  (`food_energy`). Si possono accumulare **riserve** fino a 450
+  (`energy_max`), come il grasso: l'energia oltre quella di partenza pesa, e
+  il movimento costa di più (con le riserve piene il doppio, `reserve_mass`).
+  Così chi sa cercare supera i periodi sfortunati; chi cerca male muore di
+  fame. Misurato: senza riserve la bravura spiegava il 17% del successo in una
+  vita, con le riserve il 36%.
 - **Si muore in un solo modo: quando l'energia arriva a zero.** Non esiste morte
   istantanea.
 - L'energia si consuma per quattro motivi, che si sommano:
@@ -466,10 +470,17 @@ un genitore.
 
 ## 13. Chi si riproduce
 
-- **Si riproduce solo chi ha completato il compito.** Non esiste punteggio.
-- **Tutti i genitori contano uguale**: né la velocità né l'energia residua danno
-  vantaggi.
-- Chi è morto, o non ha completato, non lascia nulla.
+- **Si riproduce solo chi ha completato il compito**, cioè chi è **maturo**
+  (nel mondo del cibo: chi ha mangiato almeno N cibi). Chi non ci arriva non
+  lascia nulla.
+- **Nel mondo del cibo, come in natura, più risorse vuol dire più figli**
+  (`fecundity_by_food`): madri e partner si scelgono con probabilità
+  proporzionale ai cibi mangiati in tutta la vita.
+- **La vita continua dopo la maturità** (`mature_keep_living`): chi è maturo
+  continua a nutrirsi e a rischiare; passano alla generazione dopo i maturi
+  ancora vivi alla fine. (L'esame invece si ferma alla maturità.)
+- Nel mondo del bersaglio tutti i genitori contano uguale e chi completa si
+  ferma.
 
 ## 14. Come si forma la generazione successiva
 

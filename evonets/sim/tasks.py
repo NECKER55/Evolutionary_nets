@@ -92,6 +92,7 @@ class Foraging:
 
     name = "nutrirsi"
     QUEUE = 4096  # posizioni di ricomparsa del cibo
+    keeps_living = True  # chi è maturo continua a vivere (se `mature_keep_living`)
 
     def reset(self, world) -> None:
         cfg, rng, n = world.cfg, world.rng, world.n
@@ -185,7 +186,7 @@ class Foraging:
         cfg, dt = world.cfg, world.cfg.dt
         self.age += dt
         self.ghost_t += dt
-        active = world.alive & ~world.done & (world.energy > 0.0)  # chi è morto ora non mangia più
+        active = world.racing & (world.energy > 0.0)  # chi è morto ora non mangia più
         me = world.pos[:, None, :]
         # Prede: fuggono dall'agente quando è vicino, rimbalzando sulle pareti.
         if self.prey_speed > 0:
@@ -219,7 +220,7 @@ class Foraging:
                 self.ptr[i] += 2
             n_eat = eat.sum(axis=1)
             self.eaten += n_eat
-            world.energy = np.minimum(world.energy + cfg.food_energy * n_eat, cfg.energy_init)
+            world.energy = np.minimum(world.energy + cfg.food_energy * n_eat, cfg.energy_max)
 
     def completed(self, world) -> np.ndarray:
         return self.eaten >= self.need

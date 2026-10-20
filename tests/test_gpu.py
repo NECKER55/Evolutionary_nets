@@ -157,7 +157,8 @@ def test_foraging_quanta_match_the_numpy_receptors():
 
 
 def test_foraging_physics_matches_the_world():
-    cfg, w, ctrl = forage_setup(n=24)
+    cfg, w, ctrl = forage_setup(n=24, energy_max=450.0, reserve_mass=0.5)  # anche le riserve e il loro peso
+    w.energy[:] = np.linspace(20.0, 440.0, w.n)
     ph, P, s = device(cfg, w, ctrl)
     rng = np.random.default_rng(2)
     for _ in range(300):
@@ -165,7 +166,7 @@ def test_foraging_physics_matches_the_world():
         w.step(a, ctrl.upkeep)
         s = {**s, **engine.physics(ph, P, s, jnp.asarray(a, jnp.float32), P["upkeep"])}
     t = w.task
-    assert t.eaten.sum() > 0 and (w.energy < cfg.energy_init).any()
+    assert t.eaten.sum() > 0 and (w.energy < cfg.energy_init).any() and (w.energy > cfg.energy_init).any()
     for k, ref in (("pos", w.pos), ("energy", w.energy), ("food", t.food), ("pred", t.pred), ("age", t.age),
                    ("ghost", t.ghost), ("ghost_t", t.ghost_t)):
         assert np.allclose(np.asarray(s[k]), ref, atol=2e-3), k
