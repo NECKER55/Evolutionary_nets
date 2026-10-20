@@ -15,7 +15,7 @@ def forage(n=4, seed=0, **kw):
 
 
 def test_the_world_starts_the_same_for_everyone_and_far_from_food():
-    cfg, w = forage(n=50)
+    cfg, w = forage(n=50, forage_own_arena=False)
     t = w.task
     assert isinstance(t, Foraging) and t.n_food == cfg.food_count_easy and t.need == 1
     assert (t.food == t.food[0]).all()  # stessa copia per tutti all'inizio
@@ -23,10 +23,23 @@ def test_the_world_starts_the_same_for_everyone_and_far_from_food():
     assert (d >= cfg.food_min_dist).all()
 
 
-def test_dials_set_how_hard_the_world_is():
-    _, w = forage(forage_abundance=1.0, forage_need=1.0, forage_prey=1.0, forage_predators=1.0)
+def test_with_an_own_arena_everyone_starts_somewhere_else_and_far_from_its_food():
+    cfg, w = forage(n=50, forage_predators=1.0)
     t = w.task
-    assert t.n_food == 4 and np.isclose(t.food_r, 2.0) and t.need == 5
+    assert cfg.forage_own_arena and not (t.food == t.food[0]).all() and not (t.pred == t.pred[0]).all()
+    assert len(set(t.ptr)) > 1 and (t.ptr % 2 == 0).all()  # ognuno scorre la coda delle ricomparse da un punto suo
+    on = t.food_on[:, :, None]
+    d = np.linalg.norm(w.pos[:, None, :] - t.food, axis=2)
+    assert (np.where(t.food_on, d, np.inf).min(axis=1) >= cfg.food_min_dist).all()
+    d = np.linalg.norm(w.pos[:, None, :] - t.pred, axis=2)
+    assert (np.where(t.pred_on, d, np.inf).min(axis=1) >= cfg.predator_min_dist).all()
+    assert on.shape == (50, cfg.food_count_easy, 1)
+
+
+def test_dials_set_how_hard_the_world_is():
+    cfg, w = forage(forage_abundance=1.0, forage_need=1.0, forage_prey=1.0, forage_predators=1.0)
+    t = w.task
+    assert t.n_food == cfg.food_count_hard and np.isclose(t.food_r, 2.0) and t.need == cfg.food_need_hard
     assert t.prey_speed == 12.0 and t.n_pred == 3 and t.pred_speed == 15.0
 
 
@@ -54,10 +67,10 @@ def test_energy_does_not_exceed_the_full_stomach():
 def test_more_food_is_needed_when_the_dial_says_so():
     cfg, w = forage(forage_need=1.0)
     t = w.task
-    for k in range(4):
+    for k in range(t.need - 1):
         w.pos[0] = t.food[0, k % t.n_food]
         w.step(np.zeros((w.n, 2)))
-    assert t.eaten[0] == 4 and not w.done[0]
+    assert t.eaten[0] == t.need - 1 and not w.done[0]
     w.pos[0] = t.food[0, 0]
     w.step(np.zeros((w.n, 2)))
     assert w.done[0]

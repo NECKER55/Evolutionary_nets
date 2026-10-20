@@ -35,7 +35,7 @@ NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
 ADDED_IN_4 = {"r_tau": 0.0, "r_sub": 0.0, "r_div": 0.0}
 # Costanti del mondo aggiunte dopo, con il valore che lascia il mondo com'era:
 # una corsa salvata prima riparte nello stesso mondo (il registro lo annota).
-ABSENT_CONFIG = {"food_smell": 0.0, "predator_smell": 0.0, "forage_scent": 0.0}
+ABSENT_CONFIG = {"food_smell": 0.0, "predator_smell": 0.0, "forage_scent": 0.0, "forage_own_arena": False}
 
 
 def code_version() -> str:

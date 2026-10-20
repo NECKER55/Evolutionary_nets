@@ -72,8 +72,9 @@ def lerp(a, b, t):
 class Foraging:
     """Nutrirsi (docs/SPEC_MONDO.md): si riproduce chi mangia almeno N cibi.
 
-    Ogni agente ha la sua copia del mondo: cibo e predatori partono uguali per
-    tutti, poi ognuno li cambia solo nella sua copia (mangiando, facendo
+    Ogni agente ha la sua copia del mondo. Con `forage_own_arena` ogni copia
+    è un'arena diversa (cibo, predatori, ricomparse); senza, partono uguali per
+    tutti. Poi ognuno li cambia solo nella sua copia (mangiando, facendo
     fuggire le prede, attirando i predatori). Le manopole della
     configurazione (`forage_*`) decidono quanti cibi, quanto grandi, quanti ne
     servono, se fuggono, quanti predatori.
@@ -104,14 +105,18 @@ class Foraging:
         K, P = cfg.food_count_easy, cfg.predator_count_max  # posti fissi: forma uguale a ogni livello
         lo = np.array([self.food_r, self.food_r])
         hi = np.array([cfg.arena_w - self.food_r, cfg.arena_h - self.food_r])
-        food = rng.uniform(lo, hi, (K, 2))
+        own = cfg.forage_own_arena  # ognuno la sua arena, o la stessa per tutti
+        food = rng.uniform(lo, hi, (n if own else 1, K, 2))
         self.food = np.broadcast_to(food, (n, K, 2)).copy()
         self.food_on = np.zeros((n, K), dtype=bool)
         self.food_on[:, : self.n_food] = True
         self.queue = rng.uniform(lo, hi, (self.QUEUE, 2))
-        self.ptr = np.zeros(n, dtype=int)
+        # Con l'arena propria ognuno scorre la coda da un punto suo: il cibo
+        # ricompare in posti diversi per ciascuno (la coda resta comune, così
+        # il motore GPU non cambia).
+        self.ptr = 2 * rng.integers(0, self.QUEUE // 2, n) if own else np.zeros(n, dtype=int)
         r = cfg.predator_radius
-        pred = rng.uniform([r, r], [cfg.arena_w - r, cfg.arena_h - r], (P, 2))
+        pred = rng.uniform([r, r], [cfg.arena_w - r, cfg.arena_h - r], (n if own else 1, P, 2))
         self.pred = np.broadcast_to(pred, (n, P, 2)).copy()
         self.pred_on = np.zeros((n, P), dtype=bool)
         self.pred_on[:, : self.n_pred] = True
@@ -121,21 +126,22 @@ class Foraging:
         self.ghost = self.food.copy()  # dove era il cibo mangiato l'ultima volta
         self.ghost_t = np.full((n, K), FORMED)  # da quanto è stato mangiato (s)
 
+    def _nearest(self, pos: np.ndarray, obj: np.ndarray, on: np.ndarray) -> np.ndarray:
+        """Distanza di ogni agente (riga di `pos`) dall'oggetto acceso più
+        vicino nella sua copia di mondo."""
+        return np.where(on, np.linalg.norm(pos[:, None, :] - obj, axis=2), np.inf).min(axis=1)
+
     def spawn_ok(self, world, pos: np.ndarray) -> np.ndarray:
         cfg = world.cfg
-        on = self.food_on[0]
-        d_food = np.linalg.norm(pos[:, None, :] - self.food[0][None, on], axis=2)
-        ok = (d_food >= cfg.food_min_dist).all(axis=1)
+        ok = self._nearest(pos, self.food, self.food_on) >= cfg.food_min_dist
         if self.n_pred:
-            d_pred = np.linalg.norm(pos[:, None, :] - self.pred[0][None, self.pred_on[0]], axis=2)
-            ok &= (d_pred >= cfg.predator_min_dist).all(axis=1)
+            ok &= self._nearest(pos, self.pred, self.pred_on) >= cfg.predator_min_dist
         return ok
 
     def spawned(self, world) -> None:
         """Dopo la nascita: distanza di ognuno dal cibo più vicino (per
         misurare quanto pesa la fortuna)."""
-        on = self.food_on[0]
-        self.start_dist = np.linalg.norm(world.pos[:, None, :] - self.food[0][None, on], axis=2).min(axis=1)
+        self.start_dist = self._nearest(world.pos, self.food, self.food_on)
 
     def discs(self, world):
         """Gli oggetti che si vedono, per agente: posizioni (N, O, 2), raggi

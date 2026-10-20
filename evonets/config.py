@@ -170,7 +170,7 @@ class Config:
     # Generazioni. Una generazione finisce quando tutti sono morti o hanno
     # completato il compito. Si riproduce solo chi lo ha completato.
     population: int = 1000  # grande abbastanza perché la selezione pesi più del caso
-    life_max: float = 120.0  # s, tetto della vita (mangiando l'energia può durare a lungo)
+    life_max: float = 240.0  # s, tetto della vita (mangiando l'energia può durare a lungo)
     # Generazioni che un individuo può vivere al massimo; 0 = nessun limite: un
     # genitore resta finché continua a completare il compito.
     max_age: int = 0
@@ -209,17 +209,18 @@ class Config:
     # Manopole della difficoltà, da 0 (basico) a 1 (complesso); le muove la
     # progressione adattiva (evo/ladder.py).
     forage_abundance: float = 0.0  # da 12 cibi di raggio 4 a 4 di raggio 2
-    forage_need: float = 0.0  # cibi da mangiare per riprodursi: da 1 a 5
+    forage_need: float = 0.0  # cibi da mangiare per riprodursi: da 1 a 10
     forage_prey: float = 0.0  # da cibo fermo a prede che fuggono a 12 u/s
     forage_scent: float = 0.0  # da nube d'odore istantanea a nube che si forma e svanisce in scent_time_max
     forage_predators: float = 0.0  # da nessuno a 3 predatori a 15 u/s
     # Estremi delle manopole.
     food_count_easy: int = 12
+    forage_own_arena: bool = True  # ogni agente in un'arena sua (cibo e predatori in posti diversi)
     food_count_hard: int = 4  # con 3 la riuscita crollava (dal 25% al 14%): un gradino, non una salita
     food_radius_easy: float = 4.0
     food_radius_hard: float = 2.0
     food_need_easy: int = 1
-    food_need_hard: int = 5
+    food_need_hard: int = 10  # tanti incontri in una vita: la fortuna di uno solo pesa poco
     prey_speed_max: float = 12.0  # u/s, con la manopola a 1
     prey_flee_range: float = 15.0  # u: la preda si accorge dell'agente
     predator_count_max: int = 3
@@ -228,7 +229,7 @@ class Config:
     predator_radius: float = 1.5
     predator_damage: float = 60.0  # energia/s a contatto
     # Cibo: energia che dà (fino al massimo energy_init), distanze di nascita.
-    food_energy: float = 40.0
+    food_energy: float = 100.0  # con 40 cercare costava più di quanto rendeva: si moriva di fame verso i 50 s
     food_min_dist: float = 20.0  # gli agenti nascono almeno così lontani dal cibo
     predator_min_dist: float = 40.0  # e dai predatori
     # Come appaiono e si sentono: colore (asse della luce), larghezza, albedo;
@@ -258,8 +259,8 @@ class Config:
     # manopole ferme a 0 / a 1. Le soglie sono strumenti di addestramento.
     ladder: str = ""
     ladder_window: int = 10  # generazioni su cui si media la riuscita
-    ladder_up: float = 0.3  # sopra questa quota la scala sale
-    ladder_down: float = 0.1  # sotto questa scende
+    ladder_up: float = 0.5  # sopra questa quota la scala sale
+    ladder_down: float = 0.3  # sotto questa scende (sotto il 30% una prova sola è quasi una lotteria)
     ladder_step: float = 0.02  # di quanto si muove (posizione da 0 a 3)
     ladder_crash: float = 0.05  # di quanto scende se nessuno completa
 

@@ -44,7 +44,8 @@ from . import ladder
 from .trial import Trial
 
 VERSION = 3  # 2: recettori universali; 3: sensi calibrati e movimento con il costo naturale
-LEVELS_VERSION = 5  # esame a livelli del mondo del cibo; 5: odori, nube che sfugge, 4 cibi al massimo
+LEVELS_VERSION = 6  # esame a livelli del mondo del cibo; 5: odori, nube che sfugge, 4 cibi al massimo;
+# 6: fino a 10 cibi in 240 s, cibo da 100 di energia, un'arena per agente
 EXAM_SEED = 2_000_000  # le arene della prova k partono da EXAM_SEED + 10_000 * k
 
 # Ambiente d'esame, fissato al momento della versione 3. Sono i valori di
@@ -78,12 +79,14 @@ ENVIRONMENT = dict(
     predator_min_dist=40.0, food_color=0.85, food_color_width=0.06, food_albedo=1.0, predator_color=0.05,
     predator_color_width=0.06, predator_albedo=0.8, predator_vibration=0.5, predator_vibration_freq=0.4,
     forage_scent=0.0, food_molecule=0.6, food_smell=0.0, predator_molecule=0.35, predator_smell=0.0,
-    odor_range=25.0, scent_time_max=3.0,
+    odor_range=25.0, scent_time_max=3.0, forage_own_arena=False,
 )
 
 # Il mondo del cibo dell'esame a livelli (versione 5): scritto qui, non letto
 # dalla corsa.
-FORAGE = dict(task="cibo", n_hazards=0, life_max=120.0, food_count_hard=4, food_smell=1.0, predator_smell=1.0)
+FORAGE = dict(task="cibo", n_hazards=0, life_max=240.0, food_count_hard=4, food_need_hard=10, food_energy=100.0,
+              food_smell=1.0,
+              predator_smell=1.0, forage_own_arena=True)
 
 # Le costanti che invece vengono dalla corsa: riguardano la rete (forma,
 # tipo, come nasce) o l'evoluzione, non il mondo in cui l'agente vive. Ogni

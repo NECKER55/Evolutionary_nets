@@ -30,10 +30,11 @@ def history(cfg, rates):
 
 def test_the_ladder_climbs_when_easy_drops_when_hard_and_stays_in_between():
     cfg = forage(ladder="scala")
-    assert ladder.update(cfg, history(cfg, [0.5] * 10))["position"] == pytest.approx(0.02)
+    high, mid, low = cfg.ladder_up + 0.1, (cfg.ladder_up + cfg.ladder_down) / 2, cfg.ladder_down / 2
+    assert ladder.update(cfg, history(cfg, [high] * 10))["position"] == pytest.approx(0.02)
     assert cfg.forage_abundance == cfg.forage_need == 0.02 and cfg.forage_prey == 0.0
-    assert ladder.update(cfg, history(cfg, [0.2] * 10)) == {}  # tra le soglie: ferma
-    ladder.update(cfg, history(cfg, [0.05] * 10))
+    assert ladder.update(cfg, history(cfg, [mid] * 10)) == {}  # tra le soglie: ferma
+    ladder.update(cfg, history(cfg, [low] * 10))
     assert ladder.position(cfg) == pytest.approx(0.0)
     assert ladder.update(cfg, history(cfg, [0.05] * 10)) == {}  # non scende sotto zero
 
