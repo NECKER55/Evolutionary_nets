@@ -145,6 +145,29 @@ def test_receptor_duplication_copies_genes_and_halves_outputs():
     assert np.allclose(g.weights[0, :, 2], w_before / 2) and np.allclose(g.weights[0, :, 5], w_before / 2)
 
 
+def test_a_receptor_gene_duplicates_like_in_smell_one_cell_moves_to_the_copy():
+    b = rich(5, seed=10, R=6)
+    g = b.genome
+    g.r_active[0, 5] = False
+    g.r_sens[0, 2] = np.log([60.0, 2.0, 1.0, 0.5, 0.5, 0.5])  # un naso maturo
+    total = np.exp(g.r_sens[0, 2]).copy()
+    w_before = g.weights[0, :, 2].copy()
+    duplicate_receptor(g, 0, 2, 5, np.random.default_rng(0), split=True)
+    copy, orig = np.exp(g.r_sens[0, 5]), np.exp(g.r_sens[0, 2])
+    assert np.isclose(copy.max(), 1.0) and np.allclose(copy / copy.max(), total / total.max())  # stesso profilo
+    assert np.allclose(copy + orig, total)  # cellule (e costo) invariate
+    # Le sinapsi seguono le cellule: la copia ne prende la quota, l'originale la perde.
+    assert np.allclose(g.weights[0, :, 5], w_before / 60) and np.allclose(g.weights[0, :, 2], w_before * 59 / 60)
+    assert np.array_equal(g.r_mu[0, 5], g.r_mu[0, 2]) and np.array_equal(g.conn[0, :, 5], g.conn[0, :, 2])
+    # Un recettore di meno di due cellule (economico) si copia intero, uscite dimezzate.
+    g.r_active[0, 4] = False
+    g.r_sens[0, 1] = np.log(np.full(6, 1.5))
+    w_small = g.weights[0, :, 1].copy()
+    duplicate_receptor(g, 0, 1, 4, np.random.default_rng(0), split=True)
+    assert np.allclose(np.exp(g.r_sens[0, 1]), 1.5) and np.allclose(np.exp(g.r_sens[0, 4]), 1.5)
+    assert np.allclose(g.weights[0, :, 4], w_small / 2) and np.allclose(g.weights[0, :, 1], w_small / 2)
+
+
 def test_slots_grow_when_someone_fills_them():
     cfg = Config()
     g = Brains(cfg, 10, N_OUT, 0).genome

@@ -83,27 +83,46 @@ def duplicate_neuron(g: Genome, i: int, h: int, f: int, rng: np.random.Generator
     g.pos[i, f] = np.clip(g.pos[i, h] + rng.normal(0.0, std, 2), 0.0, 1.0)
 
 
-def duplicate_receptor(g: Genome, i: int, k: int, f: int, rng: np.random.Generator) -> None:
+def duplicate_receptor(g: Genome, i: int, k: int, f: int, rng: np.random.Generator, split: bool = False) -> None:
     """Il recettore k dell'individuo i si duplica nel posto libero f: stessi
-    geni e stesse uscite, uscite dimezzate. Il comportamento medio non cambia;
-    le due copie hanno rumore indipendente, quindi la loro somma è già un poco
-    più precisa."""
+    geni e stessi collegamenti.
+
+    `split` (come nell'olfatto, dove ogni cellula esprime un solo gene
+    recettore): si duplica il gene, non l'organo. Le cellule che ora
+    esprimono il gene nuovo, l'equivalente di una cellula normale
+    (sensibilità 1 sul fenomeno più forte, stesso profilo), passano alla
+    copia con le loro sinapsi: la copia prende quella quota della
+    sensibilità e dei pesi in uscita, l'originale la perde. Cellule, costo e
+    segnale restano quelli di prima e la copia nasce quasi neutrale, libera di
+    derivare. (Con i pesi interi la copia non era neutrale: un recettore con
+    adattamento divisivo risponde al contrasto, quindi una cellula sola manda
+    un segnale grande quanto tutto l'organo, solo più rumoroso.)
+
+    Senza `split`, e per i recettori che valgono meno di due cellule (costano
+    pochissimo e non lavorano a contrasto): copia intera e uscite dimezzate,
+    esattamente neutrale."""
     for field in Genome.RECEPTOR_FIELDS:
         getattr(g, field)[i, f] = getattr(g, field)[i, k]
     for a in (g.weights, g.conn):
         a[i, :, f] = a[i, :, k]
-    g.weights[i, :, k] *= 0.5
-    g.weights[i, :, f] *= 0.5
+    top = float(np.exp(g.r_sens[i, k]).max())
+    share = 1.0 / top if split and top >= 2.0 else 0.5
+    if split and top >= 2.0:
+        g.r_sens[i, f] = g.r_sens[i, k] + np.log(share)
+        g.r_sens[i, k] = g.r_sens[i, k] + np.log1p(-share)
+    g.weights[i, :, f] *= share
+    g.weights[i, :, k] *= 1.0 - share
     std = np.exp(g.meta[i, META_INDEX["pos_std"]])
     g.r_y[i, f] = np.clip(g.r_y[i, k] + rng.normal(0.0, std), 0.0, 1.0)
 
 
-def _duplicate(g: Genome, rng: np.random.Generator, p: np.ndarray) -> None:
+def _duplicate(g: Genome, rng: np.random.Generator, p: np.ndarray, split: bool = False) -> None:
     """Ogni neurone interno e ogni recettore acceso si duplica con la
     probabilità `p` (N,) del suo individuo, nel primo posto libero. Senza posti
     liberi la duplicazione non avviene (i posti crescono alla generazione
-    dopo, vedi `grow`)."""
-    for active, copy in ((g.active, duplicate_neuron), (g.r_active, duplicate_receptor)):
+    dopo, vedi `grow`). `split`: vedi `duplicate_receptor`."""
+    receptor = lambda g_, i, k, f, r: duplicate_receptor(g_, i, k, f, r, split)
+    for active, copy in ((g.active, duplicate_neuron), (g.r_active, receptor)):
         events = np.argwhere(active & (rng.random(active.shape) < p[:, None]))
         for i, k in events:
             free = np.flatnonzero(~active[i])
@@ -208,7 +227,7 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator, strength: floa
                         rng.random(g.active.shape) < np.minimum(1.0, mu)[:, None])
     g.r_active = np.where(g.r_active, rng.random(g.r_active.shape) >= on,
                           rng.random(g.r_active.shape) < np.minimum(1.0, mu)[:, None])
-    _duplicate(g, rng, np.minimum(1.0, rate("dup")))
+    _duplicate(g, rng, np.minimum(1.0, rate("dup")), cfg.receptor_dup_split)
 
 
 def reproduce(parents: Genome, n_children: int, cfg: Config, rng: np.random.Generator,

@@ -104,7 +104,7 @@ FROM_RUN = frozenset({
     "spike_substeps", "spike_gain", "spike_inhibitory_share", "sensors_excitatory_only",
     "population", "max_age", "crossover_rate",
     "mut_weight_prob", "mut_weight_std", "mut_conn_add", "mut_conn_del", "mut_neuron_toggle",
-    "mut_pos_prob", "mut_pos_std", "mut_dup", "mut_rec_drift", "mutation_floor", "exam_every", "engine",
+    "mut_pos_prob", "mut_pos_std", "mut_dup", "receptor_dup_split", "mut_rec_drift", "mutation_floor", "exam_every", "engine",
     "ladder", "ladder_window", "ladder_up", "ladder_down", "ladder_step", "ladder_crash",
 })
 

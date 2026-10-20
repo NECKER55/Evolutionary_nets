@@ -195,6 +195,10 @@ class Config:
     # solo). Come in natura, rompere è molto più facile che riparare.
     mut_neuron_toggle: float = 0.001
     mut_dup: float = 0.005  # probabilità che un neurone o recettore acceso si duplichi
+    # Un recettore si duplica come un gene dell'olfatto: la copia prende le
+    # cellule di una cellula normale, l'originale le perde (costo e segnale
+    # totali invariati). False = copia intera con uscite dimezzate (prima).
+    receptor_dup_split: bool = True
     mut_pos_prob: float = 0.1  # probabilità che un neurone (o un nervo) si sposti nel cervello
     mut_pos_std: float = 0.03  # di quanto, in lati del cervello
     mut_rec_drift: float = 0.05  # deriva dei geni dei recettori (scala: genetics.DRIFT_SCALE)

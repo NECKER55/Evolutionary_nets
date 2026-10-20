@@ -33,9 +33,14 @@ FORMAT = 7
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
 # Geni aggiunti dopo il formato 3, con il valore che vuol dire "assente".
 ADDED_IN_4 = {"r_tau": 0.0, "r_sub": 0.0, "r_div": 0.0}
-# Costanti del mondo aggiunte dopo, con il valore che lascia il mondo com'era:
-# una corsa salvata prima riparte nello stesso mondo (il registro lo annota).
-ABSENT_CONFIG = {"food_smell": 0.0, "predator_smell": 0.0, "forage_scent": 0.0, "forage_own_arena": False}
+# Lo stato di una corsa: le costanti che dicono quale corsa è e dove è
+# arrivata (rete e forma dei genomi, popolazione, mondo scelto, modo e
+# posizione della scala, frequenza dell'esame). Riprendendo un salvataggio si
+# conservano; tutte le altre costanti sono regole e vengono sempre dal codice
+# attuale, così ogni corsa si può continuare con le regole più recenti (i
+# cambi finiscono nel registro).
+RUN_STATE = ("net_type", "population", "net_hidden_slots", "receptor_slots", "task", "n_hazards", "ladder",
+             *ladder.DIALS, "exam_every")
 
 
 def code_version() -> str:
@@ -414,10 +419,12 @@ class Evolution:
 
     @classmethod
     def load(cls, cfg: Config, path) -> "Evolution":
-        """Riprende da un salvataggio. `cfg` viene riscritta con la
-        configurazione salvata: si riparte nelle stesse condizioni in cui la
-        corsa si era fermata. I salvataggi precedenti al formato 3 (sensi
-        fissi) non si aprono."""
+        """Riprende da un salvataggio con le regole più recenti: dal file
+        vengono la popolazione, i genomi e lo stato della corsa (`RUN_STATE`);
+        tutte le altre costanti restano quelle di `cfg` (il codice attuale).
+        Ogni regola diversa da quella con cui la corsa era stata salvata è
+        annotata nel registro, alla generazione della ripresa. I salvataggi
+        precedenti al formato 3 (sensi fissi) non si aprono."""
         d = np.load(path)
         fmt = int(d["format"]) if "format" in d else 1
         if fmt > FORMAT:
@@ -425,17 +432,14 @@ class Evolution:
         if fmt < 3:
             raise ValueError(f"{path}: salvataggio di formato {fmt}, con i sensi fissi di prima dei recettori "
                              "universali: non si può più caricare")
-        unknown = {}
         fields = {f.name for f in dataclasses.fields(cfg)}
         saved = json.loads(str(d["config"]))
-        for k, v in saved.items():
-            if k in fields:
-                setattr(cfg, k, v)
-            else:  # costante che questo codice non conosce più
-                unknown[k] = v
-        absent = {k: v for k, v in ABSENT_CONFIG.items() if k not in saved}
-        for k, v in absent.items():
-            setattr(cfg, k, v)
+        unknown = {k: v for k, v in saved.items() if k not in fields}  # costanti che il codice non conosce più
+        for k in RUN_STATE:
+            if k in saved:
+                setattr(cfg, k, saved[k])
+        rules = {k: [saved.get(k), getattr(cfg, k)] for k in sorted(fields - set(RUN_STATE) - {"engine"})
+                 if saved.get(k) != getattr(cfg, k)}
 
         base = 1 if str(d["net_type"]) == "rate" else 3  # geni propri prima della plasticità
 
@@ -487,8 +491,8 @@ class Evolution:
             resumed["note"] = f"salvataggio di formato {fmt}: convertito ({'; '.join(parts)})"
         if unknown:
             resumed["note"] = "costanti salvate che questo codice non conosce più: " + ", ".join(unknown)
-        if absent:
-            resumed["absent"] = "costanti nate dopo questo salvataggio, spente: " + ", ".join(absent)
+        if rules:  # [valore con cui era stata salvata (None = non esisteva), valore di adesso]
+            resumed["rules"] = rules
         evo.log.append(resumed)
         evo._seen = dataclasses.asdict(cfg)
         return evo

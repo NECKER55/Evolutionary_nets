@@ -67,6 +67,9 @@ def start(cfg: Config, seed: int, load: str | None) -> Evolution:
                 print(f"  gen. {e['generation']}: {describe_change(e['changes'])}")
             if "note" in e:
                 print(f"  nota: {e['note']}")
+        rules = evo.log[-1].get("rules", {})
+        if rules:
+            print(f"  regole aggiornate a quelle di adesso ({len(rules)}): {describe_change(rules)}")
         return evo
     return Evolution(cfg, seed)
 

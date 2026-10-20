@@ -525,6 +525,18 @@ come in natura:
 - per un recettore le due copie hanno rumore indipendente: la loro somma è già
   un poco più precisa. Poi, se conviene, la sintonia di una copia deriva e
   nasce un recettore di tipo nuovo (come i coni dei colori).
+- **un recettore sensibile si duplica come un gene dell'olfatto**
+  (`receptor_dup_split`), dove ogni cellula esprime un solo gene recettore:
+  non si copia l'organo intero, ma le cellule che ora esprimono il gene nuovo,
+  l'equivalente di una cellula normale, passano alla copia con le loro
+  sinapsi. La copia prende quella quota di sensibilità e di pesi in uscita,
+  l'originale la perde: cellule, costo e segnale restano quelli di prima.
+  Misurato su una popolazione con un naso di sensibilità circa 60: con la
+  copia completano il 44,8% contro il 46,0% senza; con la copia intera di
+  prima il 36,7%, e il costo del corpo raddoppiava. Così una copia resta a
+  lungo quasi neutrale, come in natura, e può derivare verso un senso nuovo.
+  I recettori che valgono meno di due cellule costano pochissimo e si copiano
+  ancora interi, con le uscite dimezzate.
 
 - Un collegamento che compare usa il peso già scritto in quel punto del genoma.
 - Un collegamento che esiste resta anche se i suoi due neuroni si allontanano
@@ -683,9 +695,23 @@ qualche decina di MB, in memoria e su disco). Contengono anche la
 è nata o è stata ripresa, con quale versione del codice (il commit git,
 "+modifiche" se c'erano modifiche non committate), e ogni costante cambiata,
 con la generazione in cui è cambiata (anche i ritocchi fatti con `C`).
-Riprendendo una corsa si riparte con la configurazione salvata, non con
-quella attuale. Il registro compare in cima alla pagina principale, nel
-menu accanto al salvataggio e nel terminale con `--load`.
+**Riprendendo una corsa si gioca sempre con le regole più recenti.** Dal
+salvataggio vengono la popolazione con i suoi genomi e lo **stato della
+corsa**: tipo di rete, popolazione, posti per neuroni e recettori, mondo
+scelto (compito e veleno), modo e posizione della scala, frequenza
+dell'esame (`RUN_STATE` in `evo/evolution.py`). Tutte le altre costanti sono
+regole (fisica, energia, sensi, costi, cibo, odori, mutazioni, soglie della
+scala, durata della vita...) e vengono dal codice attuale. Ogni regola diversa
+da quella con cui la corsa era stata salvata finisce nel registro alla
+generazione della ripresa, con il valore vecchio e il nuovo; anche i ritocchi
+fatti con `C` valgono quindi fino alla ripresa. Il registro compare in cima
+alla pagina principale, nel menu accanto al salvataggio e nel terminale con
+`--load`.
+
+Attenzione: la posizione della scala si conserva, ma se le regole sono
+cambiate molto la stessa posizione può voler dire un mondo più difficile (per
+esempio più cibi da mangiare). La scala allora scende da sola, passando per
+generazioni con pochi genitori.
 Il formato attuale è il 7 (recettori universali con adattamento e sensi
 calibrati, posti che crescono, mutazioni come geni, plasticità, cervello che
 cresce con le sue cellule). Quelli dei formati da 3 a 6 si aprono convertiti

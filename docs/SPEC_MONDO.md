@@ -356,9 +356,8 @@ posizione 0,94, e l'esame non migliorava più dalla generazione 200.
   accesi, nube che sfugge nei livelli dello stadio 2). I punteggi della
   versione 4 non si confrontano: la panoramica confronta solo esami della
   stessa versione.
-- Salvataggi fatti prima degli odori: riprendono con gli odori spenti e il
-  registro lo annota (`ABSENT_CONFIG` in `evo/evolution.py`). Quelli con 3
-  cibi restano con 3 cibi (è nella loro configurazione).
+- Salvataggi fatti prima degli odori: oggi riprendono con le regole più
+  recenti (vedi sezione 12).
 - Interfaccia: aloni d'odore e tracce nell'arena; la nube nello stato della
   scala.
 
@@ -400,4 +399,41 @@ a parità di riuscita) finché la popolazione è quasi uniforme. Il collo di
 bottiglia è anche la poca varietà.
 
 Esame a livelli versione 6 (fino a 10 cibi in 240 s, cibo da 100, arena per
-agente). Le corse salvate prima riprendono con l'arena uguale per tutti.
+agente). Le corse salvate prima riprendono con le regole più recenti (sezione 12).
+
+---
+
+## 11. Recettori nuovi come geni duplicati (2026-10-20)
+
+Nella corsa `corsa-20261020-200723` (prima corsa con la taratura 2) gli agenti
+hanno sviluppato un naso: un recettore delle sostanze sintonizzato sulla
+molecola del cibo (0,58), sensibilità circa 60, adattamento sottrattivo 0,71
+(chemiotassi). Esame senza sostanze: 0%; senza luce o senza neuroni: invariato.
+Non nascevano altri recettori: in circa 400 duplicazioni la copia intera di un
+naso costava subito il 20% del metabolismo di base e veniva eliminata.
+
+Scelta dell'utente: duplicare "il più possibile come in natura". Si duplica il
+gene, non l'organo (`receptor_dup_split`, regole in docs/REGOLE.md, punto 15):
+la copia prende una cellula e le sue sinapsi, l'originale le perde. Prima
+versione con i pesi interi: non neutrale (dal 46% all'11%), perché un
+recettore con adattamento divisivo risponde al contrasto e una cellula sola
+manda un segnale grande quanto l'organo, solo più rumoroso. Con le sinapsi che
+seguono le cellule: 44,8% contro 46,0%.
+
+---
+
+## 12. Ogni ripresa con le regole più recenti (2026-10-20)
+
+Scelta dell'utente: ogni salvataggio caricato gioca con le regole più recenti,
+anche in futuro, così ogni corsa si può sempre continuare. Dal file vengono
+genomi, storia e lo stato della corsa (`RUN_STATE`: rete, popolazione, posti,
+mondo scelto, modo e posizione della scala, frequenza dell'esame); tutto il
+resto dal codice. Le regole cambiate sono nel registro della ripresa (campo
+`rules`, [valore salvato, valore di adesso]). Prima, al contrario, si
+riprendeva con la configurazione salvata e le regole nuove restavano spente.
+
+Prova sui quattro salvataggi in `runs/` (una generazione ciascuno): tutti
+ripartono. La corsa `corsa-20261020-130439` (adattata al mondo vecchio, scala
+a 0,94) completa 1 su 700: con le regole nuove la stessa posizione vuol dire 9
+cibi da mangiare invece di 5, in un'arena per agente. La scala scenderà da
+sola.
