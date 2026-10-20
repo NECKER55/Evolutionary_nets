@@ -27,6 +27,12 @@ class Config:
     # rumorosa; con 150 le reti evolute riescono meglio anche se poi messe alla
     # prova con 100 (vedi docs/NOTE.md, "Energia iniziale").
     energy_init: float = 150.0
+    # Riserve: quanta energia si può accumulare mangiando (oltre si spreca) e
+    # quanto pesa quella oltre la partenza: il costo del movimento cresce di
+    # reserve_mass volte la quota in più (energia in più / energy_init), come
+    # il peso del grasso. Con energy_max = energy_init niente riserve.
+    energy_max: float = 450.0  # con 150 (nessuna riserva) la bravura spiegava il 17% del successo, con 450 il 36%
+    reserve_mass: float = 0.5  # riserve piene: il movimento costa il doppio
     metabolism_basal: float = 2.5  # energia/s solo per esistere
     # Movimento: a spinta piena il consumo totale è 5 volte quello a riposo,
     # come lo sforzo massimo sostenibile di un pesce ("aerobic scope", da 2-3 a
@@ -170,7 +176,7 @@ class Config:
     # Generazioni. Una generazione finisce quando tutti sono morti o hanno
     # completato il compito. Si riproduce solo chi lo ha completato.
     population: int = 1000  # grande abbastanza perché la selezione pesi più del caso
-    life_max: float = 90.0  # s, tetto di sicurezza se il metabolismo è spento
+    life_max: float = 240.0  # s, tetto della vita (mangiando l'energia può durare a lungo)
     # Generazioni che un individuo può vivere al massimo; 0 = nessun limite: un
     # genitore resta finché continua a completare il compito.
     max_age: int = 0
@@ -178,7 +184,12 @@ class Config:
     # Riproduzione. Il genoma è una fila di blocchi: uno per neurone interno o
     # motore (esistenza, geni propri, posizione, collegamenti in ingresso),
     # uno per recettore, uno per il meccanismo di mutazione.
-    crossover_rate: float = 0.5  # quota di figli con due genitori (gli altri: copia)
+    crossover_rate: float = 0.5  # valore di partenza del gene "sex": quota di figli con un partner
+    # Riproduzione come in natura (mondo del cibo): chi ha completato il compito
+    # è maturo e fa figli in proporzione al cibo mangiato in tutta la vita
+    # (anche il partner è scelto così); la sua vita continua dopo la maturità.
+    fecundity_by_food: bool = True
+    mature_keep_living: bool = True
     # Mutazioni: questi sono solo i valori di PARTENZA. Ogni individuo ha i
     # suoi tassi come geni, che mutano come tutti gli altri geni (con la
     # probabilità e l'ampiezza di ritocco dell'individuo stesso) e non scendono
@@ -195,13 +206,78 @@ class Config:
     # solo). Come in natura, rompere è molto più facile che riparare.
     mut_neuron_toggle: float = 0.001
     mut_dup: float = 0.005  # probabilità che un neurone o recettore acceso si duplichi
+    # Un recettore si duplica come un gene dell'olfatto: la copia prende le
+    # cellule di una cellula normale, l'originale le perde (costo e segnale
+    # totali invariati). False = copia intera con uscite dimezzate (prima).
+    receptor_dup_split: bool = True
     mut_pos_prob: float = 0.1  # probabilità che un neurone (o un nervo) si sposti nel cervello
     mut_pos_std: float = 0.03  # di quanto, in lati del cervello
     mut_rec_drift: float = 0.05  # deriva dei geni dei recettori (scala: genetics.DRIFT_SCALE)
     mutation_floor: float = 1e-5
 
-    # Compito
+    # Compito: "cibo" = nutrirsi (docs/SPEC_MONDO.md), "bersaglio" = toccare il
+    # bersaglio una volta (il mondo di prima, per le corse vecchie).
+    task: str = "bersaglio"  # il mondo predefinito; "cibo" è completo (docs/SPEC_MONDO.md) e si sceglie da menu o --task
     target_radius: float = 3.0
+
+    # Il mondo del cibo. Ogni agente ha la sua copia di cibo e predatori.
+    # Manopole della difficoltà, da 0 (basico) a 1 (complesso); le muove la
+    # progressione adattiva (evo/ladder.py).
+    forage_abundance: float = 0.0  # da 12 cibi di raggio 4 a 4 di raggio 2
+    forage_need: float = 0.0  # cibi da mangiare per riprodursi: da 1 a 10
+    forage_prey: float = 0.0  # da cibo fermo a prede che fuggono a 12 u/s
+    forage_scent: float = 0.0  # da nube d'odore istantanea a nube che si forma e svanisce in scent_time_max
+    forage_predators: float = 0.0  # da nessuno a 3 predatori a 15 u/s
+    # Estremi delle manopole.
+    food_count_easy: int = 12
+    forage_own_arena: bool = True  # ogni agente in un'arena sua (cibo e predatori in posti diversi)
+    food_count_hard: int = 4  # con 3 la riuscita crollava (dal 25% al 14%): un gradino, non una salita
+    food_radius_easy: float = 4.0
+    food_radius_hard: float = 2.0
+    food_need_easy: int = 1
+    food_need_hard: int = 10  # tanti incontri in una vita: la fortuna di uno solo pesa poco
+    prey_speed_max: float = 12.0  # u/s, con la manopola a 1
+    prey_flee_range: float = 15.0  # u: la preda si accorge dell'agente
+    predator_count_max: int = 3
+    predator_speed_max: float = 15.0  # u/s (l'agente arriva a 30)
+    predator_range: float = 40.0  # u: il predatore si accorge dell'agente
+    predator_radius: float = 1.5
+    predator_damage: float = 60.0  # energia/s a contatto
+    # Cibo: energia che dà (fino al massimo energy_init), distanze di nascita.
+    food_energy: float = 100.0  # con 40 cercare costava più di quanto rendeva: si moriva di fame verso i 50 s
+    food_min_dist: float = 20.0  # gli agenti nascono almeno così lontani dal cibo
+    predator_min_dist: float = 40.0  # e dai predatori
+    # Come appaiono e si sentono: colore (asse della luce), larghezza, albedo;
+    # i predatori vibrano muovendosi.
+    food_color: float = 0.85
+    food_color_width: float = 0.06
+    food_albedo: float = 1.0
+    predator_color: float = 0.05
+    predator_color_width: float = 0.06
+    predator_albedo: float = 0.8
+    predator_vibration: float = 0.5
+    predator_vibration_freq: float = 0.4
+    # Odori (docs/SPEC_MONDO.md, sezione 9): il cibo e i predatori rilasciano
+    # una molecola loro; diffusione e degradazione fanno una nube stabile
+    # forza · exp(-d / odor_range), d dal bordo. Con forage_scent > 0 la nube
+    # di un cibo appena comparso si forma in τ = forage_scent · scent_time_max
+    # secondi (1 - e^(-t/τ)) e quella di un cibo mangiato svanisce nello
+    # stesso tempo (e^(-t/τ)): una traccia ingannevole.
+    food_molecule: float = 0.6
+    food_smell: float = 1.0
+    predator_molecule: float = 0.35
+    predator_smell: float = 1.0
+    odor_range: float = 25.0  # u
+    scent_time_max: float = 3.0  # s, con la manopola a 1
+    # La scala di difficoltà (evo/ladder.py): "" = nessuna, "scala" =
+    # progressione adattiva, "basico" / "complesso" = controlli con le
+    # manopole ferme a 0 / a 1. Le soglie sono strumenti di addestramento.
+    ladder: str = ""
+    ladder_window: int = 10  # generazioni su cui si media la riuscita
+    ladder_up: float = 0.5  # sopra questa quota la scala sale
+    ladder_down: float = 0.3  # sotto questa scende (sotto il 30% una prova sola è quasi una lotteria)
+    ladder_step: float = 0.02  # di quanto si muove (posizione da 0 a 3)
+    ladder_crash: float = 0.05  # di quanto scende se nessuno completa
 
     # Pericoli (zone tossiche in deriva armonica). Il danno cresce dal bordo
     # (zero) al centro (hazard_drain) come profondità ** hazard_falloff.

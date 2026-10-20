@@ -15,11 +15,22 @@ sensi), perché senza quelle la rete non si potrebbe nemmeno costruire.
 
 Se un giorno le prove cambiano, si alza `VERSION`: i punteggi di versioni
 diverse non si confrontano.
+
+Le corse nel mondo del cibo fanno un'altra batteria, l'esame a livelli
+(versione 4, docs/SPEC_MONDO.md): 8 livelli fissi lungo la scala di
+difficoltà, dal mondo basico al complesso. Il risultato è un profilo:
+diventare più intelligenti vuol dire migliorare sui livelli difficili senza
+perdere quelli facili.
+
+Prove di lesione (`lesion`): lo stesso esame con una parte del cervello tolta
+(un senso, i neuroni interni, la plasticità). Dicono cosa gli agenti usano
+davvero.
 """
 
 import dataclasses
 import multiprocessing
 import os
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, wait
 from dataclasses import dataclass, field
@@ -28,10 +39,14 @@ import numpy as np
 
 from ..config import Config
 from ..net.brain import Genome
-from ..sim.tasks import FarTarget, MovingTarget, ReachTarget
+from ..sim.signals import PHENOMENA
+from ..sim.tasks import FarTarget, Foraging, MovingTarget, ReachTarget
+from . import ladder
 from .trial import Trial
 
 VERSION = 3  # 2: recettori universali; 3: sensi calibrati e movimento con il costo naturale
+LEVELS_VERSION = 6  # esame a livelli del mondo del cibo; 5: odori, nube che sfugge, 4 cibi al massimo;
+# 6: fino a 10 cibi in 240 s, cibo da 100 di energia, un'arena per agente
 EXAM_SEED = 2_000_000  # le arene della prova k partono da EXAM_SEED + 10_000 * k
 
 # Ambiente d'esame, fissato al momento della versione 3. Sono i valori di
@@ -40,7 +55,7 @@ ENVIRONMENT = dict(
     arena_w=200.0, arena_h=140.0, dt=1.0 / 60.0,
     agent_radius=1.0, thrust_accel=60.0, reverse_factor=0.5, lin_drag=2.0, lat_drag=8.0,
     turn_accel=40.0, ang_drag=6.0, wall_restitution=0.3,
-    energy_init=150.0, metabolism_basal=2.5, metabolism_move=10.0, metabolism_turn=2.0, metabolism_exponent=2.0,
+    energy_init=150.0, energy_max=150.0, reserve_mass=0.0, metabolism_basal=2.5, metabolism_move=10.0, metabolism_turn=2.0, metabolism_exponent=2.0,
     wire_cost=0.004,
     sensor_noise=0.0, receptor_cell_cost=0.002, receptor_sens_cost=0.008, neuron_cost=0.01,
     life_max=90.0, target_radius=3.0,
@@ -57,7 +72,23 @@ ENVIRONMENT = dict(
     magnetic_field=0.0, magnetic_angle_deg=90.0, receptor_dark=1.0, receptor_saturation=300.0,
     receptor_scale_light=300.0, receptor_scale_chemical=200.0, receptor_scale_mechanical=100.0,
     receptor_scale_thermal=100.0, receptor_scale_magnetic=100.0, receptor_scale_internal=70.0,
+    # Il mondo del cibo (non usato dalla versione 3, che è nel mondo del bersaglio).
+    task='bersaglio', forage_abundance=0.0, forage_need=0.0, forage_prey=0.0, forage_predators=0.0,
+    food_count_easy=12, food_count_hard=3, food_radius_easy=4.0, food_radius_hard=2.0, food_need_easy=1,
+    food_need_hard=5, prey_speed_max=12.0, prey_flee_range=15.0, predator_count_max=3, predator_speed_max=15.0,
+    predator_range=40.0, predator_radius=1.5, predator_damage=60.0, food_energy=40.0, food_min_dist=20.0,
+    predator_min_dist=40.0, food_color=0.85, food_color_width=0.06, food_albedo=1.0, predator_color=0.05,
+    predator_color_width=0.06, predator_albedo=0.8, predator_vibration=0.5, predator_vibration_freq=0.4,
+    forage_scent=0.0, food_molecule=0.6, food_smell=0.0, predator_molecule=0.35, predator_smell=0.0,
+    odor_range=25.0, scent_time_max=3.0, forage_own_arena=False,
+    mature_keep_living=False,  # l'esame misura chi diventa maturo: lì la prova finisce
 )
+
+# Il mondo del cibo dell'esame a livelli (versione 5): scritto qui, non letto
+# dalla corsa.
+FORAGE = dict(task="cibo", n_hazards=0, life_max=240.0, food_count_hard=4, food_need_hard=10, food_energy=100.0,
+              food_smell=1.0,
+              predator_smell=1.0, forage_own_arena=True)
 
 # Le costanti che invece vengono dalla corsa: riguardano la rete (forma,
 # tipo, come nasce) o l'evoluzione, non il mondo in cui l'agente vive. Ogni
@@ -75,7 +106,8 @@ FROM_RUN = frozenset({
     "spike_substeps", "spike_gain", "spike_inhibitory_share", "sensors_excitatory_only",
     "population", "max_age", "crossover_rate",
     "mut_weight_prob", "mut_weight_std", "mut_conn_add", "mut_conn_del", "mut_neuron_toggle",
-    "mut_pos_prob", "mut_pos_std", "mut_dup", "mut_rec_drift", "mutation_floor", "exam_every", "engine",
+    "mut_pos_prob", "mut_pos_std", "mut_dup", "receptor_dup_split", "fecundity_by_food", "mut_rec_drift", "mutation_floor", "exam_every", "engine",
+    "ladder", "ladder_window", "ladder_up", "ladder_down", "ladder_step", "ladder_crash",
 })
 
 
@@ -104,6 +136,60 @@ TESTS = (
 )
 
 
+def level_world(d: dict) -> dict:
+    """Cosa c'è in un livello: cibi in arena, da mangiare, velocità di fuga,
+    tempo della nube, predatori."""
+    e = {**ENVIRONMENT, **FORAGE}
+    return {
+        "food": int(round(e["food_count_easy"] + (e["food_count_hard"] - e["food_count_easy"]) * d["forage_abundance"])),
+        "need": int(round(e["food_need_easy"] + (e["food_need_hard"] - e["food_need_easy"]) * d["forage_need"])),
+        "flee": e["prey_speed_max"] * d["forage_prey"],
+        "scent": e["scent_time_max"] * d["forage_scent"],
+        "predators": int(np.ceil(e["predator_count_max"] * d["forage_predators"])),
+    }
+
+
+def _level(k: int, n: int = 8) -> Test:
+    x = ladder.TOP * k / (n - 1)
+    d = ladder.at(x)
+    w = level_world(d)
+    what = (f"{w['food']} cibi, {w['need']} da mangiare, prede a {w['flee']:.0f} u/s, nube in {w['scent']:.1f} s, "
+            f"{w['predators']} predatori")
+    return Test(f"L{k}", f"livello {k}", what, {**FORAGE, **d}, task=Foraging)
+
+
+# L'esame a livelli: posizioni 0, 3/7, ..., 3 della scala (manopole scritte
+# qui: non seguono la scala della corsa).
+LEVELS = tuple(_level(k) for k in range(8))
+
+# Le lesioni possibili: un senso (sensibilità a quel fenomeno azzerata in
+# tutti i recettori), i neuroni interni, la plasticità.
+LESIONS = ("neuroni", "plasticità") + PHENOMENA
+
+
+def battery(run_cfg: Config) -> tuple[Test, ...]:
+    """Le prove dell'esame di una corsa: i livelli per il mondo del cibo, le
+    prove della versione 3 per il mondo del bersaglio."""
+    return LEVELS if run_cfg.task == "cibo" else TESTS
+
+
+def lesioned(run_cfg: Config, genomes: Genome, lesion: str | None) -> tuple[Config, Genome]:
+    """La corsa e i genomi con la lesione applicata (copie: gli originali non
+    cambiano)."""
+    if lesion is None:
+        return run_cfg, genomes
+    if lesion not in LESIONS:
+        raise ValueError(f"lesione sconosciuta: {lesion!r} (valide: {', '.join(LESIONS)})")
+    if lesion == "plasticità":
+        return dataclasses.replace(run_cfg, plasticity=False), genomes
+    g = genomes.take(np.arange(len(genomes)))
+    if lesion == "neuroni":
+        g.active[:] = False
+    else:
+        g.r_sens[..., PHENOMENA.index(lesion)] = -30.0  # sensibilità e^-30: nulla
+    return run_cfg, g
+
+
 def exam_config(run_cfg: Config, test: Test) -> Config:
     """La configurazione di una prova: la rete dalla corsa, tutto il resto
     dall'esame."""
@@ -122,7 +208,7 @@ def _arena(run_cfg: Config, genomes: Genome, i: int, k: int, clones: int) -> np.
     """Arena `k` della prova `i`: quante copie di ogni rete completano. Ogni
     arena è indipendente dalle altre, così si possono fare in parallelo con lo
     stesso risultato."""
-    t = TESTS[i]
+    t = battery(run_cfg)[i]
     trial = Trial(exam_config(run_cfg, t), genomes, 1, clones, seed=EXAM_SEED + 10_000 * i + k, task=t.task())
     while not trial.finished:
         trial.step()
@@ -141,7 +227,7 @@ def default_workers() -> int:
 
 
 class Exam:
-    """Mette `genomes` alla prova su tutte le `TESTS`: `arenas` arene per
+    """Mette `genomes` alla prova su tutte le prove della corsa (`battery`): `arenas` arene per
     prova, `clones` copie di ogni rete per arena.
 
     Ogni arena è un lavoro a sé. Con `workers` > 1 i lavori girano in processi
@@ -152,29 +238,30 @@ class Exam:
     """
 
     def __init__(self, run_cfg: Config, genomes: Genome, generation: int, ids=None,
-                 arenas: int = 8, clones: int = 5, workers: int | None = None):
+                 arenas: int = 8, clones: int = 5, workers: int | None = None, lesion: str | None = None):
+        self.lesion = lesion
+        run_cfg, genomes = lesioned(run_cfg, genomes, lesion)
         self.run_cfg, self.genomes, self.generation = run_cfg, genomes, generation
+        self.tests = battery(run_cfg)
         self.ids = None if ids is None else [int(i) for i in ids]
         self.arenas, self.clones = arenas, clones
-        self.todo = [(i, k) for i in range(len(TESTS)) for k in range(arenas)]
-        self.wins = np.zeros((len(TESTS), len(genomes)), dtype=int)  # per prova e rete: copie arrivate
+        self.todo = [(i, k) for i in range(len(self.tests)) for k in range(arenas)]
+        self.wins = np.zeros((len(self.tests), len(genomes)), dtype=int)  # per prova e rete: copie arrivate
         self.done = 0
         self.started = time.perf_counter()
         self.seconds = 0.0
         self.workers = default_workers() if workers is None else workers
         self._pool, self._futures, self._trial = None, {}, None
+        self._thread, self._error = None, None
         if run_cfg.engine == "gpu" and _gpu_ready():
-            # Sulla GPU tutte le arene di una prova girano nello stesso lotto:
-            # niente processi separati.
+            # Sulla GPU tutte le arene di una prova girano nello stesso lotto,
+            # in un filo a parte: chi ha lanciato l'esame (l'interfaccia, la
+            # corsa) non si ferma ad aspettarlo. Niente processi separati: ognuno
+            # occuperebbe la scheda video per conto suo.
             self.workers = 0
             self.todo = []
-            for i, t in enumerate(TESTS):
-                trial = Trial(exam_config(run_cfg, t), genomes, arenas, clones, seed=EXAM_SEED + 10_000 * i,
-                              task=t.task())
-                trial.run(float("inf"))
-                self.wins[i] = trial.wins
-                self.done += arenas
-            self.seconds = time.perf_counter() - self.started
+            self._thread = threading.Thread(target=self._run_on_gpu, name="esame", daemon=True)
+            self._thread.start()
             return
         if self.workers > 1:
             try:
@@ -188,12 +275,12 @@ class Exam:
 
     @property
     def finished(self) -> bool:
-        return self.done >= len(TESTS) * self.arenas
+        return self.done >= len(self.tests) * self.arenas
 
     @property
     def progress(self) -> float:
         """Quota fatta, da 0 a 1."""
-        return self.done / (len(TESTS) * self.arenas)
+        return self.done / (len(self.tests) * self.arenas)
 
     def _record(self, i: int, wins: np.ndarray) -> None:
         self.wins[i] += wins
@@ -202,9 +289,27 @@ class Exam:
             self.seconds = time.perf_counter() - self.started
             self.close()
 
+    def _run_on_gpu(self) -> None:
+        try:
+            for i, t in enumerate(self.tests):
+                trial = Trial(exam_config(self.run_cfg, t), self.genomes, self.arenas, self.clones,
+                              seed=EXAM_SEED + 10_000 * i, task=t.task())
+                trial.run(float("inf"))
+                self.wins[i] = trial.wins
+                self.seconds = time.perf_counter() - self.started
+                self.done += self.arenas
+        except Exception as err:  # riportato a chi raccoglie il risultato
+            self._error = err
+
     def run(self, budget: float = float("inf")) -> None:
-        """In parallelo: raccoglie le arene finite (con `budget` infinito
-        aspetta tutte). Qui: avanza per circa `budget` secondi di calcolo."""
+        """In parallelo (processi o, sulla GPU, un filo a parte): raccoglie le
+        arene finite (con `budget` infinito aspetta tutte). Qui: avanza per
+        circa `budget` secondi di calcolo."""
+        if self._thread is not None:
+            self._thread.join(None if budget == float("inf") else 0.0)
+            if self._error is not None:
+                raise self._error
+            return
         if self._pool is not None:
             ready = wait(self._futures, timeout=None if budget == float("inf") else 0).done
             for f in ready:
@@ -215,7 +320,7 @@ class Exam:
         while not self.finished and time.perf_counter() < deadline:
             if self._trial is None:
                 i, k = self.todo.pop(0)
-                t = TESTS[i]
+                t = self.tests[i]
                 self._trial = (i, Trial(exam_config(self.run_cfg, t), self.genomes, 1, self.clones,
                                         seed=EXAM_SEED + 10_000 * i + k, task=t.task()))
             i, trial = self._trial
@@ -225,7 +330,8 @@ class Exam:
                 self._record(i, trial.wins)
 
     def close(self) -> None:
-        """Ferma i processi (anche a esame non finito: il risultato si perde)."""
+        """Ferma i processi (anche a esame non finito: il risultato si perde).
+        Un esame sulla GPU finisce da solo in sottofondo e viene scartato."""
         if self._pool is not None:
             self._pool.shutdown(wait=False, cancel_futures=True)
             self._pool = None
@@ -233,7 +339,7 @@ class Exam:
     @property
     def rates(self) -> dict[str, np.ndarray]:
         """Per prova: quota di prove completate da ogni rete."""
-        return {t.key: self.wins[i] / (self.arenas * self.clones) for i, t in enumerate(TESTS)}
+        return {t.key: self.wins[i] / (self.arenas * self.clones) for i, t in enumerate(self.tests)}
 
     def result(self) -> dict:
         """Il risultato, pronto per il registro della corsa (solo tipi JSON)."""
@@ -241,7 +347,8 @@ class Exam:
         scores = {k: float(r.mean()) for k, r in rates.items()}
         return {
             "generation": self.generation,
-            "version": VERSION,
+            "version": LEVELS_VERSION if self.tests is LEVELS else VERSION,
+            "lesion": self.lesion,
             "who": len(self.genomes),
             "ids": self.ids,
             "arenas": self.arenas,

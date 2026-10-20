@@ -2,7 +2,7 @@ import numpy as np
 
 from ..config import Config
 from .hazards import HazardField
-from .tasks import ReachTarget
+from .tasks import TASKS
 
 
 class World:
@@ -12,14 +12,19 @@ class World:
     tutti gli agenti insieme: chi le produce (tastiera, mock, rete) è esterno.
     Gli agenti non collidono tra loro: ognuno vive la propria prova nell'arena.
 
-    `done` segna chi ha completato il compito: è l'unico lasciapassare per la
+    `done` segna chi ha completato il compito (nel mondo del cibo: chi è
+    maturo). Con `keep_living` chi ha completato continua a vivere, mangiare e
+    rischiare (mondo del cibo con `mature_keep_living`), altrimenti si ferma ed
+    è in salvo. `racing` dice chi è ancora in gara.
+
+    `done` è l'unico lasciapassare per la
     riproduzione. Chi completa è in salvo (esce dalla simulazione), chi muore
     prima non può più completare.
     """
 
     def __init__(self, cfg: Config, n_agents: int, seed: int = 0, task=None):
         self.cfg = cfg
-        self.task = task or ReachTarget()
+        self.task = task or TASKS[cfg.task]()
         self.n = n_agents
         self.seed = seed
         self.reset()
@@ -30,7 +35,10 @@ class World:
         self.t = 0.0
         self.hazards = HazardField(cfg, self.rng)
         self.task.reset(self)
+        self.keep_living = bool(cfg.mature_keep_living and getattr(self.task, "keeps_living", False))
         self.pos = self._spawn_positions()
+        if hasattr(self.task, "spawned"):
+            self.task.spawned(self)
         self.heading = self.rng.uniform(-np.pi, np.pi, self.n)
         self.vel = np.zeros((self.n, 2))
         self.ang_vel = np.zeros(self.n)
@@ -81,8 +89,8 @@ class World:
         v_lat *= np.exp(-cfg.lat_drag * dt)
         self.vel = v_fwd[:, None] * fwd + v_lat
 
-        # Morti e arrivati restano fermi dove sono.
-        active = self.alive & ~self.done
+        # Morti (e arrivati, se si fermano) restano fermi dove sono.
+        active = self.racing
         self.vel[~active] = 0.0
         self.ang_vel[~active] = 0.0
         self.pos += self.vel * dt
@@ -101,21 +109,34 @@ class World:
         self.hazards.step(dt)
         toxicity = self.hazards.intensity(self.pos) * active
         self.pain = np.minimum(toxicity, 1.0)
-        # Metabolismo: si paga lo sforzo comandato, non la velocità raggiunta.
+        # Metabolismo: si paga lo sforzo comandato, non la velocità raggiunta;
+        # le riserve oltre l'energia di partenza pesano e rendono il movimento più caro.
+        mass = 1.0 + cfg.reserve_mass * np.maximum(self.energy - cfg.energy_init, 0.0) / cfg.energy_init
         effort = (
             cfg.metabolism_basal
-            + cfg.metabolism_move * np.abs(act[:, 0]) ** cfg.metabolism_exponent
-            + cfg.metabolism_turn * np.abs(turn) ** cfg.metabolism_exponent
+            + mass * cfg.metabolism_move * np.abs(act[:, 0]) ** cfg.metabolism_exponent
+            + mass * cfg.metabolism_turn * np.abs(turn) ** cfg.metabolism_exponent
             + (0.0 if upkeep is None else upkeep)
         ) * active
         spent = (effort + cfg.hazard_drain * toxicity) * dt
         self.energy = np.maximum(self.energy - spent, 0.0)
-        self.alive &= self.energy > 0.0
-
+        # Il compito può cambiare il mondo e l'energia (mangiare, predatori)
+        # prima che si contino i vivi.
         if hasattr(self.task, "step"):
             self.task.step(self)
+        self.alive &= self.energy > 0.0
         self.done |= self.task.completed(self) & self.alive
         self.t += dt
+
+    @property
+    def racing(self) -> np.ndarray:
+        """Chi è ancora in gara: vivo, e non arrivato (o arrivato ma la vita continua)."""
+        return self.alive & (~self.done | self.keep_living)
+
+    @property
+    def over(self) -> bool:
+        """La prova è finita: nessuno in gara, o tempo scaduto."""
+        return not self.racing.any() or self.t >= self.cfg.life_max
 
     @property
     def speed(self) -> np.ndarray:

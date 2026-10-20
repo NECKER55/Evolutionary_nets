@@ -37,12 +37,17 @@ F = jnp.float32
 # compilati dentro), così cambiarle dal vivo non richiede di ricompilare.
 PHYS = (
     "arena_w", "arena_h", "dt", "agent_radius", "thrust_accel", "reverse_factor", "lin_drag", "lat_drag",
-    "turn_accel", "ang_drag", "wall_restitution", "energy_init", "metabolism_basal", "metabolism_move",
+    "turn_accel", "ang_drag", "wall_restitution", "energy_init", "energy_max", "reserve_mass",
+    "metabolism_basal", "metabolism_move",
     "metabolism_turn", "metabolism_exponent", "light_attenuation", "hazard_drain", "hazard_falloff", "hazard_pulse", "hazard_speed",
     "toxin_molecule", "hazard_smell", "target_molecule", "target_smell", "smell_range", "vibration_range",
     "target_vibration", "target_vibration_freq", "hazard_vibration", "hazard_vibration_freq",
     "ambient_temperature", "heat_range", "target_heat", "hazard_heat", "receptor_dark", "receptor_saturation",
     "sensor_noise", "synapse_max", "spike_gain", "life_max",
+    # Il mondo del cibo.
+    "prey_flee_range", "predator_range", "predator_radius", "predator_damage", "food_energy", "food_min_dist",
+    "predator_vibration", "predator_vibration_freq",
+    "food_molecule", "food_smell", "predator_molecule", "predator_smell", "odor_range",
 )
 
 
@@ -64,9 +69,12 @@ def _rotate(vx, vy, c, s):
 # --- Sensi -----------------------------------------------------------------
 
 
-def light(ph, ox, oy, ang, hz_pos, hz_r, target, target_r, has_target):
+def light(ph, ox, oy, ang, hz_pos, hz_r, target, target_r, has_target, objects=None):
     """Come `signals.light`: per ogni recettore (K) e direzione campione (M),
-    luce delle pareti, del bersaglio e del veleno, mediata sulle direzioni."""
+    luce delle pareti, del bersaglio e del veleno, mediata sulle direzioni.
+    `objects` = (posizioni (K, O, 2), raggi (K, O), tipi (O,)) degli oggetti
+    opachi della copia di mondo di ogni recettore (cibo 0, predatori 1): se
+    c'è, si aggiungono la luce del cibo e quella dei predatori."""
     W, H, L = ph["arena_w"], ph["arena_h"], ph["light_attenuation"]
     dx, dy = jnp.cos(ang), jnp.sin(ang)  # (K, M)
     ox, oy = ox[:, None], oy[:, None]
@@ -82,6 +90,21 @@ def light(ph, ox, oy, ang, hz_pos, hz_r, target, target_r, has_target):
     d_t = jnp.where((disc >= 0) & (proj + half >= 0) & (has_target > 0), jnp.maximum(proj - half, 0.0), jnp.inf)
     hit_t = d_t < d_hit
     d_hit = jnp.minimum(d_hit, d_t)
+    if objects is not None:
+        o_pos, o_r, o_kind = objects
+        gx = o_pos[:, None, :, 0] - ox[..., None]  # (K, 1, O)
+        gy = o_pos[:, None, :, 1] - oy[..., None]
+        pj = gx * dx[..., None] + gy * dy[..., None]  # (K, M, O)
+        rr = o_r[:, None, :]
+        dsc = rr * rr - (gx * gx + gy * gy) + pj * pj
+        hf = jnp.sqrt(jnp.maximum(dsc, 0.0))
+        d_o = jnp.where((rr > 0) & (dsc >= 0) & (pj + hf >= 0), jnp.maximum(pj - hf, 0.0), jnp.inf)
+        nearest = jnp.argmin(d_o, -1)
+        d_o = d_o.min(-1)
+        hit_o = d_o < d_hit
+        hit_t = hit_t & ~hit_o
+        d_hit = jnp.minimum(d_hit, d_o)
+        kind = o_kind[nearest]
     fade = jnp.exp(-d_hit / L)
     # Nubi di veleno: (Hz, K, M).
     cx = hz_pos[:, 0, None, None] - ox[None]
@@ -93,7 +116,10 @@ def light(ph, ox, oy, ang, hz_pos, hz_r, target, target_r, has_target):
     s_out = jnp.minimum(pr + hh, d_hit[None])
     ok = (dc >= 0) & (pr + hh >= 0) & (s_out > s_in)
     glow = jnp.where(ok, L * (jnp.exp(-s_in / L) - jnp.exp(-s_out / L)), 0.0).sum(0)
-    return (jnp.where(hit_t, 0.0, fade).mean(1), jnp.where(hit_t, fade, 0.0).mean(1), glow.mean(1))
+    if objects is None:
+        return (jnp.where(hit_t, 0.0, fade).mean(1), jnp.where(hit_t, fade, 0.0).mean(1), glow.mean(1))
+    return (jnp.where(hit_t | hit_o, 0.0, fade).mean(1), jnp.where(hit_t, fade, 0.0).mean(1), glow.mean(1),
+            jnp.where(hit_o & (kind == 0), fade, 0.0).mean(1), jnp.where(hit_o & (kind == 1), fade, 0.0).mean(1))
 
 
 def quanta(ph, P, s):
@@ -106,9 +132,19 @@ def quanta(ph, P, s):
     py = (s["pos"][:, 1, None] + r * ny).reshape(-1)
     hz_pos, hz_r = hazard_shape(ph, P, s)
     ang = (s["heading"][:, None, None] + P["angles"]).reshape(N * R, -1)
-    wall, targ, glow = light(ph, px, py, ang, hz_pos, hz_r, s["target"], P["target_r"], P["has_target"])
+    forage = "food" in s
+    if forage:
+        o_pos = jnp.repeat(jnp.concatenate([s["food"], s["pred"]], 1), R, axis=0)
+        o_r = jnp.repeat(jnp.concatenate([P["food_rad"], P["pred_rad"]], 1), R, axis=0)
+        o_kind = jnp.concatenate([jnp.zeros(s["food"].shape[1], jnp.int32), jnp.ones(s["pred"].shape[1], jnp.int32)])
+        wall, targ, glow, food, pred = light(ph, px, py, ang, hz_pos, hz_r, s["target"], P["target_r"],
+                                             P["has_target"], (o_pos, o_r, o_kind))
+    else:
+        wall, targ, glow = light(ph, px, py, ang, hz_pos, hz_r, s["target"], P["target_r"], P["has_target"])
     out = (P["c_wall"] * wall.reshape(N, R) + P["c_target"] * targ.reshape(N, R)
            + P["c_glow"] * glow.reshape(N, R))
+    if forage:
+        out += P["c_food"] * food.reshape(N, R) + P["c_pred"] * pred.reshape(N, R)
     # Sostanze: tossina (dentro: intensità; fuori: odore se c'è), odore del bersaglio.
     ex = px[:, None] - hz_pos[None, :, 0]
     ey = py[:, None] - hz_pos[None, :, 1]
@@ -120,6 +156,21 @@ def quanta(ph, P, s):
     dt_ = jnp.sqrt((px - s["target"][0]) ** 2 + (py - s["target"][1]) ** 2) - P["target_r"]
     smell = ph["target_smell"] * jnp.exp(-jnp.maximum(dt_, 0.0) / ph["smell_range"]) * P["has_target"]
     out += P["g_c"] * _tuning(ph["target_molecule"], P["mu_c"], P["sg_c"]) * smell.reshape(N, R)
+    if forage:  # odori del cibo (nube e traccia) e dei predatori, nella copia di mondo dell'agente
+        lam = ph["odor_range"]
+        qx, qy = px.reshape(N, R, 1), py.reshape(N, R, 1)
+
+        def cloud(obj, radius):
+            d = jnp.sqrt((qx - obj[:, None, :, 0]) ** 2 + (qy - obj[:, None, :, 1]) ** 2) - radius
+            return jnp.exp(-jnp.maximum(d, 0.0) / lam)
+
+        on, trace = scent(P, s)
+        food_on = (P["food_rad"] > 0)[:, None, :]
+        fc = ((on[:, None, :] * cloud(s["food"], P["food_r"]) + trace[:, None, :] * cloud(s["ghost"], P["food_r"]))
+              * food_on).sum(-1)
+        out += P["g_c"] * _tuning(ph["food_molecule"], P["mu_c"], P["sg_c"]) * ph["food_smell"] * fc
+        pc = (cloud(s["pred"], ph["predator_radius"]) * (P["pred_rad"] > 0)[:, None, :]).sum(-1)
+        out += P["g_c"] * _tuning(ph["predator_molecule"], P["mu_c"], P["sg_c"]) * ph["predator_smell"] * pc
     # Pressione sui lati che toccano una parete.
     lo = s["pos"] <= r
     hi = s["pos"] >= jnp.stack([ph["arena_w"] - r, ph["arena_h"] - r])
@@ -140,6 +191,11 @@ def quanta(ph, P, s):
                  ph["target_vibration_freq"])
     hv = jax.vmap(lambda c: heard(c[0], c[1], ph["hazard_vibration"], ph["hazard_vibration_freq"]))(hz_pos)
     out += hv.sum(0)
+    if forage:  # i predatori vibrano (ognuno nella copia di mondo del suo agente)
+        for p in range(s["pred"].shape[1]):
+            on = (P["pred_rad"][:, p, None] > 0).astype(F)
+            out += heard(s["pred"][:, p, 0, None], s["pred"][:, p, 1, None], ph["predator_vibration"] * on,
+                         ph["predator_vibration_freq"])
     # Temperatura: ambiente più le sorgenti di calore.
     temp = ph["ambient_temperature"] + ph["target_heat"] * jnp.exp(-jnp.maximum(dt_, 0.0) / ph["heat_range"]) * \
         P["has_target"]
@@ -164,7 +220,7 @@ def body(ph, s):
     def pos(x):
         return jnp.clip(x, 0.0, 1.0)
 
-    return jnp.stack([jnp.clip(s["energy"] / ph["energy_init"], 0.0, 1.0),
+    return jnp.stack([jnp.clip(s["energy"] / ph["energy_max"], 0.0, 1.0),
                       pos(fwd), pos(-fwd), pos(lat), pos(-lat), pos(rot), pos(-rot)], 1)
 
 
@@ -265,7 +321,7 @@ def physics(ph, P, s, actions, upkeep):
     v_fwd = (v_fwd + thrust * ph["thrust_accel"] * dt) * jnp.exp(-ph["lin_drag"] * dt)
     k = jnp.exp(-ph["lat_drag"] * dt)
     vel = jnp.stack([v_fwd * fx + lx * k, v_fwd * fy + ly * k], 1)
-    active = (s["alive"] > 0) & (s["done"] <= 0)
+    active = in_race(P, s)
     vel = jnp.where(active[:, None], vel, 0.0)
     ang_vel = jnp.where(active, ang_vel, 0.0)
     pos = s["pos"] + vel * dt
@@ -283,9 +339,13 @@ def physics(ph, P, s, actions, upkeep):
     hz_r = P["base_radius"] * (1.0 + ph["hazard_pulse"] * jnp.sin(pulse))
     d = jnp.sqrt(((pos[:, None, :] - hz_pos[None]) ** 2).sum(-1)) - hz_r[None]
     toxicity = (jnp.clip(-d / hz_r[None], 0.0, 1.0) ** ph["hazard_falloff"]).sum(1) * active
-    effort = (ph["metabolism_basal"] + ph["metabolism_move"] * jnp.abs(act[:, 0]) ** ph["metabolism_exponent"]
-              + ph["metabolism_turn"] * jnp.abs(turn) ** ph["metabolism_exponent"] + upkeep) * active
+    mass = 1.0 + ph["reserve_mass"] * jnp.maximum(s["energy"] - ph["energy_init"], 0.0) / ph["energy_init"]
+    effort = (ph["metabolism_basal"] + mass * ph["metabolism_move"] * jnp.abs(act[:, 0]) ** ph["metabolism_exponent"]
+              + mass * ph["metabolism_turn"] * jnp.abs(turn) ** ph["metabolism_exponent"] + upkeep) * active
     energy = jnp.maximum(s["energy"] - (effort + ph["hazard_drain"] * toxicity) * dt, 0.0)
+    forage = {}
+    if "food" in s:
+        energy, forage = foraging(ph, P, s, pos, energy, active)
     alive = (s["alive"] > 0) & (energy > 0.0)
     # Il bersaglio (se si muove) e chi lo raggiunge.
     target, tvel = s["target"] + s["target_vel"] * dt, s["target_vel"]
@@ -296,11 +356,69 @@ def physics(ph, P, s, actions, upkeep):
     target = jnp.clip(target, tr, t_hi)
     reached = jnp.sqrt(((pos - target) ** 2).sum(1)) <= tr + r
     done = (s["done"] > 0) | (reached & alive & (P["has_target"] > 0))
+    if forage:
+        done = done | ((forage["eaten"] >= P["need"]) & alive)
     t = s["t"] + dt
     done_t = jnp.where(done & (s["done"] <= 0), t, s["done_t"])  # quando ha completato
     return dict(pos=pos, vel=vel, heading=heading, ang_vel=ang_vel, energy=energy, alive=alive.astype(F),
                 done=done.astype(F), bump=bump.astype(F), pain=jnp.minimum(toxicity, 1.0), phase=phase,
-                pulse_phase=pulse, target=target, target_vel=tvel, t=t, done_t=done_t)
+                pulse_phase=pulse, target=target, target_vel=tvel, t=t, done_t=done_t, **forage)
+
+
+def scent(P, s):
+    """Come `Foraging.scent`: forza della nube di ogni cibo e della sua traccia."""
+    tau = P["scent_tau"]
+    safe = jnp.maximum(tau, 1e-9)
+    on = jnp.where(tau > 0, 1.0 - jnp.exp(-s["age"] / safe), 1.0)
+    trace = jnp.where(tau > 0, jnp.exp(-s["ghost_t"] / safe), 0.0)
+    return on, trace
+
+
+def foraging(ph, P, s, pos, energy, active):
+    """Come `Foraging.step`: prede e predatori si muovono, i predatori
+    mordono, chi tocca il cibo lo mangia e il cibo ricompare dalla coda."""
+    dt = ph["dt"]
+    W, H = ph["arena_w"], ph["arena_h"]
+    act = active & (energy > 0.0)
+    me = pos[:, None, :]
+    # Prede: fuggono dall'agente vicino.
+    food, fr = s["food"], P["food_r"]
+    away = food - me
+    d = jnp.sqrt((away ** 2).sum(-1, keepdims=True))
+    flee = (d < ph["prey_flee_range"]) & (P["food_rad"][..., None] > 0) & act[:, None, None]
+    food = food + jnp.where(flee, away / jnp.maximum(d, 1e-9) * P["prey_speed"] * dt, 0.0)
+    food = jnp.clip(food, jnp.stack([fr, fr]), jnp.stack([W - fr, H - fr]))
+    # Predatori: inseguono l'agente vicino e mordono a contatto.
+    pr = ph["predator_radius"]
+    pred = s["pred"]
+    pred_on = P["pred_rad"] > 0
+    toward = me - pred
+    d = jnp.sqrt((toward ** 2).sum(-1, keepdims=True))
+    chase = (d < ph["predator_range"]) & pred_on[..., None] & act[:, None, None]
+    pred = pred + jnp.where(chase, toward / jnp.maximum(d, 1e-9) * jnp.minimum(P["pred_speed"] * dt, d), 0.0)
+    pred = jnp.clip(pred, jnp.stack([pr, pr]), jnp.stack([W - pr, H - pr]))
+    d = jnp.sqrt(((me - pred) ** 2).sum(-1))
+    bitten = ((d <= pr + ph["agent_radius"]) & pred_on).sum(1)
+    energy = jnp.maximum(energy - ph["predator_damage"] * dt * bitten * act, 0.0)
+    act = act & (energy > 0.0)
+    # Mangiare: il k-esimo cibo mangiato in questo passo prende il k-esimo
+    # posto libero della coda (due posti per cibo: il secondo se il primo è
+    # troppo vicino all'agente).
+    d = jnp.sqrt(((me - food) ** 2).sum(-1))
+    eat = (d <= fr + ph["agent_radius"]) & (P["food_rad"] > 0) & act[:, None]
+    q = P["queue"]
+    Q = q.shape[0]
+    idx = s["ptr"].astype(jnp.int32)[:, None] + 2 * (jnp.cumsum(eat, 1) - 1)
+    a, b = q[idx % Q], q[(idx + 1) % Q]
+    far = jnp.sqrt(((a - me) ** 2).sum(-1)) >= ph["food_min_dist"]
+    ghost = jnp.where(eat[..., None], food, s["ghost"])  # la nube del cibo mangiato resta lì e svanisce
+    food = jnp.where(eat[..., None], jnp.where(far[..., None], a, b), food)
+    n_eat = eat.sum(1)
+    energy = jnp.where(n_eat > 0, jnp.minimum(energy + ph["food_energy"] * n_eat, ph["energy_max"]), energy)
+    age = jnp.where(eat, 0.0, s["age"] + dt)
+    ghost_t = jnp.where(eat, 0.0, s["ghost_t"] + dt)
+    return energy, dict(food=food, pred=pred, ptr=s["ptr"] + 2 * n_eat, eaten=s["eaten"] + n_eat, age=age,
+                        ghost=ghost, ghost_t=ghost_t)
 
 
 def make_step(net_type: str, n_hidden: int, substeps: int):
@@ -308,7 +426,7 @@ def make_step(net_type: str, n_hidden: int, substeps: int):
     attivo) sostituisce i comandi di un agente (guida a mano)."""
 
     def step(ph, P, s, manual):
-        racing = ((s["alive"] > 0) & (s["done"] <= 0)).astype(F)
+        racing = in_race(P, s).astype(F)
         key, sub = jax.random.split(s["key"])
         obs, m = respond(ph, P, s, sub, racing)
         if net_type == "rate":
@@ -324,6 +442,11 @@ def make_step(net_type: str, n_hidden: int, substeps: int):
     return step
 
 
-def running(ph, s):
+def in_race(P, s):
+    """Come `World.racing`: vivi, e non arrivati (o arrivati ma la vita continua)."""
+    return (s["alive"] > 0) & ((s["done"] <= 0) | (P["keep_living"] > 0))
+
+
+def running(ph, P, s):
     """Il mondo è ancora in corso? (qualcuno in gara e tempo non finito)."""
-    return ((s["alive"] > 0) & (s["done"] <= 0)).any() & (s["t"] < ph["life_max"])
+    return in_race(P, s).any() & (s["t"] < ph["life_max"])

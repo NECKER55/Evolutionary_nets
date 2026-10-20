@@ -14,11 +14,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ..sim.tasks import FarTarget, MovingTarget, ReachTarget
+from ..sim.tasks import FarTarget, Foraging, MovingTarget, ReachTarget
 from . import engine
 from .engine import F
 
-SUPPORTED_TASKS = (ReachTarget, FarTarget, MovingTarget)
+SUPPORTED_TASKS = (ReachTarget, FarTarget, MovingTarget, Foraging)
 
 
 def supported(world, ctrl) -> bool:
@@ -48,9 +48,16 @@ def pack_params(world, ctrl) -> dict:
         anchor=hz.anchor.reshape(-1, 2), amp=hz.amp.reshape(-1, 2), omega=hz.omega.reshape(-1, 2),
         pulse_omega=hz.pulse_omega, base_radius=hz.base_radius,
         target_r=task.radius if has_target else 0.0, has_target=float(has_target),
+        keep_living=float(world.keep_living),
     )
     if b.KIND == "spike-ei":
         params.update(keep_n=b.keep, active_n=b.active)
+    if isinstance(task, Foraging):  # le manopole di questo mondo
+        cfg = world.cfg
+        params.update(c_food=p.c_food, c_pred=p.c_pred, food_rad=np.where(task.food_on, task.food_r, 0.0),
+                      pred_rad=np.where(task.pred_on, cfg.predator_radius, 0.0), food_r=task.food_r,
+                      need=task.need, prey_speed=task.prey_speed, pred_speed=task.pred_speed, queue=task.queue,
+                      scent_tau=task.scent_tau)
     return {k: _f(v) for k, v in params.items()}
 
 
@@ -70,6 +77,9 @@ def pack_state(world, ctrl, key) -> dict:
     )
     if b.KIND == "spike-ei":
         state.update(charge=b.charge, spikes=b.spikes)
+    if isinstance(task, Foraging):
+        state.update(food=task.food, pred=task.pred, ptr=task.ptr, eaten=task.eaten, age=task.age,
+                     ghost=task.ghost, ghost_t=task.ghost_t)
     state = {k: _f(v) for k, v in state.items()}
     state["key"] = key
     return state
@@ -90,6 +100,11 @@ def unpack(world, ctrl, s: dict) -> None:
         world.task.target = g["target"]
         if hasattr(world.task, "vel"):
             world.task.vel = g["target_vel"]
+    if "food" in g:
+        t = world.task
+        t.food, t.pred = g["food"], g["pred"]
+        t.ptr, t.eaten = g["ptr"].astype(int), g["eaten"].astype(int)
+        t.age, t.ghost, t.ghost_t = g["age"], g["ghost"], g["ghost_t"]
     b.state, ctrl.obs, ctrl.adapt = g["state"], g["obs"], g["m"]
     if b.KIND == "spike-ei":
         b.charge, b.spikes = g["charge"], g["spikes"]
@@ -111,24 +126,25 @@ class GpuWorlds:
         self.state = jax.tree_util.tree_map(lambda *a: jnp.stack(a),
                                             *[pack_state(w, c, k) for (w, c), k in zip(pairs, keys)])
         self.n = pairs[0][0].n
+        self.forage = "food" in self.state
 
     def _fns(self):
-        key = (self.net, self.h, self.cfg.spike_substeps)
+        key = (self.net, self.h, self.cfg.spike_substeps, self.forage)
         if key not in GpuWorlds._compiled:
             step = engine.make_step(self.net, self.h, self.cfg.spike_substeps)
             vstep = jax.vmap(step, in_axes=(None, 0, 0, None))
-            vrun = jax.vmap(engine.running, in_axes=(None, 0))
+            vrun = jax.vmap(engine.running, in_axes=(None, 0, 0))
 
             def advance(ph, P, s, manual, k):
                 """k passi (o meno, se tutti i mondi finiscono): i mondi finiti
                 restano fermi."""
                 def cond(c):
                     i, s = c
-                    return (i < k) & vrun(ph, s).any()
+                    return (i < k) & vrun(ph, P, s).any()
 
                 def body(c):
                     i, s = c
-                    live = vrun(ph, s)
+                    live = vrun(ph, P, s)
                     new = vstep(ph, P, s, manual)
                     s = jax.tree_util.tree_map(
                         lambda a, b: jnp.where(live.reshape((-1,) + (1,) * (a.ndim - 1)), a, b), new, s)

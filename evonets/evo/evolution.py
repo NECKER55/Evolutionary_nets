@@ -1,7 +1,4 @@
 import dataclasses
-import json
-import subprocess
-from pathlib import Path
 
 import numpy as np
 
@@ -9,57 +6,31 @@ from ..config import Config
 from ..net.brain import META, Genome, pad
 from ..net.controllers import NeuralController
 from ..sim.world import World
-from ..net.receptors import scales
+from . import ladder, saves
 from .exam import Exam, candidates
 from .genetics import grow, reproduce
+from .saves import code_version
 
 NORMAL = "normale"
 ONE_PARENT = "un solo genitore"
 RESTART = "nessun genitore: ripartenza dagli ultimi"
 RANDOM = "nessun genitore: reti casuali"
 
-# Versione del formato dei salvataggi. 1 = con geometria del cervello ma senza
-# configurazione; 2 = con configurazione completa e registro dell'ambiente;
-# 3 = recettori universali, posti che crescono, mutazioni come geni;
-# 4 = adattamento sensoriale (i file del formato 3 si aprono con l'adattamento spento);
-# 5 = plasticità (i file precedenti si aprono senza plasticità né modulatori);
-# 6 = sensi calibrati: la sensibilità è un moltiplicatore della scala fisica di
-#     ogni fenomeno (i file precedenti si convertono a parità di quanti);
-# 7 = il cervello cresce con le sue cellule (le distanze si ricalcolano).
-FORMAT = 7
-# Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
-# nullo, regola a zero, nessun modulatore.
-NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
-# Geni aggiunti dopo il formato 3, con il valore che vuol dire "assente".
-ADDED_IN_4 = {"r_tau": 0.0, "r_sub": 0.0, "r_div": 0.0}
-
-
-def code_version() -> str:
-    """Il commit git del codice in uso ("+modifiche" se ce ne sono di non
-    committate), o "sconosciuta" fuori da un repository."""
-    root = Path(__file__).resolve().parents[2]
-    try:
-        head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True,
-                              text=True, timeout=5, check=True).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root,
-                               capture_output=True, text=True, timeout=5).stdout.strip()
-        return head + ("+modifiche" if dirty else "")
-    except (OSError, subprocess.SubprocessError):
-        return "sconosciuta"
-
-
 def run_together(evos: list["Evolution"]) -> list[dict]:
     """Una generazione di più evoluzioni (per esempio più semi dello stesso
     esperimento) simulate insieme sulla GPU, nello stesso lotto. Servono la
     stessa popolazione, lo stesso tipo di rete e lo stesso numero di zone di
-    veleno; i posti di recettori e neuroni vengono pareggiati al più grande
+    veleno, lo stesso compito (le manopole del mondo del cibo possono essere
+    diverse: la scala e i suoi controlli girano insieme); i posti di
+    recettori e neuroni vengono pareggiati al più grande
     (posti spenti: non cambia nulla per nessuno). Restituisce le statistiche
     di ciascuna."""
     from ..gpu import available
     from ..gpu.sim import GpuWorlds, supported
     ok = (all(e.cfg.engine == "gpu" for e in evos) and available()
           and all(supported(e.world, e.ctrl) for e in evos)
-          and len({(e.world.n, e.cfg.net_type, len(e.world.hazards.pos)) for e in evos}) == 1)
+          and len({(e.world.n, e.cfg.net_type, len(e.world.hazards.pos), e.cfg.task, e.cfg.food_count_easy,
+                    e.cfg.predator_count_max) for e in evos}) == 1)
     if ok:
         r = max(e.ctrl.brains.n_in for e in evos)
         h = max(e.ctrl.brains.n_hidden for e in evos)
@@ -134,6 +105,7 @@ class Evolution:
 
     def __init__(self, cfg: Config, seed: int = 0, task=None):
         self.cfg = cfg
+        ladder.prepare(cfg)  # i controlli hanno le manopole ferme
         self.seed = seed  # il seme con cui è nata la corsa
         self.rng = np.random.default_rng(seed)
         self.world = World(cfg, cfg.population, seed, task)
@@ -166,7 +138,7 @@ class Evolution:
     @property
     def finished(self) -> bool:
         w = self.world
-        return not (w.alive & ~w.done).any() or w.t >= self.cfg.life_max
+        return w.over
 
     def gpu(self):
         """La simulazione della generazione in corso sul motore compilato, o
@@ -226,7 +198,7 @@ class Evolution:
         """È ora dell'esame automatico (ogni `exam_every` generazioni)?"""
         every = self.cfg.exam_every
         return (every > 0 and self.generation > 0 and self.generation % every == 0 and self.exam is None
-                and not any(e["generation"] == self.generation for e in self.exams))
+                and not any(e["generation"] == self.generation and not e.get("lesion") for e in self.exams))
 
     def oldest(self) -> dict | None:
         """L'individuo più anziano in gara: posto nella popolazione, numero,
@@ -277,6 +249,16 @@ class Evolution:
         }
         if hasattr(brains, "inhibitory"):  # quota di inibitori tra i neuroni interni esistenti
             stats["inhibitory"] = float(brains.inhibitory[brains.active].mean()) if brains.active.any() else 0.0
+        if cfg.task == "cibo":
+            stats["dials"] = ladder.dials(cfg)  # le manopole con cui ha vissuto
+            stats["position"] = ladder.position(cfg)
+            stats["eaten"] = float(world.task.eaten.mean())
+            if world.n == len(getattr(world.task, "start_dist", ())):
+                stats["luck"] = ladder.luck(world.task.start_dist, world.done)
+        moved = ladder.update(cfg, self.history + [stats])
+        if moved:  # vale dalla prossima generazione
+            self.log.append({"generation": self.generation + 1, "event": "scala", **moved})
+            self._seen.update(ladder.dials(cfg))
 
         genome = brains.genome
         if len(winners):
@@ -286,12 +268,19 @@ class Evolution:
                                    int(self.ids[champion])))
             parents = genome.take(winners)
             self.last_parents = parents
-            keep = winners if cfg.max_age <= 0 else winners[self.age[winners] + 1 < cfg.max_age]
+            # Fecondità: come in natura, più cibo mangiato in tutta la vita, più figli.
+            fecundity = None
+            if cfg.fecundity_by_food and hasattr(world.task, "eaten"):
+                fecundity = world.task.eaten[winners].astype(float)
+            # Sopravvivono i maturi ancora vivi (con la vita che continua si può
+            # morire anche dopo essere diventati maturi).
+            keep = winners[world.alive[winners]]
+            keep = keep if cfg.max_age <= 0 else keep[self.age[keep] + 1 < cfg.max_age]
             survivors, survivor_age, survivor_ids = genome.take(keep), self.age[keep] + 1, self.ids[keep]
             survivor_born = self.born[keep]
             stats["event"] = NORMAL if len(winners) > 1 else ONE_PARENT
         else:
-            parents = self.last_parents
+            parents, fecundity = self.last_parents, None
             survivors, survivor_age, survivor_ids = genome.take([]), np.zeros(0, dtype=int), self.ids[:0]
             survivor_born = self.born[:0]
             stats["event"] = RESTART if parents is not None else RANDOM
@@ -300,7 +289,7 @@ class Evolution:
             fresh = NeuralController(cfg, n, int(self.rng.integers(2**31)))
             new = fresh.brains.genome
         else:
-            children = reproduce(parents, n - len(survivors), cfg, self.rng)
+            children = reproduce(parents, n - len(survivors), cfg, self.rng, fecundity)
             new = Genome.concat([survivors, children])
         stats["survivors"] = len(survivors)
         new = grow(new, cfg)  # posti nuovi se qualcuno li ha quasi finiti
@@ -370,101 +359,10 @@ class Evolution:
         return entry
 
     def save(self, path) -> None:
-        """Salva la popolazione all'inizio della generazione corrente, con ciò
-        che serve per riprendere l'evoluzione da lì."""
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.note_changes()
-        g = self.ctrl.brains.genome
-        data = dict(**{f: getattr(g, f) for f in Genome.FIELDS}, age=self.age,
-                    ids=self.ids, next_id=self.next_id, born=self.born, population=self.cfg.population,
-                    net_type=self.cfg.net_type, seed=self.seed,
-                    generation=self.generation, world_seed=self.world.seed,
-                    history=json.dumps(self.history), format=FORMAT,
-                    config=json.dumps(dataclasses.asdict(self.cfg)), log=json.dumps(self.log),
-                    exams=json.dumps(self.exams))
-        if self.last_parents is not None:
-            data.update({"lp_" + f: getattr(self.last_parents, f) for f in Genome.FIELDS})
-        if self.champions:
-            gens, ages, genomes, ids = zip(*self.champions)
-            ch = Genome.concat(list(genomes))  # i posti vengono pareggiati
-            data.update(ch_generation=np.array(gens), ch_age=np.array(ages), ch_id=np.array(ids),
-                        **{"ch_" + f: getattr(ch, f) for f in Genome.FIELDS})
-        if self.selection is not None:
-            data["selection"] = json.dumps(self.selection)
-        np.savez_compressed(path, **data)
+        """Salva la popolazione all'inizio della generazione corrente (vedi `saves.save`)."""
+        saves.save(self, path)
 
     @classmethod
     def load(cls, cfg: Config, path) -> "Evolution":
-        """Riprende da un salvataggio. `cfg` viene riscritta con la
-        configurazione salvata: si riparte nelle stesse condizioni in cui la
-        corsa si era fermata. I salvataggi precedenti al formato 3 (sensi
-        fissi) non si aprono."""
-        d = np.load(path)
-        fmt = int(d["format"]) if "format" in d else 1
-        if fmt > FORMAT:
-            raise ValueError(f"{path}: salvataggio di formato {fmt}, più nuovo di questo codice ({FORMAT})")
-        if fmt < 3:
-            raise ValueError(f"{path}: salvataggio di formato {fmt}, con i sensi fissi di prima dei recettori "
-                             "universali: non si può più caricare")
-        unknown = {}
-        fields = {f.name for f in dataclasses.fields(cfg)}
-        for k, v in json.loads(str(d["config"])).items():
-            if k in fields:
-                setattr(cfg, k, v)
-            else:  # costante che questo codice non conosce più
-                unknown[k] = v
-
-        base = 1 if str(d["net_type"]) == "rate" else 3  # geni propri prima della plasticità
-
-        def genome(prefix=""):
-            shape = d[prefix + "r_active"].shape
-            g = Genome(*(d[prefix + f] if prefix + f in d else np.full(shape, ADDED_IN_4[f])
-                         for f in Genome.FIELDS))
-            if fmt < 6:  # prima la sensibilità era in quanti: stessa risposta, nuova unità
-                g.r_sens = g.r_sens - np.log(scales(cfg))
-            if g.traits.shape[2] == base:
-                extra = np.broadcast_to(NO_PLASTICITY, g.traits.shape[:2] + (len(NO_PLASTICITY),))
-                g.traits = np.concatenate([g.traits, extra], axis=2)
-            return g
-
-        # Dopo una selezione finale gli individui sono meno della popolazione:
-        # la generazione in corso la fanno solo loro, la successiva torna piena.
-        n = len(d["weights"])
-        cfg.population = int(d["population"])
-        cfg.net_type = str(d["net_type"])
-        evo = cls(cfg, int(d["world_seed"]))
-        evo.ctrl.brains.set_genome(genome())
-        evo.ctrl.reset(evo.world.seed)
-        evo.age = d["age"]
-        evo.ids, evo.next_id, evo.born = d["ids"], int(d["next_id"]), d["born"]
-        if n != cfg.population:
-            evo.world.n = n
-            evo.world.reset()
-        evo._sim = None
-        evo.generation = int(d["generation"])
-        evo.seed = int(d["seed"])
-        evo.history = json.loads(str(d["history"]))
-        if "lp_weights" in d:
-            evo.last_parents = genome("lp_")
-        if "ch_weights" in d:
-            ch = genome("ch_")
-            evo.champions = [(int(g), int(a), ch.take([k]), int(i))
-                             for k, (g, a, i) in enumerate(zip(d["ch_generation"], d["ch_age"], d["ch_id"]))]
-        if "selection" in d:
-            evo.selection = json.loads(str(d["selection"]))
-        evo.exams = json.loads(str(d["exams"]))
-        resumed = {"generation": evo.generation, "event": "ripresa", "code": code_version()}
-        evo.log = json.loads(str(d["log"]))
-        if fmt < FORMAT:
-            parts = ((["recettori senza adattamento sensoriale"] if fmt <= 3 else [])
-                     + (["neuroni senza plasticità né modulatori"] if fmt <= 4 else [])
-                     + (["sensibilità dei recettori convertite in moltiplicatori della scala fisica"] if fmt <= 5
-                        else [])
-                     + ["distanze nel cervello ricalcolate: ora il cervello cresce con le sue cellule"])
-            resumed["note"] = f"salvataggio di formato {fmt}: convertito ({'; '.join(parts)})"
-        if unknown:
-            resumed["note"] = "costanti salvate che questo codice non conosce più: " + ", ".join(unknown)
-        evo.log.append(resumed)
-        evo._seen = dataclasses.asdict(cfg)
-        return evo
+        """Riprende da un salvataggio con le regole più recenti (vedi `saves.load`)."""
+        return saves.load(cls, cfg, path)

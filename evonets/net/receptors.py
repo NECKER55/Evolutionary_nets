@@ -27,7 +27,15 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..sim import signals
-from ..sim.signals import CHEMICAL, INTERNAL, LIGHT, MAGNETIC, MECHANICAL, PHENOMENA, THERMAL
+from ..sim.signals import (
+    CHEMICAL,
+    INTERNAL,
+    LIGHT,
+    MAGNETIC,
+    MECHANICAL,
+    PHENOMENA,
+    THERMAL,
+)
 
 P = len(PHENOMENA)
 MIN_APERTURE = np.radians(1.0)
@@ -132,7 +140,7 @@ def stimuli(cfg, world, genes: ReceptorGenes, rows=None) -> np.ndarray:
     m = cfg.light_samples
     offsets = (np.arange(m) + 0.5) / m - 0.5
     angles = centre[..., None] + genes.aperture_rad[..., None] * offsets  # (n, R, M)
-    seen = signals.light(cfg, world, flat, angles.reshape(-1, m))
+    seen = signals.light(cfg, world, flat, angles.reshape(-1, m), agent)
     mu_l, sg_l = mu[..., LIGHT], sigma[..., LIGHT]
     out[..., LIGHT] = (
         spectral(mu_l, sg_l, cfg.wall_color, cfg.wall_color_width, cfg.wall_albedo) * seen["parete"].reshape(n, R)
@@ -140,10 +148,13 @@ def stimuli(cfg, world, genes: ReceptorGenes, rows=None) -> np.ndarray:
         * seen["bersaglio"].reshape(n, R)
         + spectral(mu_l, sg_l, cfg.hazard_color, cfg.hazard_color_width, cfg.hazard_glow)
         * seen["veleno"].reshape(n, R)
+        + spectral(mu_l, sg_l, cfg.food_color, cfg.food_color_width, cfg.food_albedo) * seen["cibo"].reshape(n, R)
+        + spectral(mu_l, sg_l, cfg.predator_color, cfg.predator_color_width, cfg.predator_albedo)
+        * seen["predatore"].reshape(n, R)
     )
 
     # Sostanze, nel punto del corpo dove sta il recettore.
-    for molecule, conc in signals.chemicals(cfg, world, flat):
+    for molecule, conc in signals.chemicals(cfg, world, flat, agent):
         out[..., CHEMICAL] += tuning(molecule, mu[..., CHEMICAL], sigma[..., CHEMICAL]) * conc.reshape(n, R)
 
     # Meccanica: pressione (frequenza 0) e vibrazioni dentro l'apertura.
@@ -151,7 +162,7 @@ def stimuli(cfg, world, genes: ReceptorGenes, rows=None) -> np.ndarray:
     press = signals.pressure(cfg, world, agent, normal.reshape(-1, 2)).reshape(n, R)
     out[..., MECHANICAL] = tuning(0.0, mu_m, sg_m) * press
     half = genes.aperture_rad / 2.0
-    for freq, amp, came_from in signals.vibrations(cfg, world, flat):
+    for freq, amp, came_from in signals.vibrations(cfg, world, flat, agent):
         off = np.abs((came_from.reshape(n, R) - centre + np.pi) % (2.0 * np.pi) - np.pi)
         out[..., MECHANICAL] += tuning(freq, mu_m, sg_m) * amp.reshape(n, R) * (off <= half)
 
@@ -252,6 +263,10 @@ class Prepared:
                                      cfg.target_albedo)
         self.c_glow = L * spectral(mu[..., LIGHT], sg[..., LIGHT], cfg.hazard_color, cfg.hazard_color_width,
                                    cfg.hazard_glow)
+        self.c_food = L * spectral(mu[..., LIGHT], sg[..., LIGHT], cfg.food_color, cfg.food_color_width,
+                                   cfg.food_albedo)
+        self.c_pred = L * spectral(mu[..., LIGHT], sg[..., LIGHT], cfg.predator_color, cfg.predator_color_width,
+                                   cfg.predator_albedo)
         self.mu_c, self.sg_c, self.g_c = mu[..., CHEMICAL], sg[..., CHEMICAL], C
         self.c_press = M * tuning(0.0, mu[..., MECHANICAL], sg[..., MECHANICAL])
         self.mu_m, self.sg_m, self.g_m = mu[..., MECHANICAL], sg[..., MECHANICAL], M
@@ -274,15 +289,16 @@ class Prepared:
         cos, sin = np.cos(heading), np.sin(heading)
         normal = _rotate(self.body, cos, sin)
         points = (world.pos[rows][:, None, :] + cfg.agent_radius * normal).reshape(-1, 2)
-        seen = signals.light(cfg, world, points, (heading[..., None] + self.angles).reshape(n * R, -1))
+        agent = np.repeat(rows, R)
+        seen = signals.light(cfg, world, points, (heading[..., None] + self.angles).reshape(n * R, -1), agent)
         out = (self.c_wall * seen["parete"].reshape(n, R) + self.c_target * seen["bersaglio"].reshape(n, R)
-               + self.c_glow * seen["veleno"].reshape(n, R))
-        for molecule, conc in signals.chemicals(cfg, world, points):
+               + self.c_glow * seen["veleno"].reshape(n, R) + self.c_food * seen["cibo"].reshape(n, R)
+               + self.c_pred * seen["predatore"].reshape(n, R))
+        for molecule, conc in signals.chemicals(cfg, world, points, agent):
             out += self.g_c * tuning(molecule, self.mu_c, self.sg_c) * conc.reshape(n, R)
         if world.bump[rows].any():
-            agent = np.repeat(rows, R)
             out += self.c_press * signals.pressure(cfg, world, agent, normal.reshape(-1, 2)).reshape(n, R)
-        vib = signals.vibrations(cfg, world, points)
+        vib = signals.vibrations(cfg, world, points, agent)
         if vib:
             centre = np.arctan2(sin, cos) + self.centre
             for freq, amp, came_from in vib:

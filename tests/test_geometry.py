@@ -52,13 +52,15 @@ def test_new_links_from_mutation_prefer_near_neurons():
 
 def test_position_is_inherited_with_its_neuron_and_drifts_inside_the_brain():
     g = rich(2, seed=3).genome
+    g.active[1] = g.active[0]  # stessi neuroni nei due genitori: ogni blocco da uno solo
+    g.r_active[1] = g.r_active[0]
     child = crossover(g, np.array([0] * 50), np.array([1] * 50), np.random.default_rng(1))
     for k in range(50):
         for h in range(g.n_hidden):
             src = 0 if np.array_equal(child.weights[k, h], g.weights[0, h]) else 1
             assert np.array_equal(child.pos[k, h], g.pos[src, h])
     big = Config(mut_pos_prob=1.0, mut_pos_std=0.5)
-    child.meta[:, :] = np.log(np.array([0.1, 0.3, 0.01, 0.01, 0.01, 0.005, 1.0, 0.5, 0.05, 0.3]))
+    child.meta[:, :] = np.log(np.array([0.1, 0.3, 0.01, 0.01, 0.01, 0.005, 1.0, 0.5, 0.05, 0.3, 0.5]))
     mutate(child, big, np.random.default_rng(2))
     assert ((child.pos >= 0.0) & (child.pos <= 1.0)).all() and ((child.r_y >= 0) & (child.r_y <= 1)).all()
 

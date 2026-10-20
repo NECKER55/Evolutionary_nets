@@ -39,7 +39,8 @@ BODY_QUANTITIES = (
 
 
 @njit(cache=True, parallel=True)
-def _light_kernel(origins, angles, arena_w, arena_h, L, target, target_r, hz_pos, hz_r):
+def _light_kernel(origins, angles, arena_w, arena_h, L, target, target_r, hz_pos, hz_r, agent, obj_pos, obj_r,
+                  obj_kind):
     """Il cuore di `light`, compilato: un ciclo per recettore, direzione
     campione e oggetto. Ogni recettore è indipendente (risultato identico in
     parallelo)."""
@@ -47,6 +48,7 @@ def _light_kernel(origins, angles, arena_w, arena_h, L, target, target_r, hz_pos
     wall = np.zeros(k_all)
     targ = np.zeros(k_all)
     glow = np.zeros(k_all)
+    kinds = np.zeros((k_all, 2))  # luce degli oggetti dell'agente: cibo, predatori
     for k in prange(k_all):
         ox, oy = origins[k, 0], origins[k, 1]
         for j in range(m):
@@ -66,8 +68,26 @@ def _light_kernel(origins, angles, arena_w, arena_h, L, target, target_r, hz_pos
                         d_t = max(proj - half, 0.0)
                         if d_t < d_hit:
                             d_hit, hit_target = d_t, True
+            # Gli oggetti della copia di mondo di questo agente (opachi).
+            hit_obj = -1
+            a = agent[k]
+            for o in range(obj_r.shape[1]):
+                r = obj_r[a, o]
+                if r <= 0.0:
+                    continue
+                fx, fy = obj_pos[a, o, 0] - ox, obj_pos[a, o, 1] - oy
+                proj = fx * dx + fy * dy
+                disc = r * r - (fx * fx + fy * fy) + proj * proj
+                if disc >= 0.0:
+                    half = np.sqrt(disc)
+                    if proj + half >= 0.0:
+                        d_o = max(proj - half, 0.0)
+                        if d_o < d_hit:
+                            d_hit, hit_target, hit_obj = d_o, False, o
             fade = np.exp(-d_hit / L)
-            if hit_target:
+            if hit_obj >= 0:
+                kinds[k, obj_kind[hit_obj]] += fade
+            elif hit_target:
                 targ[k] += fade
             else:
                 wall[k] += fade
@@ -86,10 +106,12 @@ def _light_kernel(origins, angles, arena_w, arena_h, L, target, target_r, hz_pos
         wall[k] /= m
         targ[k] /= m
         glow[k] /= m
-    return wall, targ, glow
+        kinds[k, 0] /= m
+        kinds[k, 1] /= m
+    return wall, targ, glow, kinds
 
 
-def light(cfg, world, origins: np.ndarray, angles: np.ndarray) -> dict[str, np.ndarray]:
+def light(cfg, world, origins: np.ndarray, angles: np.ndarray, agent: np.ndarray | None = None) -> dict[str, np.ndarray]:
     """Quanta luce di ogni tipo di oggetto arriva a K recettori, mediata sulle
     loro direzioni campione. origins (K, 2), angles (K, M) assoluti.
 
@@ -102,12 +124,20 @@ def light(cfg, world, origins: np.ndarray, angles: np.ndarray) -> dict[str, np.n
     has_target = hasattr(task, "target")
     target = np.asarray(task.target, dtype=float) if has_target else np.zeros(2)
     hz = world.hazards
-    wall, targ, glow = _light_kernel(
+    if hasattr(task, "discs") and agent is not None:
+        obj_pos, obj_r, obj_kind = task.discs(world)
+    else:
+        obj_pos, obj_r, obj_kind = np.zeros((world.n, 0, 2)), np.zeros((world.n, 0)), np.zeros(0, dtype=np.int64)
+    if agent is None:
+        agent = np.zeros(len(origins), dtype=np.int64)
+    wall, targ, glow, kinds = _light_kernel(
         np.ascontiguousarray(origins, dtype=float), np.ascontiguousarray(angles, dtype=float),
         float(cfg.arena_w), float(cfg.arena_h), float(cfg.light_attenuation),
         target, float(task.radius) if has_target else 0.0,
-        np.ascontiguousarray(hz.pos, dtype=float).reshape(-1, 2), np.ascontiguousarray(hz.radius, dtype=float))
-    return {"parete": wall, "bersaglio": targ, "veleno": glow}
+        np.ascontiguousarray(hz.pos, dtype=float).reshape(-1, 2), np.ascontiguousarray(hz.radius, dtype=float),
+        np.ascontiguousarray(agent, dtype=np.int64), np.ascontiguousarray(obj_pos, dtype=float),
+        np.ascontiguousarray(obj_r, dtype=float), np.ascontiguousarray(obj_kind, dtype=np.int64))
+    return {"parete": wall, "bersaglio": targ, "veleno": glow, "cibo": kinds[:, 0], "predatore": kinds[:, 1]}
 
 
 @njit(cache=True, parallel=True)
@@ -126,10 +156,12 @@ def _toxin_kernel(points, hz_pos, hz_r, falloff, leak, smell_range):
     return out
 
 
-def chemicals(cfg, world, points: np.ndarray) -> list[tuple[float, np.ndarray]]:
+def chemicals(cfg, world, points: np.ndarray, agent: np.ndarray | None = None) -> list[tuple[float, np.ndarray]]:
     """Concentrazioni nei punti (K, 2): [(molecola, concentrazione (K,))].
     Dentro una zona di veleno la tossina è l'intensità del danno; fuori, se
-    `hazard_smell` > 0, un odore che cala con la distanza dal bordo."""
+    `hazard_smell` > 0, un odore che cala con la distanza dal bordo. Gli
+    odori del compito (cibo, predatori) sono nella copia di mondo
+    dell'agente a cui appartiene ogni punto (`agent`, (K,))."""
     hz = world.hazards
     tox = _toxin_kernel(np.ascontiguousarray(points, dtype=float), np.ascontiguousarray(hz.pos, dtype=float).reshape(-1, 2),
                         np.ascontiguousarray(hz.radius, dtype=float), float(cfg.hazard_falloff),
@@ -139,6 +171,8 @@ def chemicals(cfg, world, points: np.ndarray) -> list[tuple[float, np.ndarray]]:
     if cfg.target_smell > 0.0 and hasattr(task, "target"):
         d = np.linalg.norm(points - task.target, axis=1) - task.radius
         out.append((cfg.target_molecule, cfg.target_smell * np.exp(-np.maximum(d, 0.0) / cfg.smell_range)))
+    if hasattr(task, "odors") and agent is not None:
+        out += task.odors(world, points, agent)
     return out
 
 
@@ -153,12 +187,20 @@ def pressure(cfg, world, agent: np.ndarray, normals: np.ndarray) -> np.ndarray:
             + lo[:, 1] * np.maximum(0.0, -normals[:, 1]) + hi[:, 1] * np.maximum(0.0, normals[:, 1]))
 
 
-def vibrations(cfg, world, points: np.ndarray) -> list[tuple[float, np.ndarray, np.ndarray]]:
+def vibrations(cfg, world, points: np.ndarray, agent: np.ndarray | None = None) -> list[tuple[float, np.ndarray, np.ndarray]]:
     """Vibrazioni che arrivano nei punti (K, 2): [(frequenza, ampiezza (K,),
-    direzione di provenienza (K,) in radianti)]. Solo le sorgenti accese."""
+    direzione di provenienza (K,) in radianti)]. Solo le sorgenti accese.
+    `agent` (K,) dice a quale agente appartiene ogni punto (per i predatori,
+    che stanno nella copia di mondo di ciascuno)."""
     out = []
-    sources = []
     task = world.task
+    if cfg.predator_vibration > 0.0 and getattr(task, "n_pred", 0) and agent is not None:
+        for p in range(task.pred.shape[1]):
+            v = task.pred[agent, p] - points
+            d = np.linalg.norm(v, axis=1)
+            amp = cfg.predator_vibration * np.exp(-d / cfg.vibration_range) * task.pred_on[agent, p]
+            out.append((cfg.predator_vibration_freq, amp, np.arctan2(v[:, 1], v[:, 0])))
+    sources = []
     if cfg.target_vibration > 0.0 and hasattr(task, "target"):
         sources.append((cfg.target_vibration_freq, cfg.target_vibration, task.target[None, :]))
     if cfg.hazard_vibration > 0.0 and len(world.hazards.pos):
@@ -205,5 +247,5 @@ def body(cfg, world, rows: np.ndarray) -> np.ndarray:
     def pos(x):
         return np.clip(x, 0.0, 1.0)
 
-    return np.stack([np.clip(world.energy[rows] / cfg.energy_init, 0.0, 1.0),
+    return np.stack([np.clip(world.energy[rows] / cfg.energy_max, 0.0, 1.0),
                      pos(fwd), pos(-fwd), pos(lat), pos(-lat), pos(rot), pos(-rot)], axis=1)
