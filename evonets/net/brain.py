@@ -10,7 +10,9 @@ from .receptors import P, Prepared, ReceptorGenes
 # Geni del meccanismo di mutazione, uno per individuo (vedi genetics.mutate e
 # docs/SPEC_FASE_C.md, sezione 5). Nel genoma stanno come logaritmi.
 META = ("weight_prob", "weight_std", "conn_add", "conn_del", "toggle", "dup", "pos_prob", "pos_std",
-        "rec_drift", "conn_range")
+        "rec_drift", "conn_range", "sex")
+# "sex": probabilità che un figlio di questo individuo (come madre) nasca con
+# un partner invece che come sua copia. Come i tassi, evolve.
 META_INDEX = {name: k for k, name in enumerate(META)}
 
 
@@ -18,10 +20,10 @@ def meta_start(cfg: Config) -> np.ndarray:
     """I valori di partenza dei geni delle mutazioni (dalla configurazione)."""
     return np.array([cfg.mut_weight_prob, cfg.mut_weight_std, cfg.mut_conn_add, cfg.mut_conn_del,
                      cfg.mut_neuron_toggle, cfg.mut_dup, cfg.mut_pos_prob, cfg.mut_pos_std,
-                     cfg.mut_rec_drift, cfg.net_conn_range])
+                     cfg.mut_rec_drift, cfg.net_conn_range, cfg.crossover_rate])
 
 
-PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", "toggle", "dup", "pos_prob")]
+PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", "toggle", "dup", "pos_prob", "sex")]
 
 
 # Geni della plasticità, in coda ai geni propri di ogni neurone interno o
@@ -70,6 +72,13 @@ class Genome:
 
     R e H sono "posti": un recettore o un neurone esiste solo se acceso. Sono
     uguali per tutta la popolazione e crescono quando servono (`pad`).
+
+    Discendenza dei geni (per l'incrocio tra omologhi, genetics.crossover):
+    `r_id` (N, R), `h_id` (N, H) identità del gene di ogni recettore e neurone
+    interno, `r_fam`, `h_fam` la famiglia (il gene antenato comune a tutte le
+    sue copie). Un gene che non viene da una duplicazione ha l'identità del suo
+    posto: tutti discendono dagli stessi antenati. Una copia riceve
+    un'identità nuova e la famiglia dell'originale.
     """
 
     weights: np.ndarray
@@ -89,10 +98,23 @@ class Genome:
     r_sub: np.ndarray
     r_div: np.ndarray
     meta: np.ndarray
+    r_id: np.ndarray | None = None
+    h_id: np.ndarray | None = None
+    r_fam: np.ndarray | None = None
+    h_fam: np.ndarray | None = None
 
     FIELDS = ("weights", "traits", "conn", "active", "pos", "r_active", "r_sens", "r_mu", "r_width",
-              "r_body", "r_look", "r_aperture", "r_y", "r_tau", "r_sub", "r_div", "meta")
+              "r_body", "r_look", "r_aperture", "r_y", "r_tau", "r_sub", "r_div", "meta",
+              "r_id", "h_id", "r_fam", "h_fam")
     RECEPTOR_FIELDS = FIELDS[5:16]
+    LINEAGE = FIELDS[17:]
+
+    def __post_init__(self):
+        n = len(self.weights)
+        for name, slots in (("r_id", self.r_active.shape[1]), ("r_fam", self.r_active.shape[1]),
+                            ("h_id", self.active.shape[1]), ("h_fam", self.active.shape[1])):
+            if getattr(self, name) is None:  # i geni del posto: discendenza comune
+                setattr(self, name, np.broadcast_to(np.arange(slots, dtype=np.int64), (n, slots)).copy())
 
     def __len__(self) -> int:
         return len(self.weights)
@@ -158,6 +180,11 @@ def pad(g: Genome, n_rec: int, n_hidden: int) -> Genome:
     return Genome(
         links(g.weights), grow(g.traits, 1, h, dh), links(g.conn), grow(g.active, 1, h, dh),
         np.concatenate([g.pos, np.full((n, dh, 2), 0.5)], axis=1), **rec, meta=g.meta,
+        # I posti nuovi hanno l'identità del loro posto (nessun gene ancora).
+        r_id=np.concatenate([g.r_id, np.broadcast_to(np.arange(r, r + dr), (n, dr))], axis=1),
+        r_fam=np.concatenate([g.r_fam, np.broadcast_to(np.arange(r, r + dr), (n, dr))], axis=1),
+        h_id=np.concatenate([g.h_id, np.broadcast_to(np.arange(h, h + dh), (n, dh))], axis=1),
+        h_fam=np.concatenate([g.h_fam, np.broadcast_to(np.arange(h, h + dh), (n, dh))], axis=1),
     )
 
 
@@ -189,7 +216,7 @@ def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Ge
     r_div = rng.uniform(0.0, cfg.receptor_initial_adaptation, (n, R))
 
     pos = rng.random((n, H, 2))
-    meta = np.log(meta_start(cfg))[None, :] + rng.normal(0.0, 0.1, (n, len(META)))
+    meta = np.log(np.maximum(meta_start(cfg), cfg.mutation_floor))[None, :] + rng.normal(0.0, 0.1, (n, len(META)))
     clamp_meta(meta, cfg)
     dist = distances(cfg, pos, r_y, n_out, brain_side(cfg, r_active, np.zeros((n, H), dtype=bool), n_out))
     conn = rng.random(dist.shape) < connect_prob(cfg, dist, R, np.exp(meta[:, META_INDEX["conn_range"]]))

@@ -437,3 +437,24 @@ ripartono. La corsa `corsa-20261020-130439` (adattata al mondo vecchio, scala
 a 0,94) completa 1 su 700: con le regole nuove la stessa posizione vuol dire 9
 cibi da mangiare invece di 5, in un'arena per agente. La scala scenderà da
 sola.
+
+---
+
+## 13. Incrocio tra omologhi e sesso come gene (2026-10-20)
+
+Scelte dell'utente, dopo la revisione di cosa restava innaturale:
+
+- **Incrocio tra omologhi**: ogni gene di recettore e di neurone porta identità
+  e famiglia (formato dei salvataggi 8; i vecchi ricevono l'identità del
+  posto). Si appaiano i geni con la stessa identità; i collegamenti seguono
+  l'identità delle sorgenti; un gene di un solo genitore passa con
+  probabilità 1/2. Prima si abbinavano i posti per numero, e una copia nata in
+  una linea poteva essere incrociata con un gene estraneo.
+- **Scambio ineguale** ("il più simile possibile alla natura"): tra copie della
+  stessa famiglia, al più uno per famiglia e per meiosi, con probabilità tasso
+  di duplicazione × (n − 1) × somiglianza; una copia in più o in meno. Una
+  prima versione con uno scambio per ogni coppia di copie faceva esplodere i
+  cervelli anche senza selezione (71 neuroni in media invece di meno di 4).
+- **Sesso come gene della madre** (`sex`, partenza 0,5), senza costi per ora.
+
+Sulla popolazione di `corsa-20261020-200723`: 400 figli in 0,04 s.

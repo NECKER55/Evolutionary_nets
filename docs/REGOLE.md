@@ -437,14 +437,19 @@ sensoriale e la sua rete:
 - per ciascun posto di **neurone interno**: se esiste e dove sta nel cervello;
 - per ciascun collegamento possibile, se **esiste** e il suo **peso**;
 - per ciascun neurone interno o motore, i suoi **geni propri**;
-- il **meccanismo di mutazione**: i tassi di mutazione e la portata λ dei
-  collegamenti dell'individuo (punto 15).
+- il **meccanismo di mutazione e di riproduzione**: i tassi di mutazione, la
+  portata λ dei collegamenti e quanto spesso l'individuo, come madre, fa figli
+  con un partner (gene `sex`, punto 14);
+- per ogni gene di recettore e di neurone interno, la sua **discendenza**:
+  un'identità (quale gene è) e una famiglia (da quale gene antenato discendono
+  lui e le sue copie). I geni dei primi individui hanno l'identità del loro
+  posto, perché discendono tutti dagli stessi antenati; una copia nata da una
+  duplicazione riceve un'identità nuova e la famiglia dell'originale.
 
 È organizzato a **blocchi**: uno per neurone (interno o motore: se esiste, dove
 sta, i geni propri e tutti i collegamenti *in ingresso*), uno per recettore,
 uno per il meccanismo di mutazione. Nell'incrocio ogni blocco arriva intero da
-un genitore. I posti si abbinano per posizione: il posto k della madre con il
-posto k del padre.
+un genitore.
 
 ## 12. La generazione
 
@@ -478,12 +483,23 @@ posto k del padre.
 
 Per ogni figlio:
 
-- si sorteggia un genitore, tutti con la stessa probabilità;
-- metà dei figli (`crossover_rate`) ha anche un **secondo genitore**, sempre
-  diverso dal primo; l'altra metà è copia di un solo genitore;
-- con due genitori, per ogni blocco del genoma il figlio prende quello della
-  madre o quello del padre, con probabilità uguale. Un neurone, un recettore e
-  il meccanismo di mutazione arrivano sempre interi da un solo genitore;
+- si sorteggia una madre, tutti i genitori con la stessa probabilità;
+- con la probabilità scritta nel **gene `sex` della madre** il figlio ha anche
+  un **partner**, un altro genitore a caso; altrimenti è una copia della madre.
+  Il gene parte da 0,5 (`crossover_rate`) e muta come i tassi di mutazione:
+  quanto conviene il sesso lo decide l'evoluzione (per ora senza costi);
+- con un partner, come nella meiosi si appaiano i **geni omologhi**, quelli con
+  la stessa identità, ovunque stiano nei due genomi. Per ogni coppia di
+  omologhi il blocco viene dalla madre o dal padre con la stessa probabilità.
+  I collegamenti seguono l'identità delle sorgenti: un ingresso dal naso resta
+  collegato al naso anche se nel figlio il naso sta in un altro posto;
+- un gene che ha **un solo genitore** passa al figlio con probabilità 1/2, come
+  una variante che solo uno dei due porta (nel suo stesso posto, se è libero);
+- **scambio ineguale**: in una famiglia di n copie, con probabilità tasso di
+  duplicazione × (n − 1) due copie si appaiano per sbaglio, e se si somigliano
+  (con probabilità pari alla somiglianza: 1 se identiche) il figlio riceve una
+  copia in più o una in meno. È così che in natura le famiglie di geni
+  crescono e si accorciano;
 - poi il figlio viene **mutato**.
 
 Di conseguenza il numero di figli per genitore dipende da quanti completano: con

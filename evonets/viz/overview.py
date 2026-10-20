@@ -342,6 +342,11 @@ class Overview:
         ]
         if "inhibitory" in last:
             lines.append(f"Neuroni inibitori: {pct(last['inhibitory'])}; modulatori: {num(last.get('modulators', 0.0))}.")
+        sex = last.get("mutation", {}).get("sex")
+        if sex is not None:
+            first_sex = first.get("mutation", {}).get("sex", sex)
+            lines.append(f"Figli con un partner: {pct(sex)} (gene della madre; alla gen. {first['generation']}: "
+                         f"{pct(first_sex)}).")
         luck = [h["luck"] for h in hist[-10:] if "luck" in h]
         if luck:
             near = float(np.mean([l["near"] for l in luck]))

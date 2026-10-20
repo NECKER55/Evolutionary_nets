@@ -32,8 +32,16 @@ def test_copy_without_mutation_is_identical_and_independent():
     assert not np.array_equal(kids.weights[0], parents.weights[3])  # il genitore non cambia
 
 
+def same_genes(parents):
+    """I due genitori portano gli stessi geni (stessi neuroni e recettori accesi)."""
+    parents.active[1] = parents.active[0]
+    parents.r_active[1] = parents.r_active[0]
+    return parents
+
+
 def test_crossover_takes_each_block_whole_from_one_parent():
     cfg, parents = population()
+    same_genes(parents)
     rng = np.random.default_rng(1)
     mothers, fathers = np.zeros(30, dtype=int), np.ones(30, dtype=int)
     kids = crossover(parents, mothers, fathers, rng)
@@ -60,9 +68,11 @@ def test_crossover_takes_each_block_whole_from_one_parent():
 
 
 def test_two_parent_children_never_pick_the_same_parent_twice():
-    cfg, parents = population(n=2, crossover_rate=1.0, **FROZEN)
+    cfg, parents = population(n=2, **FROZEN)
+    same_genes(parents)
+    parents.meta[:, META_INDEX["sex"]] = 0.0  # le madri si riproducono sempre con un partner
     kids = reproduce(parents, 200, cfg, np.random.default_rng(3))
-    clones = sum(same(kids.take([k]), parents.take([p]), ("weights", "conn"))
+    clones = sum(same(kids.take([k]), parents.take([p]), ("weights", "conn", "r_sens"))
                  for k in range(200) for p in (0, 1))
     assert clones < 5
 
@@ -224,3 +234,71 @@ def test_receptor_sensitivity_has_a_physical_maximum():
     g.r_sens[:] = 50.0  # derivata all'infinito
     mutate(g, cfg, np.random.default_rng(0))
     assert np.exp(g.r_sens).max() <= MAX_SENSITIVITY * (1 + 1e-9)
+
+
+def test_homologous_genes_pair_wherever_they_are_and_links_follow_them():
+    cfg, parents = population(n=2)
+    g = parents
+    g.r_active[:] = False
+    g.r_active[0, 1] = g.r_active[1, 3] = True  # lo stesso gene, in posti diversi
+    g.r_id[0, 1] = g.r_id[1, 3] = g.r_fam[0, 1] = g.r_fam[1, 3] = 77
+    g.active[:] = False  # niente neuroni interni: solo recettore -> motori
+    H = g.n_hidden
+    g.conn[:, :, 3] = False  # nessun collegamento latente dal posto 3
+    g.conn[1, H:, 3], g.weights[1, H:, 3] = True, 2.5  # nel padre il recettore parla ai motori
+    kids = crossover(g, np.zeros(200, dtype=int), np.ones(200, dtype=int), np.random.default_rng(0))
+    assert (kids.r_active[:, 1]).all() and not kids.r_active[:, 3].any()  # resta nel posto della madre
+    from_father = kids.conn[:, H:, 1] & np.isclose(kids.weights[:, H:, 1], 2.5)
+    assert from_father.any() and not kids.conn[:, H:, 3].any()  # i collegamenti del padre seguono il gene
+
+
+def test_a_gene_only_one_parent_has_passes_to_half_the_children():
+    cfg, parents = population(n=2)
+    g = parents
+    g.r_active[:] = False
+    g.r_active[0, 0] = g.r_active[1, 0] = True  # un gene comune
+    g.r_active[1, 2] = True
+    g.r_id[1, 2] = 999  # e uno che ha solo il padre
+    kids = crossover(g, np.zeros(2000, dtype=int), np.ones(2000, dtype=int), np.random.default_rng(1))
+    has = (kids.r_id == 999) & kids.r_active
+    assert has.sum(axis=1).max() == 1 and 0.45 < has.any(axis=1).mean() < 0.55
+    assert kids.r_active[:, 0].all()
+
+
+def test_unequal_crossing_over_adds_or_removes_a_copy_of_similar_genes():
+    from evonets.evo.genetics import unequal_crossing_over
+
+    cfg, g = population(n=1)
+    g.r_active[:] = False
+    g.r_active[0, :2] = True
+    for name in Genome.RECEPTOR_FIELDS[1:]:  # due copie identiche della stessa famiglia
+        getattr(g, name)[0, 1] = getattr(g, name)[0, 0]
+    g.r_fam[0, 1] = g.r_fam[0, 0]
+    g.active[:] = False
+    g.meta[0, META_INDEX["dup"]] = 0.0  # tasso 1: con copie identiche avviene sempre
+    counts = []
+    for s in range(400):
+        k = g.take([0])
+        unequal_crossing_over(k, 0, np.random.default_rng(s))
+        counts.append(int(k.r_active[0].sum()))
+    assert set(counts) == {1, 3} and 0.4 < np.mean(np.array(counts) == 3) < 0.6
+    g.r_mu[0, 1] = 1.0 - g.r_mu[0, 0]  # copie molto diverse: lo scambio si fa raro
+    g.r_sens[0, 1] += 3.0
+    events = 0
+    for s in range(400):
+        k = g.take([0])
+        unequal_crossing_over(k, 0, np.random.default_rng(s))
+        events += int(k.r_active[0].sum() != 2)
+    assert events < 200
+
+
+def test_how_often_mothers_mate_is_their_own_gene():
+    def clones(sex):
+        cfg, parents = population(n=4, **FROZEN)
+        parents.meta[:, META_INDEX["sex"]] = np.log(sex)
+        kids = reproduce(parents, 200, cfg, np.random.default_rng(5))
+        return sum(any(same(kids.take([k]), parents.take([p]), ("weights", "conn")) for p in range(4))
+                   for k in range(200))
+
+    assert clones(1e-9) == 200  # madri che non si accoppiano mai: solo copie
+    assert clones(1.0) < 20  # madri che si accoppiano sempre

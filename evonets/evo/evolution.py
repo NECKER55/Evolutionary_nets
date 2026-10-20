@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from ..config import Config
-from ..net.brain import META, Genome, pad
+from ..net.brain import META, Genome, meta_start, pad
 from ..net.controllers import NeuralController
 from ..sim.world import World
 from ..net.receptors import scales
@@ -26,8 +26,10 @@ RANDOM = "nessun genitore: reti casuali"
 # 5 = plasticità (i file precedenti si aprono senza plasticità né modulatori);
 # 6 = sensi calibrati: la sensibilità è un moltiplicatore della scala fisica di
 #     ogni fenomeno (i file precedenti si convertono a parità di quanti);
-# 7 = il cervello cresce con le sue cellule (le distanze si ricalcolano).
-FORMAT = 7
+# 7 = il cervello cresce con le sue cellule (le distanze si ricalcolano);
+# 8 = discendenza dei geni (identità e famiglia, per l'incrocio tra omologhi)
+#     e gene del sesso (i file precedenti: identità = posto, sesso 0,5).
+FORMAT = 8
 # Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
 # nullo, regola a zero, nessun modulatore.
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
@@ -445,8 +447,12 @@ class Evolution:
 
         def genome(prefix=""):
             shape = d[prefix + "r_active"].shape
-            g = Genome(*(d[prefix + f] if prefix + f in d else np.full(shape, ADDED_IN_4[f])
+            g = Genome(*(d[prefix + f] if prefix + f in d
+                         else None if f in Genome.LINEAGE else np.full(shape, ADDED_IN_4[f])
                          for f in Genome.FIELDS))
+            if g.meta.shape[1] < len(META):  # geni nati dopo (il sesso): il valore di partenza
+                start = np.log(np.maximum(meta_start(cfg), cfg.mutation_floor))[g.meta.shape[1]:]
+                g.meta = np.concatenate([g.meta, np.broadcast_to(start, (len(g), len(start)))], axis=1)
             if fmt < 6:  # prima la sensibilità era in quanti: stessa risposta, nuova unità
                 g.r_sens = g.r_sens - np.log(scales(cfg))
             if g.traits.shape[2] == base:

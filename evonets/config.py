@@ -178,7 +178,7 @@ class Config:
     # Riproduzione. Il genoma è una fila di blocchi: uno per neurone interno o
     # motore (esistenza, geni propri, posizione, collegamenti in ingresso),
     # uno per recettore, uno per il meccanismo di mutazione.
-    crossover_rate: float = 0.5  # quota di figli con due genitori (gli altri: copia)
+    crossover_rate: float = 0.5  # valore di partenza del gene "sex": quota di figli con un partner
     # Mutazioni: questi sono solo i valori di PARTENZA. Ogni individuo ha i
     # suoi tassi come geni, che mutano come tutti gli altri geni (con la
     # probabilità e l'ampiezza di ritocco dell'individuo stesso) e non scendono
