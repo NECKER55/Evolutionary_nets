@@ -17,6 +17,9 @@ TARGET = (80, 200, 230)
 DONE = (235, 240, 250)
 RAY = (60, 66, 84)
 WALL = (200, 204, 215)
+FOOD = (235, 80, 70)  # il cibo è rosso anche per gli agenti (0,85 sull'asse della luce)
+PREDATOR = (90, 110, 255)  # i predatori quasi blu (0,05)
+TRAIL = 240  # punti della scia dell'agente seguito (uno per fotogramma)
 # Colore di un recettore secondo il fenomeno a cui è più sensibile (bianco se
 # generalista): luce, sostanze, meccanica, temperatura, magnetismo, interno.
 PHENOMENON_COLOR = ((250, 230, 110), (120, 220, 60), (235, 150, 70), (240, 90, 90), (180, 130, 245),
@@ -87,6 +90,8 @@ class Renderer:
         self.net_layer = pygame.Surface((PANEL_W, self.net_h), pygame.SRCALPHA)
         self.font = pygame.font.SysFont("monospace", 15)
         self.small = pygame.font.SysFont("monospace", 11)
+        self.trail: list[tuple[int, int]] = []  # percorso dell'agente seguito, in pixel
+        self._trail_of = (None, -1.0)  # (agente, istante dell'ultimo punto)
 
     def _px(self, p) -> tuple[int, int]:
         return int(p[0] * self.scale), int(p[1] * self.scale)
@@ -105,12 +110,71 @@ class Renderer:
             pygame.draw.circle(self.overlay, (*HAZARD, 120), c, rad, 1)
         self.screen.blit(self.overlay, (0, 0))
 
-    def _draw_task(self) -> None:
+    def _draw_task(self, focus: int) -> None:
         task = self.world.task
         if hasattr(task, "target"):
             c, rad = self._px(task.target), int(task.radius * self.scale)
             pygame.draw.circle(self.screen, TARGET, c, rad, 2)
             pygame.draw.circle(self.screen, TARGET, c, 3)
+        if hasattr(task, "food"):
+            self._draw_forage(task, focus)
+
+    def _draw_forage(self, task, i: int) -> None:
+        """Cibo e predatori nella copia di mondo dell'agente i (ognuno ha la
+        sua). Un anello sottile mostra fin dove una preda si accorge
+        dell'agente e fin dove un predatore lo insegue."""
+        cfg, s = self.world.cfg, self.scale
+        self.overlay.fill((0, 0, 0, 0))
+        if cfg.food_smell > 0:  # la nube d'odore: alone fino a una portata; la traccia del cibo mangiato
+            on, trace = task.scent()
+            reach = int(cfg.odor_range * s)
+            for k in np.flatnonzero(task.food_on[i]):
+                pygame.draw.circle(self.overlay, (*FOOD, int(18 * on[i, k])), self._px(task.food[i, k]), reach)
+                if trace[i, k] > 0.02:
+                    pygame.draw.circle(self.overlay, (*FOOD, int(18 * trace[i, k])), self._px(task.ghost[i, k]),
+                                       reach)
+                    pygame.draw.circle(self.overlay, (*FOOD, int(160 * trace[i, k])), self._px(task.ghost[i, k]),
+                                       max(2, int(task.food_r * s)), 1)
+        for k in np.flatnonzero(task.food_on[i]):
+            c = self._px(task.food[i, k])
+            if task.prey_speed > 0:
+                pygame.draw.circle(self.overlay, (*FOOD, 40), c, int(cfg.prey_flee_range * s), 1)
+            pygame.draw.circle(self.overlay, (*FOOD, 255), c, max(2, int(task.food_r * s)))
+        for k in np.flatnonzero(task.pred_on[i]):
+            c = self._px(task.pred[i, k])
+            pygame.draw.circle(self.overlay, (*PREDATOR, 22), c, int(cfg.predator_range * s))
+            pygame.draw.circle(self.overlay, (*PREDATOR, 90), c, int(cfg.predator_range * s), 1)
+            pygame.draw.circle(self.overlay, (*PREDATOR, 255), c, max(3, int(cfg.predator_radius * s)))
+        self.screen.blit(self.overlay, (0, 0))
+
+    def task_line(self, i: int) -> str:
+        """Lo stato del compito per l'agente i, in una riga (vuota se il compito
+        non ha niente da dire)."""
+        task = self.world.task
+        if not hasattr(task, "eaten"):
+            return ""
+        line = f"cibi mangiati {int(task.eaten[i])}/{task.need}"
+        if task.n_pred:
+            d = np.linalg.norm(task.pred[i, task.pred_on[i]] - self.world.pos[i], axis=1).min()
+            line += f"   predatore più vicino a {d:4.0f} u"
+        return line
+
+    def _draw_trail(self, i: int) -> None:
+        """La scia dell'agente seguito: si azzera quando si cambia agente o
+        comincia una generazione nuova."""
+        w = self.world
+        who, t = self._trail_of
+        if who != i or w.t < t:
+            self.trail = []
+        if w.t != t or not self.trail:
+            self.trail.append(self._px(w.pos[i]))
+            del self.trail[:-TRAIL]
+        self._trail_of = (i, w.t)
+        n = len(self.trail)
+        for k in range(1, n):
+            f = k / n
+            color = tuple(int(a + (b - a) * f) for a, b in zip(ARENA, PLAYER))
+            pygame.draw.line(self.screen, color, self.trail[k - 1], self.trail[k], 1)
 
     def _draw_receptors(self, i: int, genes, obs: np.ndarray) -> None:
         """I recettori dell'agente i: per ognuno il suo campo (due linee ai
@@ -178,7 +242,7 @@ class Renderer:
         images = [self.font.render(text, True, color) for text, color in lines]
         width = min(max(img.get_width() for img in images) + 20, self.arena.w)
         back = pygame.Surface((width, 18 * len(images) + 12), pygame.SRCALPHA)
-        back.fill((*BG, 190))
+        back.fill((*BG, 140))
         self.screen.blit(back, (0, 0))
         for k, img in enumerate(images):
             self.screen.blit(img, (10, 8 + 18 * k))
@@ -276,13 +340,14 @@ class Renderer:
         ogni generazione, linea spessa = media delle ultime 10."""
         box = pygame.Rect(self.panel.x + 44, self.net_h + 30, PANEL_W - 64, GRAPH_H - 58)
         pygame.draw.line(self.screen, BORDER, (self.panel.x, self.net_h), (self.panel.right, self.net_h), 1)
-        title = "successi (%) - sottile: ogni gen., spessa: media di 10"
+        title = "successi (%) - grigio: ogni gen., azzurro: media di 10"
         self.screen.blit(self.small.render(title, True, DIM), (self.panel.x + 8, self.net_h + 8))
         if not history:
             plot(self.screen, box, self.small, (), 100.0)
             return
         pct, avg = success_series(history, self.world.cfg.population)
-        plot(self.screen, box, self.small, ((pct, WALL, 1), (avg, TARGET, 2)), 100.0)
+        pct, avg, history = pct[-300:], avg[-300:], history[-300:]  # le ultime: con migliaia non si legge
+        plot(self.screen, box, self.small, ((pct, (88, 94, 112), 1), (avg, TARGET, 2)), 100.0)
         self.screen.blit(self.small.render(f"gen. {history[0]['generation']}", True, DIM), (box.x, box.bottom + 6))
         last = self.small.render(f"gen. {history[-1]['generation']}: {pct[-1]:.0f}%  media {avg[-1]:.0f}%", True, TEXT)
         self.screen.blit(last, (box.right - last.get_width(), box.bottom + 6))
@@ -294,7 +359,8 @@ class Renderer:
         self.screen.fill(BG)
         pygame.draw.rect(self.screen, ARENA, self.arena)
         self._draw_hazards()
-        self._draw_task()
+        self._draw_task(focus)
+        self._draw_trail(focus)
         # L'ultima lettura dei sensi, senza rileggerli: rileggerli consumerebbe
         # il rumore dei recettori e cambierebbe la corsa.
         obs = ctrl.obs if ctrl is not None and len(ctrl.obs) == self.world.n else None

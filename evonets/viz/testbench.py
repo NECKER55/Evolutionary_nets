@@ -140,6 +140,7 @@ class TestScreen:
                         f"morti {int((~w.alive).sum())}   in corsa {int((w.alive & ~w.done).sum())}", TEXT))
         hud += [
             (f"seguito: {self.labels[i]}: {status}   energia {w.energy[i]:5.1f}   v={w.speed[i]:5.1f} u/s", PLAYER),
+            *([(self.renderer.task_line(i), PLAYER)] if self.renderer.task_line(i) else []),
             ("nessun figlio, nessuna eliminazione: si osserva soltanto", DIM),
             ("", TEXT),
             ("Spazio pausa | +/- velocita' | N arena successiva | R rifai questa", DIM),

@@ -234,7 +234,7 @@ class Evolution:
         """È ora dell'esame automatico (ogni `exam_every` generazioni)?"""
         every = self.cfg.exam_every
         return (every > 0 and self.generation > 0 and self.generation % every == 0 and self.exam is None
-                and not any(e["generation"] == self.generation for e in self.exams))
+                and not any(e["generation"] == self.generation and not e.get("lesion") for e in self.exams))
 
     def oldest(self) -> dict | None:
         """L'individuo più anziano in gara: posto nella popolazione, numero,

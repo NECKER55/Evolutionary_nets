@@ -128,3 +128,12 @@ def test_a_lesioned_exam_is_recorded_as_such():
     assert not ex.genomes.active.any() and e.ctrl.brains.genome.active.any()
     ex.run()
     assert e.collect_exam()["lesion"] == "neuroni"
+
+
+def test_a_lesion_exam_does_not_replace_the_scheduled_exam():
+    evo = Evolution(forage(exam_every=5, engine="numpy"), 1)
+    evo.generation = 10
+    evo.exams = [{"generation": 10, "lesion": "luce"}]
+    assert evo.exam_due()  # la lesione è un'altra misura: l'esame della corsa va fatto lo stesso
+    evo.exams.append({"generation": 10, "lesion": None})
+    assert not evo.exam_due()

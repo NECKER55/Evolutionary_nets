@@ -22,9 +22,12 @@ import pygame
 
 from ..config import TUNABLES, Config
 from ..evo import Evolution
+from ..evo import ladder
 from ..evo.evolution import describe_change
+from ..evo.exam import LESIONS
 from ..net.anatomy import KIND_NAMES
-from .render import BG, BORDER, DIM, HAZARD, PLAYER, TARGET, TEXT, WALL, Renderer, plot, success_series
+from .render import BG, BORDER, DIM, MODULATOR, PLAYER, TARGET, TEXT, Renderer, success_series
+from .overview import Overview
 from .widgets import ROW_H, Button, Choice, Number, Text
 
 SPEEDS = (1, 2, 4, 8, 16)
@@ -128,6 +131,12 @@ def save_info(path) -> str:
             text = f"generazione {int(d['generation'])}, {n} individui, rete {KIND_NAMES.get(net, net)}"
             if "seed" in d:
                 text += f", seme {int(d['seed'])}"
+            if "config" in d:
+                saved = json.loads(str(d["config"]))
+                if saved.get("task") == "cibo":
+                    mode = {"scala": "scala adattiva", "basico": "controllo basico",
+                            "complesso": "controllo complesso"}.get(saved.get("ladder"), "manopole ferme")
+                    text += f", mondo del cibo ({mode})"
             if "exams" in d:
                 exams = json.loads(str(d["exams"]))
                 if exams:
@@ -169,11 +178,22 @@ class Launcher(Screen):
                              help="Il seme usato viene comunque mostrato e salvato: ogni corsa si può rifare.")
         self.seed = Number("Seme", defaults.get("seed") or 0,
                            help="Stesso seme e stesse impostazioni = stessa corsa.")
+        self.task = Choice("Mondo", [("bersaglio", "bersaglio e veleno (il mondo di prima)"),
+                                     ("cibo", "nutrirsi: cibo, prede e predatori")],
+                           help="Il compito. Nel mondo del cibo si riproduce chi mangia almeno N cibi; il veleno "
+                                "è spento. Ignorato se si riprende un salvataggio.")
+        self.task.select(defaults.get("task") or "bersaglio")
+        self.ladder = Choice("Scala", [("scala", "adattiva: sale se va bene, scende se va male"),
+                                       ("basico", "ferma al mondo basico (controllo)"),
+                                       ("complesso", "ferma al mondo complesso (controllo)")],
+                             help="Solo nel mondo del cibo: come si muovono le manopole della difficoltà "
+                                  "(docs/SPEC_MONDO.md).")
+        self.ladder.select(defaults.get("ladder") or "scala")
         self.gens = Number("Generazioni", 0, step=50,
                            help="Dopo quante generazioni fermarsi e salvare. 0 = senza limite.")
         self.exam_every = Number("Esame ogni", Config().exam_every, step=50,
-                                 help="Ogni quante generazioni mettere all'esame fisso (7 prove) i 20 più "
-                                      "anziani; gira su altri core e non cambia la corsa. 0 = mai.")
+                                 help="Ogni quante generazioni mettere all'esame fisso (7 prove; 8 livelli nel "
+                                      "mondo del cibo) i 20 più anziani; non cambia la corsa. 0 = mai.")
         self.select = Number("Selezione finale", 0, step=1,
                              help="Finite le generazioni, i sopravvissuti rifanno la prova questo numero di "
                                   "volte, senza figli: chi fallisce è eliminato. 0 = niente.")
@@ -185,8 +205,8 @@ class Launcher(Screen):
                            on_change=self._loaded)
         self.save = Text("Salva in", defaults.get("save") or self._fresh_name(),
                          help="Dove salvare: tasto S, fine delle generazioni, uscita dalla corsa.")
-        self.fields = [self.mode, self.net, self.agents, self.chance, self.seed, self.gens, self.exam_every,
-                       self.select, self.load, self.save]
+        self.fields = [self.mode, self.net, self.agents, self.task, self.ladder, self.chance, self.seed, self.gens,
+                       self.exam_every, self.select, self.load, self.save]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
         self.inspect_btn = Button("Esplora reti e genomi del salvataggio", self.explore)
@@ -200,15 +220,52 @@ class Launcher(Screen):
         return str(RUNS / f"corsa-{datetime.now():%Y%m%d-%H%M%S}.npz")
 
     def _loaded(self, path) -> None:
-        self.net.enabled = self.agents.enabled = self.chance.enabled = path is None
+        """Scelto un salvataggio (o nessuno). Le righe che vengono dal file si
+        disattivano e mostrano i valori del file; tornando a "nessuno" riprendono
+        quelli scelti a mano."""
+        fields = (self.net, self.agents, self.task, self.ladder, self.chance, self.seed)
+        if path is not None and getattr(self, "_mine", None) is None:
+            self._mine = [f.value if isinstance(f, Number) else f.index for f in fields]
+        if path is None and getattr(self, "_mine", None) is not None:
+            for f, v in zip(fields, self._mine):
+                if isinstance(f, Number):
+                    f.value = v
+                else:
+                    f.index = v
+            self._mine = None
+        if path is not None:
+            self._show_saved(path)
+        self.net.enabled = self.agents.enabled = self.chance.enabled = self.task.enabled = path is None
         if path is not None:
             self.save.value, self.save.edited = path, False
         elif not self.save.edited:
             self.save.value = self._fresh_name()
 
+    def _show_saved(self, path) -> None:
+        """Mette nelle righe disattivate i valori del salvataggio."""
+        try:
+            with np.load(path) as d:
+                saved = json.loads(str(d["config"])) if "config" in d else {}
+                net = str(d["net_type"]) if "net_type" in d else saved.get("net_type", "rate")
+                n = len(d["weights"])
+                seed = int(d["seed"]) if "seed" in d else None
+        except Exception:  # file illeggibile: lo dirà save_info
+            return
+        for field, value in ((self.net, net), (self.task, saved.get("task") or "bersaglio"),
+                             (self.ladder, saved.get("ladder"))):
+            if value in [v for v, _ in field.options]:
+                field.select(value)
+        self.agents.value = n
+        if seed is not None:
+            self.chance.select("fixed")
+            self.seed.value = seed
+
     def _config(self) -> Config:
-        cfg = Config(net_type=self.net.value)
+        cfg = Config(net_type=self.net.value, task=self.task.value)
         cfg.population = self.agents.fixed()
+        if cfg.task == "cibo":
+            cfg.n_hazards = 0  # il veleno resta spento in tutta la scala
+            cfg.ladder = self.ladder.value
         return cfg
 
     def _evolution(self) -> Evolution | None:
@@ -284,11 +341,12 @@ class Launcher(Screen):
         app = self.app
         self.select.enabled = self.gens.value > 0  # serve un punto in cui le generazioni finiscono
         self.seed.enabled = self.chance.enabled and self.chance.value == "fixed"
+        self.ladder.enabled = self.task.enabled and self.task.value == "cibo"
         s.fill(BG)
         s.blit(app.big.render("Evolutionary nets", True, PLAYER), (60, 40))
         s.blit(app.font.render("nuova corsa, ripresa di un salvataggio o esplorazione delle sue reti", True, DIM),
                (60, 76))
-        y = 130
+        y = 110
         for k, f in enumerate(self.fields):
             f.draw(s, app.font, 60, y, 175, 540, k == self.focus)
             y += ROW_H + 4
@@ -317,12 +375,13 @@ class Launcher(Screen):
             ("", TEXT),
             ("Durante la corsa", TEXT),
             ("", TEXT),
-            ("La pagina principale mostra le statistiche", DIM),
-            ("e le reti dei vincitori, esplorabili mentre", DIM),
-            ("l'evoluzione continua.", DIM),
+            ("La pagina principale ha due schede: la", DIM),
+            ("panoramica (a che punto siamo, a parole) e", DIM),
+            ("le reti dei vincitori.  V   cambia scheda", DIM),
             ("F   apre/chiude l'arena (la corsa continua)", DIM),
             ("T   prova da sola la rete scelta", DIM),
             ("I   reti e genomi a tutto schermo", DIM),
+            ("E   esame    L   esame con una lesione", DIM),
             ("Con Generazioni e Selezione finale, alla fine", DIM),
             ("i sopravvissuti rifanno la prova senza figli.", DIM),
             ("S   salva     Spazio   pausa", DIM),
@@ -333,7 +392,7 @@ class Launcher(Screen):
             ("si possono esplorare anche dopo.", DIM),
         ]
         for k, (text, color) in enumerate(lines):
-            s.blit(app.font.render(text, True, color), (help_x, 130 + 20 * k))
+            s.blit(app.font.render(text, True, color), (help_x, 110 + 20 * k))
 
 
 class RunScreen(Screen):
@@ -370,6 +429,11 @@ class RunScreen(Screen):
                         Button("Chiudi  [Invio]", self._close_summary)]
         self.gen0, self.busy = evo.generation, 0.0
         self.saved_exams = len(evo.exams)
+        self.lesion_menu = False  # L: scelta della parte da togliere per l'esame
+        self.overview = Overview(app)
+        self.tab = "overview"  # scheda della pagina principale: "overview" o "nets"
+        self.tab_rects: dict[str, pygame.Rect] = {}
+        self.show_help = False  # H nell'arena: elenco dei tasti
 
     # --- evoluzione --------------------------------------------------------
 
@@ -433,8 +497,9 @@ class RunScreen(Screen):
             lines.append((f"ultima generazione: {hist[-1]['completed']}/{cfg.population} hanno completato "
                           f"({pct[-1]:.0f}%); media ultime 10: {avg[-1]:.0f}%; record {pct[best]:.0f}% "
                           f"(gen. {hist[best]['generation']})", TEXT))
-        if evo.exams:
-            r = evo.exams[-1]
+        intact = [e for e in evo.exams if not e.get("lesion")]
+        if intact:
+            r = intact[-1]
             lines.append((f"ultimo esame fisso (gen. {r['generation']}, {r['who']} più anziani): media "
                           f"{r['score']:.0%}, migliore {r['best']:.0%}; "
                           + ", ".join(f"{k} {v:.0%}" for k, v in r["scores"].items()), TEXT))
@@ -466,12 +531,13 @@ class RunScreen(Screen):
         self.summary, self.summary_open = lines, True
         self.message = "esperimento concluso: Invio riapre il riepilogo, A guarda i sopravvissuti in arena"
 
-    def _start_exam(self) -> None:
+    def _start_exam(self, lesion: str | None = None) -> None:
         if self.evo.exam is not None:
             self.message = "c'è già un esame in corso"
             return
-        self.evo.start_exam()
-        self.message = (f"esame dei {len(self.evo.exam.genomes)} più anziani della gen. {self.evo.generation} "
+        self.evo.start_exam(lesion=lesion)
+        what = f", senza {lesion}," if lesion else ""
+        self.message = (f"esame dei {len(self.evo.exam.genomes)} più anziani della gen. {self.evo.generation}{what} "
                         "avviato: va avanti anche in pausa")
 
     def _test_survivors(self) -> None:
@@ -481,6 +547,7 @@ class RunScreen(Screen):
 
     def _explore_survivors(self) -> None:
         self.summary_open = self.full = False
+        self.tab = "nets"
         self.explorer.switch("survivors")
         self.explorer.snapshot()
 
@@ -511,7 +578,8 @@ class RunScreen(Screen):
         evo.exam.run(budget / 2)
         r = evo.collect_exam()
         if r is not None:
-            self.message = (f"esame della gen. {r['generation']} concluso: media {r['score']:.0%}, "
+            what = f" senza {r['lesion']}" if r.get("lesion") else ""
+            self.message = (f"esame della gen. {r['generation']}{what} concluso: media {r['score']:.0%}, "
                             f"migliore {r['best']:.0%} (in {r['seconds']:.0f}s)")
         return max(budget - (time.perf_counter() - start), 0.0)
 
@@ -563,6 +631,12 @@ class RunScreen(Screen):
     # --- comandi -----------------------------------------------------------
 
     def handle(self, ev) -> None:
+        if self.lesion_menu and ev.type == pygame.KEYDOWN:
+            self.lesion_menu = False
+            k = ev.key - pygame.K_1
+            if 0 <= k < len(LESIONS):
+                self._start_exam(LESIONS[k])
+            return
         if self.summary_open and not self.watch:
             if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 for b in self.buttons:
@@ -610,13 +684,28 @@ class RunScreen(Screen):
         elif (ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1
               and any(r.collidepoint(ev.pos) for r in self.oldest_rects)):
             self._show_oldest()
+        elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and any(
+                r.collidepoint(ev.pos) for r in self.tab_rects.values()):
+            self.tab = next(k for k, r in self.tab_rects.items() if r.collidepoint(ev.pos))
+            self.full = False
+        elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_v:
+            self.tab = "nets" if self.tab == "overview" else "overview"
+            self.full = False
         elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_t:
             self.app.test(self.explorer.selected(), back=self)
         elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_e:
             self._start_exam()
+        elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_l:
+            if self.evo.exam is not None:
+                self.message = "c'è già un esame in corso"
+            else:
+                self.lesion_menu = True
         elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_z:
             self.full = not self.full
-        elif not self.full:
+        elif ev.type == pygame.KEYDOWN and ev.key in (pygame.K_1, pygame.K_2, pygame.K_3) and not self.full:
+            self.tab = "nets"  # gli elenchi delle reti stanno nell'altra scheda
+            self.explorer.handle(ev)
+        elif not self.full and self.tab == "nets":
             self.explorer.handle(ev)
 
     def _show_oldest(self) -> None:
@@ -629,7 +718,7 @@ class RunScreen(Screen):
         if self.watch:
             self.focus = o["index"]
         else:
-            self.full = False
+            self.full, self.tab = False, "nets"
             self.explorer.show_individual(o["index"])
 
     def _handle_arena(self, ev) -> None:
@@ -647,6 +736,8 @@ class RunScreen(Screen):
                 self.manual = not self.manual
             elif k == pygame.K_c:
                 self.show_consts = not self.show_consts
+            elif k == pygame.K_h:
+                self.show_help = not self.show_help
             elif k in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS):
                 self.turbo, self.speed_i = False, min(self.speed_i + 1, len(SPEEDS) - 1)
             elif k in (pygame.K_MINUS, pygame.K_KP_MINUS):
@@ -677,8 +768,33 @@ class RunScreen(Screen):
                     f"in gara {self.world.n} (partiti {sel['entered']}), nessun figlio")
         return f"selezione finale conclusa: restano {self.world.n} su {sel['entered']}"
 
+    def _ladder_lines(self) -> list[str]:
+        """A che punto è la scala, in due righe corte: lo stadio, e cosa
+        trovano gli agenti in questa generazione. Vuote fuori dal mondo del cibo."""
+        cfg, task = self.cfg, self.world.task
+        if cfg.task != "cibo" or not hasattr(task, "need"):
+            return []
+        i, f = ladder.stage(cfg)
+        if cfg.ladder == "scala":
+            head = (f"stadio {i + 1}/3, {ladder.STAGE_NAMES[i]}: {f:.0%}" if ladder.position(cfg) < ladder.TOP
+                    else "scala in cima: mondo complesso")
+        else:
+            head = {"basico": "controllo: sempre il mondo basico",
+                    "complesso": "controllo: sempre il mondo complesso"}.get(cfg.ladder, "manopole ferme")
+        prey = f"prede a {task.prey_speed:.1f} u/s" if task.prey_speed > 0 else "cibo fermo"
+        if task.scent_tau > 0 and cfg.food_smell > 0:
+            prey += f", nube in {task.scent_tau:.1f} s"
+        pred = (f"{task.n_pred} predatori a {task.pred_speed:.1f} u/s" if task.n_pred
+                else "nessun predatore" + (" (dallo stadio 3)" if cfg.ladder == "scala" else ""))
+        return [head, f"ora: {task.n_food} cibi r{task.food_r:.1f}, servono {task.need}; {prey}; {pred}"]
+
     def _env_text(self) -> str:
         """Lo stato del registro dell'ambiente, in una riga."""
+        if self.cfg.task == "cibo":
+            moves = sum(e["event"] == "scala" for e in self.evo.log)
+            other = sum(e["event"] == "cambio" for e in self.evo.log)
+            return (f"ambiente: mondo del cibo, la scala si è mossa {moves} "
+                    f"{'volta' if moves == 1 else 'volte'}, altri cambi {other}")
         changes = [e for e in self.evo.log if e["event"] == "cambio"]
         code = next((e["code"] for e in reversed(self.evo.log) if "code" in e), "sconosciuta")
         if not changes:
@@ -707,105 +823,103 @@ class RunScreen(Screen):
             status = "MORTO"
         pace = "TURBO" if self.turbo else f"x{SPEEDS[self.speed_i]}"
         hud = [
-            (f"generazione {evo.generation}   t={world.t:5.1f}s   {pace}   {self.app.clock.get_fps():3.0f} fps"
-             f"{'   PAUSA' if self.paused else ''}", TEXT),
-            (f"compito: {world.task.name}", TEXT),
-            (f"completato {int(world.done.sum())}/{world.n}   morti {int((~world.alive).sum())}   "
-             f"sopravvissuti in gara {int((evo.age > 0).sum())}", TEXT),
-            (self._oldest_text(), TEXT),
+            (f"generazione {evo.generation}   t={world.t:5.1f}s   {pace}{'   PAUSA' if self.paused else ''}", TEXT),
+            *[(line, PLAYER if k == 0 else TEXT) for k, line in enumerate(self._ladder_lines())],
+            *([] if self._ladder_lines() else [(f"compito: {world.task.name}", TEXT)]),
+            (f"in questa generazione: completato {int(world.done.sum())} su {world.n}, "
+             f"morti {int((~world.alive).sum())}", TEXT),
         ]
         if self._selection_text():
             hud.insert(0, (self._selection_text(), PLAYER))
-        if evo.history:
-            h = evo.history[-1]
-            note = "" if h["event"] == "normale" else f"   [{h['event']}]"
-            hud.append((f"gen. precedente: {h['completed']}/{self.cfg.population} completati, "
-                        f"{h['neurons']:.1f} neuroni e {h['links']:.0f} collegamenti in media{note}", DIM))
         hud += [
             ("", TEXT),
             (f"seguito: #{evo.ids[focus]} ({'guidi tu' if self.manual else 'guida la rete'}), "
              f"età {evo.age[focus]}: {status}", PLAYER),
             (f"energia {world.energy[focus]:5.1f}   v={world.speed[focus]:5.1f} u/s   "
              f"w={world.ang_vel[focus]:+5.2f} rad/s", PLAYER),
-            ("", TEXT),
         ]
+        if self.renderer.task_line(focus):
+            hud.append((self.renderer.task_line(focus), PLAYER))
+            hud.append(("cibo e predatori disegnati: la copia di mondo dell'agente seguito", DIM))
+        hud.append(("", TEXT))
         if self.show_consts:
             for i, name in enumerate(TUNABLES):
                 mark = ">" if i == self.tun_i else " "
                 hud.append((f"{mark} {name:17s} {getattr(self.cfg, name):8.3f}", TEXT if i == self.tun_i else DIM))
             hud.append(("Tab scegli | , . (o [ ]) regola | C chiudi", DIM))
             hud.append(("ogni cambio va nel registro dell'ambiente, salvato con la corsa", DIM))
-        else:
+        elif self.show_help:
             hud.append(("+/- velocita' | T turbo | Spazio pausa | S salva | C costanti", DIM))
             hud.append(("clic segui un agente | M guida manuale (WASD/frecce) | V raggi", DIM))
-            hud.append(("O segui il più anziano | F pagina principale | I reti e genomi | Esc menu", DIM))
+            hud.append(("O segui il più anziano | F pagina principale | I reti e genomi | Esc menu | H chiudi", DIM))
+        else:
+            hud.append(("H tasti | F pagina principale", DIM))
         if self.message:
             hud.append((self.message[:100], DIM))
         self.renderer.draw(focus, hud, evo.ctrl, self.show_rays, evo.age, evo.history)
 
     def _draw_page(self, s) -> None:
+        """La pagina principale: intestazione, due schede (panoramica e reti),
+        suggerimenti in fondo."""
         app, evo, world, cfg = self.app, self.evo, self.world, self.cfg
         s.fill(BG)
         W, H = s.get_size()
-        state = "IN PAUSA" if self.paused else f"{self._rate():.1f} gen/min"
+        if self.full:
+            self.tab = "overview"
         title = "Selezione finale" if evo.selecting else f"Generazione {evo.generation}"
-        seed = "" if evo.seed is None else f"seme {evo.seed}   "
-        s.blit(app.big.render(title, True, PLAYER), (16, 10))
-        head = (f"{state}   {seed}rete {KIND_NAMES[cfg.net_type]}, {cfg.population} individui"
+        s.blit(app.big.render(title, True, PLAYER), (16, 12))
+        state = "IN PAUSA" if self.paused else ("MASSIMA VELOCITÀ, " if self.full else "") + f"{self._rate():.1f} gen/min"
+        seed = "" if evo.seed is None else f"   seme {evo.seed}"
+        head = (f"{state}   rete {KIND_NAMES[cfg.net_type]}, {cfg.population} individui{seed}"
                 + (f"   si ferma alla gen. {self.goal}" if self.goal else "")
                 + (f", poi {self.select} prove di selezione" if self.goal and self.select else ""))
-        img = app.small.render(head, True, TEXT)
-        s.blit(img, (250, 8))
-        self.oldest_rects = []
-        if self.evo.oldest() is not None:
-            old = app.small.render(self._oldest_text() + "  [clic o O: la sua rete]", True, PLAYER)
-            r = s.blit(old, (250 + img.get_width() + 24, 8))
-            pygame.draw.line(s, PLAYER, r.bottomleft, r.bottomright, 1)
-            self.oldest_rects.append(r)
+        s.blit(app.small.render(head, True, TEXT), (250, 10))
         n_surv = int((evo.age > 0).sum())
         if evo.selecting:
-            who = f"in gara {world.n} finalisti della selezione, nessun figlio"
+            who = self._selection_text()
         elif evo.selection is not None and n_surv == world.n:
-            who = f"sopravvissuti {n_surv}: i rimasti dalla selezione finale"
+            who = f"restano {n_surv} dalla selezione finale"
         else:
-            who = (f"sopravvissuti {n_surv} (vincitori della gen. precedente, di nuovo in gara) + "
-                   f"{world.n - n_surv} figli nuovi")
-        s.blit(app.small.render(
-            f"{who}   |   in corso: t={world.t:4.1f}s  completato {int(world.done.sum())}  "
-            f"morti {int((~world.alive).sum())}", True, DIM), (250, 24))
-        x = 250
-        if self._selection_text():
-            x += s.blit(app.small.render(self._selection_text(), True, PLAYER), (x, 38)).w + 24
-        x += s.blit(app.small.render(self._env_text(), True, DIM), (x, 38)).w + 24
-        if evo.exam is not None:
-            s.blit(app.small.render(f"ESAME della gen. {evo.exam.generation} in corso: {evo.exam.progress:.0%}",
-                                    True, PLAYER), (x, 38))
-        pygame.draw.line(s, BORDER, (0, 54), (W, 54), 1)
+            who = f"in gara: {n_surv} sopravvissuti della generazione prima + {world.n - n_surv} figli nuovi"
+        s.blit(app.small.render(f"{who}   |   generazione in corso: t={world.t:4.1f}s, completato "
+                                f"{int(world.done.sum())}, morti {int((~world.alive).sum())}", True, DIM), (250, 28))
 
-        self._draw_stats(s, pygame.Rect(0, 58, 456, H - 112))
-        pygame.draw.line(s, BORDER, (460, 54), (460, H - 50), 1)
-        if self.full:
-            msg = ["MASSIMA VELOCITÀ: l'esploratore è nascosto e la pagina si ridisegna",
-                   "due volte al secondo; il resto del tempo va all'evoluzione.",
-                   "Il risultato è lo stesso delle altre modalità.",
-                   "",
-                   "Z riapre l'esploratore. I tasti rispondono con un po' di ritardo."]
-            for k, text in enumerate(msg):
-                s.blit(app.font.render(text, True, DIM), (490, 100 + 22 * k))
+        # Le schede: clic o V.
+        self.tab_rects = {}
+        x = W - 16
+        for key, label in (("nets", "Reti  "), ("overview", "Panoramica")):
+            img = app.font.render(label.strip(), True, BG if self.tab == key else TEXT)
+            r = pygame.Rect(0, 10, img.get_width() + 24, 30)
+            r.right = x
+            pygame.draw.rect(s, PLAYER if self.tab == key else (32, 35, 46), r, border_radius=4)
+            pygame.draw.rect(s, PLAYER, r, 1, border_radius=4)
+            s.blit(img, img.get_rect(center=r.center))
+            self.tab_rects[key] = r
+            x = r.x - 8
+        pygame.draw.line(s, BORDER, (0, 50), (W, 50), 1)
+
+        self.oldest_rects = []
+        if self.tab == "overview":
+            self.overview.draw(s, pygame.Rect(12, 60, W - 24, H - 60 - 62), evo, self._env_text())
+            self.oldest_rects = self.overview.oldest_rects
+            hints = ("V reti | F arena | E esame | L lesione | A sopravvissuti in arena | O più anziano | "
+                     "Z max velocità | Spazio pausa | S salva | Esc menu")
         else:
             ex = self.explorer
-            ex.place((470, 62), pygame.Rect(464, 86, 216, H - 86 - 54),
-                     pygame.Rect(684, 58, 470, H - 58 - 50), pygame.Rect(1164, 108, W - 1170, H - 108 - 60))
-            pygame.draw.line(s, BORDER, (680, 84), (680, H - 50), 1)
-            pygame.draw.line(s, BORDER, (1156, 58), (1156, H - 50), 1)
+            ex.place((16, 58), pygame.Rect(10, 84, 216, H - 84 - 54),
+                     pygame.Rect(236, 56, 700, H - 56 - 50), pygame.Rect(956, 106, W - 962, H - 106 - 60))
+            pygame.draw.line(s, BORDER, (230, 82), (230, H - 50), 1)
+            pygame.draw.line(s, BORDER, (946, 56), (946, H - 50), 1)
             ex.draw(s, app.font, app.small)
+            hints = ("V panoramica | 1/2/3 elenchi | T prova la rete scelta | P rami morti | I genoma | "
+                     "F arena | O più anziano | Spazio pausa | S salva | Esc menu")
 
         if self.summary_open:
             self._draw_summary(s)
+        if self.lesion_menu:
+            self._draw_lesions(s)
         pygame.draw.line(s, BORDER, (0, H - 50), (W, H - 50), 1)
         pygame.draw.line(s, BORDER, (0, H - 30), (W, H - 30), 1)
-        hints = ("F arena | T prova la rete scelta | A sopravvissuti in arena | O più anziano | 1/2/3 elenchi | "
-                 "P rami morti | I genoma | E esame | Z max velocità | Spazio pausa | S salva | Esc menu")
         s.blit(app.small.render(hints, True, DIM), (12, H - 22))
         if self.message:
             s.blit(app.small.render(self.message[:190], True, TARGET), (12, H - 44))
@@ -825,96 +939,19 @@ class RunScreen(Screen):
         for b in self.buttons:
             x += b.draw(s, app.small, x, y) + 10
 
-    def _oldest_tile(self) -> str:
-        o = self.evo.oldest()
-        return "-" if o is None else f"#{o['id']} ({o['age']})"
-
-    def _draw_stats(self, s, area: pygame.Rect) -> None:
-        app, cfg, hist = self.app, self.cfg, self.evo.history
-        x0, y = area.x + 12, area.y + 4
-        # Riquadri con i numeri chiave.
-        if hist:
-            pct, avg = success_series(hist, cfg.population)
-            best = int(np.argmax(pct))
-            last = hist[-1]
-            tiles = [("succ. ultima", f"{pct[-1]:.0f}%"), ("succ. media10", f"{avg[-1]:.0f}%"),
-                     ("record (gen.)", f"{pct[best]:.0f}% ({hist[best]['generation']})"),
-                     ("anziano (età)", self._oldest_tile()),
-                     ("neuroni medi", f"{last['neurons']:.1f}"), ("colleg. medi", f"{last['links']:.0f}"),
-                     ("durata ultima", f"{last['duration']:.1f}s"),
-                     ("recettori usati/accesi", f"{last.get('used', 0.0):.1f}/{last.get('receptors', 0.0):.1f}")]
-        else:
-            tiles = [("succ. ultima", "-"), ("succ. media10", "-"), ("record (gen.)", "-"),
-                     ("anziano (età)", self._oldest_tile()),
-                     ("neuroni medi", "-"), ("colleg. medi", "-"), ("durata ultima", "-"),
-                     ("recettori usati/accesi", "-")]
-        tw = (area.w - 24) // 4
-        for k, (label, value) in enumerate(tiles):
-            r = pygame.Rect(x0 + (k % 4) * tw, y + (k // 4) * 40, tw - 6, 36)
-            pygame.draw.rect(s, (24, 27, 36), r, border_radius=3)
-            clickable = label.startswith("anziano") and value != "-"
-            if clickable:
-                self.oldest_rects.append(r)
-                pygame.draw.rect(s, PLAYER, r, 1, border_radius=3)
-            s.blit(app.small.render(label, True, DIM), (r.x + 6, r.y + 3))
-            s.blit(app.font.render(value, True, PLAYER if clickable else TEXT), (r.x + 6, r.y + 17))
-        y += 86
-
-        spiking = bool(hist) and "inhibitory" in hist[-1]
-        used_text = ""
-        if hist:  # recettori usati per individuo, per fenomeno, nell'ultima generazione
-            names = ("luce", "sost.", "mecc.", "temp.", "magn.", "int.", "gener.")
-            used_text = "\nusati: " + " ".join(f"{k} {v:.1f}" for k, v in zip(names, hist[-1].get("used_by", [])))
-        graphs = [
-            ("successi (%): sottile ogni gen., spessa media di 10",
-             lambda: ((pct, WALL, 1), (avg, TARGET, 2)), lambda: 100.0, (0, 0.5, 1)),
-            ("reti: arancio neuroni, azzurro collegamenti/10, verde recettori usati" + used_text,
-             lambda: ((col("neurons"), PLAYER, 2), (col("links") / 10, TARGET, 2), (col("used"), HAZARD, 2)),
-             lambda: max(col("neurons").max(), col("links").max() / 10, col("used").max(), 1.0),
-             (0, 0.5, 1)),
-            ("sopravvissuti (bianco), generazioni vinte dal più anziano (arancio)",
-             lambda: ((col("survivors"), WALL, 1), (col("oldest"), PLAYER, 2)),
-             lambda: max(col("survivors").max(), col("oldest").max(), 1.0), (0, 0.5, 1)),
-            ("quota di neuroni inibitori (%)" if spiking else "durata della generazione (s)",
-             (lambda: ((col("inhibitory") * 100, TARGET, 2),)) if spiking else (lambda: ((col("duration"), TARGET, 2),)),
-             (lambda: 100.0) if spiking else (lambda: max(col("duration").max(), 1.0)), (0, 0.5, 1)),
-        ]
-
-        def col(name):
-            return np.array([h.get(name, 0.0) for h in hist], dtype=float)  # campi nuovi: 0 nelle storie vecchie
-
-        exams = self.evo.exams
-        if exams:  # l'esame prende il posto della durata (o dei neuroni inibitori)
-            last = exams[-1]
-            graphs[3] = (f"ESAME ({len(exams)}, gen. {exams[0]['generation']}-{last['generation']}): arancio media, "
-                         f"bianco migliore\nultimo: " + " ".join(f"{k} {v * 100:.0f}" for k, v in last["scores"].items()),
-                         lambda: ((np.array([e["best"] * 100 for e in exams]), WALL, 1),
-                                  (np.array([e["score"] * 100 for e in exams]), PLAYER, 2)),
-                         lambda: 100.0, (0, 0.5, 1))
-
-        sel = self.evo.selection
-        if sel is not None:
-            graphs = graphs[:3]  # l'ultimo posto va all'esito della selezione
-        gh = (area.bottom - y) // (len(graphs) + (sel is not None))
-        for title, series, top, ticks in graphs:
-            lines = title.split("\n")
-            for k, line in enumerate(lines):
-                s.blit(app.small.render(line, True, PLAYER if k else DIM), (x0, y + 13 * k))
-            shift = 13 * (len(lines) - 1)
-            box = pygame.Rect(area.x + 50, y + 22 + shift, area.w - 64, gh - 44 - shift)
-            if hist:
-                plot(s, box, app.small, series(), top(), ticks)
-            else:
-                plot(s, box, app.small, (), 1.0, ticks)
-            y += gh
-        if sel is not None:
-            s.blit(app.small.render(f"selezione finale: {sel['entered']} sopravvissuti, {sel['rounds']} prove",
-                                    True, PLAYER), (x0, y))
-            for k, e in enumerate(sel["log"][-5:]):
-                s.blit(app.small.render(f"prova {e['round']}: {e['entered']} in gara, {e['passed']} superano",
-                                        True, TEXT), (x0 + 10, y + 18 + 16 * k))
-            if not sel["log"]:
-                s.blit(app.small.render("prima prova in corso", True, DIM), (x0 + 10, y + 18))
-        elif hist:
-            s.blit(app.small.render(f"gen. {hist[0]['generation']}-{hist[-1]['generation']}", True, DIM),
-                   (area.x + 50, area.bottom - 16))
+    def _draw_lesions(self, s) -> None:
+        """Il menu delle lesioni: cosa togliere ai più anziani per l'esame."""
+        app = self.app
+        names = {"neuroni": "i neuroni interni", "plasticità": "la plasticità (pesi fissi per tutta la vita)"}
+        lines = [f"{k + 1}   {names.get(x, f'il senso: {x}')}" for k, x in enumerate(LESIONS)]
+        box = pygame.Rect(480, 90, 620, 110 + 20 * len(lines))
+        back = pygame.Surface(box.size, pygame.SRCALPHA)
+        back.fill((14, 16, 22, 245))
+        s.blit(back, box)
+        pygame.draw.rect(s, MODULATOR, box, 1, border_radius=4)
+        s.blit(app.font.render("ESAME CON LESIONE: cosa togliere?", True, MODULATOR), (box.x + 20, box.y + 14))
+        s.blit(app.small.render("ai 20 più anziani, sulle stesse prove dell'esame; gli originali non cambiano",
+                                True, DIM), (box.x + 20, box.y + 38))
+        for k, line in enumerate(lines):
+            s.blit(app.font.render(line, True, TEXT), (box.x + 30, box.y + 64 + 20 * k))
+        s.blit(app.small.render("un altro tasto chiude", True, DIM), (box.x + 20, box.bottom - 26))

@@ -247,7 +247,8 @@ def main() -> None:
     else:
         from evonets.viz.app import App
 
-        App(dict(net=args.net, agents=args.agents, seed=args.seed, load=args.load, save=args.save)).run()
+        App(dict(net=args.net, agents=args.agents, seed=args.seed, load=args.load, save=args.save, task=args.task,
+                 ladder=cfg.ladder)).run()
 
 
 if __name__ == "__main__":
