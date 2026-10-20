@@ -146,7 +146,7 @@ def stimuli(cfg, world, genes: ReceptorGenes, rows=None) -> np.ndarray:
     )
 
     # Sostanze, nel punto del corpo dove sta il recettore.
-    for molecule, conc in signals.chemicals(cfg, world, flat):
+    for molecule, conc in signals.chemicals(cfg, world, flat, agent):
         out[..., CHEMICAL] += tuning(molecule, mu[..., CHEMICAL], sigma[..., CHEMICAL]) * conc.reshape(n, R)
 
     # Meccanica: pressione (frequenza 0) e vibrazioni dentro l'apertura.
@@ -286,7 +286,7 @@ class Prepared:
         out = (self.c_wall * seen["parete"].reshape(n, R) + self.c_target * seen["bersaglio"].reshape(n, R)
                + self.c_glow * seen["veleno"].reshape(n, R) + self.c_food * seen["cibo"].reshape(n, R)
                + self.c_pred * seen["predatore"].reshape(n, R))
-        for molecule, conc in signals.chemicals(cfg, world, points):
+        for molecule, conc in signals.chemicals(cfg, world, points, agent):
             out += self.g_c * tuning(molecule, self.mu_c, self.sg_c) * conc.reshape(n, R)
         if world.bump[rows].any():
             out += self.c_press * signals.pressure(cfg, world, agent, normal.reshape(-1, 2)).reshape(n, R)

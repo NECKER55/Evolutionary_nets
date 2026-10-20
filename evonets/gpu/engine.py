@@ -46,6 +46,7 @@ PHYS = (
     # Il mondo del cibo.
     "prey_flee_range", "predator_range", "predator_radius", "predator_damage", "food_energy", "food_min_dist",
     "predator_vibration", "predator_vibration_freq",
+    "food_molecule", "food_smell", "predator_molecule", "predator_smell", "odor_range",
 )
 
 
@@ -154,6 +155,21 @@ def quanta(ph, P, s):
     dt_ = jnp.sqrt((px - s["target"][0]) ** 2 + (py - s["target"][1]) ** 2) - P["target_r"]
     smell = ph["target_smell"] * jnp.exp(-jnp.maximum(dt_, 0.0) / ph["smell_range"]) * P["has_target"]
     out += P["g_c"] * _tuning(ph["target_molecule"], P["mu_c"], P["sg_c"]) * smell.reshape(N, R)
+    if forage:  # odori del cibo (nube e traccia) e dei predatori, nella copia di mondo dell'agente
+        lam = ph["odor_range"]
+        qx, qy = px.reshape(N, R, 1), py.reshape(N, R, 1)
+
+        def cloud(obj, radius):
+            d = jnp.sqrt((qx - obj[:, None, :, 0]) ** 2 + (qy - obj[:, None, :, 1]) ** 2) - radius
+            return jnp.exp(-jnp.maximum(d, 0.0) / lam)
+
+        on, trace = scent(P, s)
+        food_on = (P["food_rad"] > 0)[:, None, :]
+        fc = ((on[:, None, :] * cloud(s["food"], P["food_r"]) + trace[:, None, :] * cloud(s["ghost"], P["food_r"]))
+              * food_on).sum(-1)
+        out += P["g_c"] * _tuning(ph["food_molecule"], P["mu_c"], P["sg_c"]) * ph["food_smell"] * fc
+        pc = (cloud(s["pred"], ph["predator_radius"]) * (P["pred_rad"] > 0)[:, None, :]).sum(-1)
+        out += P["g_c"] * _tuning(ph["predator_molecule"], P["mu_c"], P["sg_c"]) * ph["predator_smell"] * pc
     # Pressione sui lati che toccano una parete.
     lo = s["pos"] <= r
     hi = s["pos"] >= jnp.stack([ph["arena_w"] - r, ph["arena_h"] - r])
@@ -347,6 +363,15 @@ def physics(ph, P, s, actions, upkeep):
                 pulse_phase=pulse, target=target, target_vel=tvel, t=t, done_t=done_t, **forage)
 
 
+def scent(P, s):
+    """Come `Foraging.scent`: forza della nube di ogni cibo e della sua traccia."""
+    tau = P["scent_tau"]
+    safe = jnp.maximum(tau, 1e-9)
+    on = jnp.where(tau > 0, 1.0 - jnp.exp(-s["age"] / safe), 1.0)
+    trace = jnp.where(tau > 0, jnp.exp(-s["ghost_t"] / safe), 0.0)
+    return on, trace
+
+
 def foraging(ph, P, s, pos, energy, active):
     """Come `Foraging.step`: prede e predatori si muovono, i predatori
     mordono, chi tocca il cibo lo mangia e il cibo ricompare dalla coda."""
@@ -384,10 +409,14 @@ def foraging(ph, P, s, pos, energy, active):
     idx = s["ptr"].astype(jnp.int32)[:, None] + 2 * (jnp.cumsum(eat, 1) - 1)
     a, b = q[idx % Q], q[(idx + 1) % Q]
     far = jnp.sqrt(((a - me) ** 2).sum(-1)) >= ph["food_min_dist"]
+    ghost = jnp.where(eat[..., None], food, s["ghost"])  # la nube del cibo mangiato resta lì e svanisce
     food = jnp.where(eat[..., None], jnp.where(far[..., None], a, b), food)
     n_eat = eat.sum(1)
     energy = jnp.where(n_eat > 0, jnp.minimum(energy + ph["food_energy"] * n_eat, ph["energy_init"]), energy)
-    return energy, dict(food=food, pred=pred, ptr=s["ptr"] + 2 * n_eat, eaten=s["eaten"] + n_eat)
+    age = jnp.where(eat, 0.0, s["age"] + dt)
+    ghost_t = jnp.where(eat, 0.0, s["ghost_t"] + dt)
+    return energy, dict(food=food, pred=pred, ptr=s["ptr"] + 2 * n_eat, eaten=s["eaten"] + n_eat, age=age,
+                        ghost=ghost, ghost_t=ghost_t)
 
 
 def make_step(net_type: str, n_hidden: int, substeps: int):

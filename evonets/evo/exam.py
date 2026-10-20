@@ -44,7 +44,7 @@ from . import ladder
 from .trial import Trial
 
 VERSION = 3  # 2: recettori universali; 3: sensi calibrati e movimento con il costo naturale
-LEVELS_VERSION = 4  # l'esame a livelli del mondo del cibo
+LEVELS_VERSION = 5  # esame a livelli del mondo del cibo; 5: odori, nube che sfugge, 4 cibi al massimo
 EXAM_SEED = 2_000_000  # le arene della prova k partono da EXAM_SEED + 10_000 * k
 
 # Ambiente d'esame, fissato al momento della versione 3. Sono i valori di
@@ -77,7 +77,13 @@ ENVIRONMENT = dict(
     predator_range=40.0, predator_radius=1.5, predator_damage=60.0, food_energy=40.0, food_min_dist=20.0,
     predator_min_dist=40.0, food_color=0.85, food_color_width=0.06, food_albedo=1.0, predator_color=0.05,
     predator_color_width=0.06, predator_albedo=0.8, predator_vibration=0.5, predator_vibration_freq=0.4,
+    forage_scent=0.0, food_molecule=0.6, food_smell=0.0, predator_molecule=0.35, predator_smell=0.0,
+    odor_range=25.0, scent_time_max=3.0,
 )
+
+# Il mondo del cibo dell'esame a livelli (versione 5): scritto qui, non letto
+# dalla corsa.
+FORAGE = dict(task="cibo", n_hazards=0, life_max=120.0, food_count_hard=4, food_smell=1.0, predator_smell=1.0)
 
 # Le costanti che invece vengono dalla corsa: riguardano la rete (forma,
 # tipo, come nasce) o l'evoluzione, non il mondo in cui l'agente vive. Ogni
@@ -125,14 +131,26 @@ TESTS = (
 )
 
 
+def level_world(d: dict) -> dict:
+    """Cosa c'è in un livello: cibi in arena, da mangiare, velocità di fuga,
+    tempo della nube, predatori."""
+    e = {**ENVIRONMENT, **FORAGE}
+    return {
+        "food": int(round(e["food_count_easy"] + (e["food_count_hard"] - e["food_count_easy"]) * d["forage_abundance"])),
+        "need": int(round(e["food_need_easy"] + (e["food_need_hard"] - e["food_need_easy"]) * d["forage_need"])),
+        "flee": e["prey_speed_max"] * d["forage_prey"],
+        "scent": e["scent_time_max"] * d["forage_scent"],
+        "predators": int(np.ceil(e["predator_count_max"] * d["forage_predators"])),
+    }
+
+
 def _level(k: int, n: int = 8) -> Test:
     x = ladder.TOP * k / (n - 1)
     d = ladder.at(x)
-    what = (f"{12 - round(9 * d['forage_abundance'])} cibi, "
-            f"{1 + round(4 * d['forage_need'])} da mangiare, prede {d['forage_prey']:.0%}, "
-            f"predatori {d['forage_predators']:.0%}")
-    return Test(f"L{k}", f"livello {k}", what, {"task": "cibo", "n_hazards": 0, "life_max": 120.0, **d},
-                task=Foraging)
+    w = level_world(d)
+    what = (f"{w['food']} cibi, {w['need']} da mangiare, prede a {w['flee']:.0f} u/s, nube in {w['scent']:.1f} s, "
+            f"{w['predators']} predatori")
+    return Test(f"L{k}", f"livello {k}", what, {**FORAGE, **d}, task=Foraging)
 
 
 # L'esame a livelli: posizioni 0, 3/7, ..., 3 della scala (manopole scritte

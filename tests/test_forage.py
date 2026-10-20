@@ -26,7 +26,7 @@ def test_the_world_starts_the_same_for_everyone_and_far_from_food():
 def test_dials_set_how_hard_the_world_is():
     _, w = forage(forage_abundance=1.0, forage_need=1.0, forage_prey=1.0, forage_predators=1.0)
     t = w.task
-    assert t.n_food == 3 and np.isclose(t.food_r, 2.0) and t.need == 5
+    assert t.n_food == 4 and np.isclose(t.food_r, 2.0) and t.need == 5
     assert t.prey_speed == 12.0 and t.n_pred == 3 and t.pred_speed == 15.0
 
 
@@ -117,3 +117,39 @@ def test_an_agent_killed_by_a_bite_cannot_eat_in_the_same_step():
     w.energy[0] = 1.0
     w.step(np.zeros((w.n, 2)))
     assert not w.alive[0] and t.eaten[0] == 0
+
+
+def test_food_and_predators_smell_with_their_own_molecule():
+    cfg, w = forage(forage_predators=1.0)
+    t = w.task
+    points = t.food[:2, 0] + np.array([[cfg.odor_range + t.food_r, 0.0]] * 2)  # una portata dal bordo del primo cibo
+    odors = dict(t.odors(w, points, np.arange(2)))
+    assert set(odors) == {cfg.food_molecule, cfg.predator_molecule}
+    alone = np.exp(-1.0)  # il primo cibo da solo; gli altri aggiungono la loro nube
+    assert (odors[cfg.food_molecule] >= alone - 1e-9).all()
+    cfg.food_smell = cfg.predator_smell = 0.0
+    assert t.odors(w, points, np.arange(2)) == []
+
+
+def test_a_new_food_cloud_forms_and_an_eaten_one_fades():
+    cfg, w = forage(forage_scent=1.0)
+    t = w.task
+    tau = cfg.scent_time_max
+    assert t.scent_tau == tau
+    old = t.food[0, 0].copy()
+    w.pos[0] = old  # l'agente 0 è sopra il primo cibo: lo mangia
+    w.step(np.zeros((w.n, 2)))
+    assert t.eaten[0] == 1 and t.age[0, 0] == 0.0 and t.ghost_t[0, 0] == 0.0
+    assert np.allclose(t.ghost[0, 0], old)
+    for _ in range(int(tau / cfg.dt)):  # dopo τ secondi
+        w.step(np.zeros((w.n, 2)))
+    on, trace = t.scent()
+    assert np.isclose(on[0, 0], 1 - np.exp(-1), atol=0.01) and np.isclose(trace[0, 0], np.exp(-1), atol=0.01)
+    assert on[1, 0] == 1.0 and trace[1, 0] < 1e-6  # chi non ha mangiato: nube formata da sempre, nessuna traccia
+
+
+def test_without_the_scent_dial_the_cloud_is_always_formed():
+    cfg, w = forage()
+    w.task.age[:] = 0.0
+    on, trace = w.task.scent()
+    assert (on == 1.0).all() and (trace == 0.0).all()

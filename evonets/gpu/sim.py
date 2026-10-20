@@ -55,7 +55,8 @@ def pack_params(world, ctrl) -> dict:
         cfg = world.cfg
         params.update(c_food=p.c_food, c_pred=p.c_pred, food_rad=np.where(task.food_on, task.food_r, 0.0),
                       pred_rad=np.where(task.pred_on, cfg.predator_radius, 0.0), food_r=task.food_r,
-                      need=task.need, prey_speed=task.prey_speed, pred_speed=task.pred_speed, queue=task.queue)
+                      need=task.need, prey_speed=task.prey_speed, pred_speed=task.pred_speed, queue=task.queue,
+                      scent_tau=task.scent_tau)
     return {k: _f(v) for k, v in params.items()}
 
 
@@ -76,7 +77,8 @@ def pack_state(world, ctrl, key) -> dict:
     if b.KIND == "spike-ei":
         state.update(charge=b.charge, spikes=b.spikes)
     if isinstance(task, Foraging):
-        state.update(food=task.food, pred=task.pred, ptr=task.ptr, eaten=task.eaten)
+        state.update(food=task.food, pred=task.pred, ptr=task.ptr, eaten=task.eaten, age=task.age,
+                     ghost=task.ghost, ghost_t=task.ghost_t)
     state = {k: _f(v) for k, v in state.items()}
     state["key"] = key
     return state
@@ -101,6 +103,7 @@ def unpack(world, ctrl, s: dict) -> None:
         t = world.task
         t.food, t.pred = g["food"], g["pred"]
         t.ptr, t.eaten = g["ptr"].astype(int), g["eaten"].astype(int)
+        t.age, t.ghost, t.ghost_t = g["age"], g["ghost"], g["ghost_t"]
     b.state, ctrl.obs, ctrl.adapt = g["state"], g["obs"], g["m"]
     if b.KIND == "spike-ei":
         b.charge, b.spikes = g["charge"], g["spikes"]

@@ -33,6 +33,9 @@ FORMAT = 7
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
 # Geni aggiunti dopo il formato 3, con il valore che vuol dire "assente".
 ADDED_IN_4 = {"r_tau": 0.0, "r_sub": 0.0, "r_div": 0.0}
+# Costanti del mondo aggiunte dopo, con il valore che lascia il mondo com'era:
+# una corsa salvata prima riparte nello stesso mondo (il registro lo annota).
+ABSENT_CONFIG = {"food_smell": 0.0, "predator_smell": 0.0, "forage_scent": 0.0}
 
 
 def code_version() -> str:
@@ -424,11 +427,15 @@ class Evolution:
                              "universali: non si può più caricare")
         unknown = {}
         fields = {f.name for f in dataclasses.fields(cfg)}
-        for k, v in json.loads(str(d["config"])).items():
+        saved = json.loads(str(d["config"]))
+        for k, v in saved.items():
             if k in fields:
                 setattr(cfg, k, v)
             else:  # costante che questo codice non conosce più
                 unknown[k] = v
+        absent = {k: v for k, v in ABSENT_CONFIG.items() if k not in saved}
+        for k, v in absent.items():
+            setattr(cfg, k, v)
 
         base = 1 if str(d["net_type"]) == "rate" else 3  # geni propri prima della plasticità
 
@@ -480,6 +487,8 @@ class Evolution:
             resumed["note"] = f"salvataggio di formato {fmt}: convertito ({'; '.join(parts)})"
         if unknown:
             resumed["note"] = "costanti salvate che questo codice non conosce più: " + ", ".join(unknown)
+        if absent:
+            resumed["absent"] = "costanti nate dopo questo salvataggio, spente: " + ", ".join(absent)
         evo.log.append(resumed)
         evo._seen = dataclasses.asdict(cfg)
         return evo

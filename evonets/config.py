@@ -208,13 +208,14 @@ class Config:
     # Il mondo del cibo. Ogni agente ha la sua copia di cibo e predatori.
     # Manopole della difficoltà, da 0 (basico) a 1 (complesso); le muove la
     # progressione adattiva (evo/ladder.py).
-    forage_abundance: float = 0.0  # da 12 cibi di raggio 4 a 3 di raggio 2
+    forage_abundance: float = 0.0  # da 12 cibi di raggio 4 a 4 di raggio 2
     forage_need: float = 0.0  # cibi da mangiare per riprodursi: da 1 a 5
     forage_prey: float = 0.0  # da cibo fermo a prede che fuggono a 12 u/s
+    forage_scent: float = 0.0  # da nube d'odore istantanea a nube che si forma e svanisce in scent_time_max
     forage_predators: float = 0.0  # da nessuno a 3 predatori a 15 u/s
     # Estremi delle manopole.
     food_count_easy: int = 12
-    food_count_hard: int = 3
+    food_count_hard: int = 4  # con 3 la riuscita crollava (dal 25% al 14%): un gradino, non una salita
     food_radius_easy: float = 4.0
     food_radius_hard: float = 2.0
     food_need_easy: int = 1
@@ -240,6 +241,18 @@ class Config:
     predator_albedo: float = 0.8
     predator_vibration: float = 0.5
     predator_vibration_freq: float = 0.4
+    # Odori (docs/SPEC_MONDO.md, sezione 9): il cibo e i predatori rilasciano
+    # una molecola loro; diffusione e degradazione fanno una nube stabile
+    # forza · exp(-d / odor_range), d dal bordo. Con forage_scent > 0 la nube
+    # di un cibo appena comparso si forma in τ = forage_scent · scent_time_max
+    # secondi (1 - e^(-t/τ)) e quella di un cibo mangiato svanisce nello
+    # stesso tempo (e^(-t/τ)): una traccia ingannevole.
+    food_molecule: float = 0.6
+    food_smell: float = 1.0
+    predator_molecule: float = 0.35
+    predator_smell: float = 1.0
+    odor_range: float = 25.0  # u
+    scent_time_max: float = 3.0  # s, con la manopola a 1
     # La scala di difficoltà (evo/ladder.py): "" = nessuna, "scala" =
     # progressione adattiva, "basico" / "complesso" = controlli con le
     # manopole ferme a 0 / a 1. Le soglie sono strumenti di addestramento.

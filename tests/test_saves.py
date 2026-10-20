@@ -42,3 +42,21 @@ def test_saved_config_is_complete_json(tmp_path):
     assert int(d["format"]) == 7
     assert json.loads(str(d["config"]))["energy_init"] == e.cfg.energy_init
     assert json.loads(str(d["log"]))[0]["code"]
+
+
+def test_a_run_saved_before_the_odors_resumes_without_them(tmp_path):
+    import json
+
+    cfg = Config(task="cibo", n_hazards=0, population=10, net_hidden_slots=4, engine="numpy")
+    path = tmp_path / "vecchia.npz"
+    Evolution(cfg, 3).save(path)
+    with np.load(path) as d:
+        data = dict(d)
+    old = json.loads(str(data["config"]))
+    for k in ("food_smell", "predator_smell", "forage_scent"):
+        del old[k]  # come un salvataggio fatto prima degli odori
+    data["config"] = json.dumps(old)
+    np.savez_compressed(path, **data)
+    evo = Evolution.load(Config(), path)
+    assert evo.cfg.food_smell == 0.0 and evo.cfg.predator_smell == 0.0
+    assert "food_smell" in evo.log[-1]["absent"]

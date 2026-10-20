@@ -125,7 +125,8 @@ def test_finished_worlds_stand_still_while_others_go_on():
 
 # --- Il mondo del cibo (docs/SPEC_MONDO.md) ---------------------------------
 
-FORAGE_ALL = dict(task="cibo", forage_abundance=0.5, forage_need=1.0, forage_prey=1.0, forage_predators=1.0)
+FORAGE_ALL = dict(task="cibo", forage_abundance=0.5, forage_need=1.0, forage_prey=1.0, forage_predators=1.0,
+                  forage_scent=1.0)
 
 
 def forage_setup(net="rate", n=12, **kw):
@@ -138,6 +139,10 @@ def forage_setup(net="rate", n=12, **kw):
     # Cibo e predatori sparsi vicino agli agenti, diversi in ogni copia.
     t.food = np.clip(w.pos[:, None, :] + rng.normal(0, 12, t.food.shape), 3.0, 137.0)
     t.pred = np.clip(w.pos[:, None, :] + rng.normal(0, 15, t.pred.shape), 3.0, 137.0)
+    # Nubi a metà: cibi appena comparsi e tracce di cibi appena mangiati.
+    t.age = rng.uniform(0.0, 4.0, t.age.shape)
+    t.ghost = np.clip(w.pos[:, None, :] + rng.normal(0, 12, t.ghost.shape), 3.0, 137.0)
+    t.ghost_t = rng.uniform(0.0, 4.0, t.ghost_t.shape)
     return cfg, w, ctrl
 
 
@@ -161,7 +166,8 @@ def test_foraging_physics_matches_the_world():
         s = {**s, **engine.physics(ph, P, s, jnp.asarray(a, jnp.float32), P["upkeep"])}
     t = w.task
     assert t.eaten.sum() > 0 and (w.energy < cfg.energy_init).any()
-    for k, ref in (("pos", w.pos), ("energy", w.energy), ("food", t.food), ("pred", t.pred)):
+    for k, ref in (("pos", w.pos), ("energy", w.energy), ("food", t.food), ("pred", t.pred), ("age", t.age),
+                   ("ghost", t.ghost), ("ghost_t", t.ghost_t)):
         assert np.allclose(np.asarray(s[k]), ref, atol=2e-3), k
     assert np.array_equal(np.asarray(s["eaten"]), t.eaten) and np.array_equal(np.asarray(s["ptr"]), t.ptr)
     assert np.array_equal(np.asarray(s["alive"]) > 0, w.alive) and np.array_equal(np.asarray(s["done"]) > 0, w.done)

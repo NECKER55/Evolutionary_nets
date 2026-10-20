@@ -156,10 +156,12 @@ def _toxin_kernel(points, hz_pos, hz_r, falloff, leak, smell_range):
     return out
 
 
-def chemicals(cfg, world, points: np.ndarray) -> list[tuple[float, np.ndarray]]:
+def chemicals(cfg, world, points: np.ndarray, agent: np.ndarray | None = None) -> list[tuple[float, np.ndarray]]:
     """Concentrazioni nei punti (K, 2): [(molecola, concentrazione (K,))].
     Dentro una zona di veleno la tossina è l'intensità del danno; fuori, se
-    `hazard_smell` > 0, un odore che cala con la distanza dal bordo."""
+    `hazard_smell` > 0, un odore che cala con la distanza dal bordo. Gli
+    odori del compito (cibo, predatori) sono nella copia di mondo
+    dell'agente a cui appartiene ogni punto (`agent`, (K,))."""
     hz = world.hazards
     tox = _toxin_kernel(np.ascontiguousarray(points, dtype=float), np.ascontiguousarray(hz.pos, dtype=float).reshape(-1, 2),
                         np.ascontiguousarray(hz.radius, dtype=float), float(cfg.hazard_falloff),
@@ -169,6 +171,8 @@ def chemicals(cfg, world, points: np.ndarray) -> list[tuple[float, np.ndarray]]:
     if cfg.target_smell > 0.0 and hasattr(task, "target"):
         d = np.linalg.norm(points - task.target, axis=1) - task.radius
         out.append((cfg.target_molecule, cfg.target_smell * np.exp(-np.maximum(d, 0.0) / cfg.smell_range)))
+    if hasattr(task, "odors") and agent is not None:
+        out += task.odors(world, points, agent)
     return out
 
 

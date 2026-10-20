@@ -18,7 +18,8 @@ def test_one_position_sums_up_the_whole_ladder():
     assert ladder.at(0.0) == dict.fromkeys(ladder.DIALS, 0.0)
     assert ladder.at(ladder.TOP) == dict.fromkeys(ladder.DIALS, 1.0)
     d = ladder.at(1.5)  # primo stadio finito, prede a metà, predatori assenti
-    assert d == {"forage_abundance": 1.0, "forage_need": 1.0, "forage_prey": 0.5, "forage_predators": 0.0}
+    assert d == {"forage_abundance": 1.0, "forage_need": 1.0, "forage_prey": 0.5, "forage_scent": 0.5,
+                 "forage_predators": 0.0}
     cfg = forage(**d)
     assert ladder.position(cfg) == 1.5
 

@@ -1,7 +1,8 @@
 """La scala di difficoltà del mondo del cibo (docs/SPEC_MONDO.md, punto 3).
 
 Le manopole (`forage_*` nella configurazione) salgono a stadi, uno alla volta:
-prima abbondanza e cibi necessari insieme, poi le prede, poi i predatori.
+prima abbondanza e cibi necessari insieme, poi il cibo che sfugge (prede che
+scappano e nube d'odore che si forma e svanisce), poi i predatori.
 Tutta la scala si riassume quindi in una sola **posizione** x tra 0 (tutto
 basico) e 3 (tutto complesso): lo stadio i ha le sue manopole a
 clip(x - i, 0, 1). Salire muove il primo stadio non ancora al massimo,
@@ -23,7 +24,7 @@ Modi (`cfg.ladder`): "scala" = progressione adattiva; "basico" e
 
 import numpy as np
 
-STAGES = (("forage_abundance", "forage_need"), ("forage_prey",), ("forage_predators",))
+STAGES = (("forage_abundance", "forage_need"), ("forage_prey", "forage_scent"), ("forage_predators",))
 DIALS = tuple(d for stage in STAGES for d in stage)
 TOP = float(len(STAGES))
 MODES = ("", "scala", "basico", "complesso")
@@ -38,6 +39,16 @@ def position(cfg) -> float:
     """La posizione della scala in cui stanno le manopole della
     configurazione (la media di ogni stadio, sommata)."""
     return float(sum(np.mean([getattr(cfg, d) for d in stage]) for stage in STAGES))
+
+
+STAGE_NAMES = ("abbondanza e cibi necessari", "prede e odore che sfugge", "predatori")
+
+
+def stage(cfg) -> tuple[int, float]:
+    """Lo stadio in corso (0, 1, 2) e quanto è avanti, da 0 a 1."""
+    x = position(cfg)
+    i = min(int(x), len(STAGES) - 1)
+    return i, x - i
 
 
 def dials(cfg) -> dict[str, float]:

@@ -62,6 +62,9 @@ class MovingTarget(ReachTarget):
         self.target = np.clip(self.target, r, hi)
 
 
+FORMED = 1e6  # s: una nube in equilibrio da sempre (o una traccia svanita da sempre)
+
+
 def lerp(a, b, t):
     return a + (b - a) * t
 
@@ -79,6 +82,11 @@ class Foraging:
     a sorte all'inizio dell'arena (comune a tutti, ognuno la scorre per conto
     suo): niente numeri casuali durante la vita, così i due motori (NumPy e
     GPU) fanno esattamente la stessa cosa.
+
+    Odori: cibo e predatori rilasciano una molecola loro (`odors`). La nube di
+    un cibo appena comparso si forma in τ secondi e quella di un cibo mangiato
+    resta nel punto dove era e svanisce nello stesso tempo; τ cresce con la
+    manopola `forage_scent` (0 = nube sempre in equilibrio).
     """
 
     name = "nutrirsi"
@@ -108,6 +116,10 @@ class Foraging:
         self.pred_on = np.zeros((n, P), dtype=bool)
         self.pred_on[:, : self.n_pred] = True
         self.eaten = np.zeros(n, dtype=int)
+        self.scent_tau = cfg.forage_scent * cfg.scent_time_max
+        self.age = np.full((n, K), FORMED)  # da quanto c'è il cibo di ogni posto (s)
+        self.ghost = self.food.copy()  # dove era il cibo mangiato l'ultima volta
+        self.ghost_t = np.full((n, K), FORMED)  # da quanto è stato mangiato (s)
 
     def spawn_ok(self, world, pos: np.ndarray) -> np.ndarray:
         cfg = world.cfg
@@ -135,10 +147,38 @@ class Foraging:
         kinds = np.r_[np.zeros(self.food.shape[1], dtype=int), np.ones(self.pred.shape[1], dtype=int)]
         return pos, radius, kinds
 
+    def scent(self) -> tuple[np.ndarray, np.ndarray]:
+        """Forza della nube di ogni cibo e della sua traccia (N, K), da 0 a 1."""
+        if self.scent_tau <= 0.0:
+            return np.ones_like(self.age), np.zeros_like(self.ghost_t)
+        return 1.0 - np.exp(-self.age / self.scent_tau), np.exp(-self.ghost_t / self.scent_tau)
+
+    def odors(self, world, points: np.ndarray, agent: np.ndarray) -> list[tuple[float, np.ndarray]]:
+        """Le sostanze nei punti (M, 2), ciascuno del corpo dell'agente
+        `agent` (M,): [(molecola, concentrazione (M,))]. La nube cala come
+        exp(-d / odor_range), con d dal bordo dell'oggetto."""
+        cfg = world.cfg
+        lam = cfg.odor_range
+        out = []
+        if cfg.food_smell > 0.0:
+            on, trace = self.scent()
+            p = points[:, None, :]
+            d = np.maximum(np.linalg.norm(p - self.food[agent], axis=2) - self.food_r, 0.0)
+            dg = np.maximum(np.linalg.norm(p - self.ghost[agent], axis=2) - self.food_r, 0.0)
+            c = (on[agent] * np.exp(-d / lam) + trace[agent] * np.exp(-dg / lam)) * self.food_on[agent]
+            out.append((cfg.food_molecule, cfg.food_smell * c.sum(axis=1)))
+        if cfg.predator_smell > 0.0 and self.n_pred:
+            d = np.maximum(np.linalg.norm(points[:, None, :] - self.pred[agent], axis=2) - cfg.predator_radius, 0.0)
+            c = np.exp(-d / lam) * self.pred_on[agent]
+            out.append((cfg.predator_molecule, cfg.predator_smell * c.sum(axis=1)))
+        return out
+
     def step(self, world) -> None:
         """Prede e predatori si muovono; chi tocca il cibo lo mangia; chi è
         toccato da un predatore perde energia. Solo per chi è in gara."""
         cfg, dt = world.cfg, world.cfg.dt
+        self.age += dt
+        self.ghost_t += dt
         active = world.alive & ~world.done & (world.energy > 0.0)  # chi è morto ora non mangia più
         me = world.pos[:, None, :]
         # Prede: fuggono dall'agente quando è vicino, rimbalzando sulle pareti.
@@ -166,6 +206,7 @@ class Foraging:
         eat = (d <= self.food_r + cfg.agent_radius) & self.food_on & active[:, None]
         if eat.any():
             for i, k in np.argwhere(eat):
+                self.ghost[i, k], self.ghost_t[i, k], self.age[i, k] = self.food[i, k], 0.0, 0.0
                 a, b = self.queue[self.ptr[i] % self.QUEUE], self.queue[(self.ptr[i] + 1) % self.QUEUE]
                 far = np.linalg.norm(a - world.pos[i]) >= cfg.food_min_dist
                 self.food[i, k] = a if far else b
