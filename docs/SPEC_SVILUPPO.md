@@ -421,6 +421,15 @@ la prova è troppo breve per dire se aiuta.
 neuroni, tabella di affinità nell'esploratore, statistiche (marcatori, tipi,
 uso dei modulatori). L'architettura non si impone.
 
+*Fase 5 fatta il 2026-10-21* (211 test). Colore dell'identità: ogni
+marcatore ha il colore della sua famiglia (tinta dall'identità della
+famiglia, quindi stabile tra copie e discendenti), ogni cellula la miscela
+pesata per espressione; tipi = gruppi di cellule che esprimono ogni marcatore
+entro 0,25. Esploratore: colore interno dei neuroni, tabella di affinità con
+gradienti, marcatori espressi nei dettagli; pannello dell'arena: anello
+dell'identità. Statistiche per generazione: `markers`, `types`, `value`
+(forza media dei nuclei di valore), anche nella panoramica.
+
 **Fase 6 — verifiche (13).** Controllo con lo XOR (diretto contro sviluppo);
 "un neurone in più"; confronto con più semi in modalità "cervello" (diretto,
 diretto + plasticità, sviluppo, sviluppo + valore), regole bloccate, misure

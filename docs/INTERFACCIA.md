@@ -187,6 +187,17 @@ guarda, l'apertura e, per ogni fenomeno, la sensibilità g, la quota sul totale
 e la sintonia (centro ± larghezza). In cima alla rete ci sono il cablaggio e
 quanta energia costano in tutto corpo e cervello al secondo.
 
+**Con lo sviluppo** (genoma "sviluppo") il colore di ogni cellula dice la sua
+**identità**: la miscela dei colori dei marcatori che esprime, più luminosa
+quanto più li esprime. Ogni marcatore ha il colore della sua famiglia, quindi
+un marcatore e le sue copie hanno lo stesso colore, in tutti gli individui
+della stessa discendenza. Due neuroni dello stesso colore si legano agli
+stessi partner: sono dello stesso **tipo**. Nell'esploratore è il colore
+interno dei neuroni (e un pallino dentro i motori e i recettori); nel pannello
+dell'arena un anello attorno ai neuroni interni. In cima alla rete si leggono
+quanti marcatori ha l'individuo e quanti tipi di neuroni interni; nei
+dettagli di un neurone, quanto esprime ogni marcatore.
+
 ## L'esploratore delle reti
 
 `I` apre a tutto schermo lo stesso elenco e la stessa rete della pagina
@@ -195,6 +206,13 @@ interno o motore), una colonna per sorgente (recettori | interni | motori). Colo
 peso effettivo, grigio = gene latente (collegamento scritto nel genoma ma con un
 capo spento), righe scure = neuroni spenti. Passando col mouse su una cella se
 ne legge il valore; il clic su una riga sceglie quel neurone.
+
+Con lo sviluppo, sotto la matrice c'è la **tabella di affinità**: quanto ogni
+marcatore sull'assone (righe) si lega a ogni marcatore sul bersaglio
+(colonne), arancio se il collegamento nasce eccitatorio, azzurro se
+inibitorio, più intenso se più forte; ai bordi il colore di ogni marcatore e,
+a destra, i suoi gradienti lungo x e y (come Eph ed efrine). Con lo sviluppo la
+matrice sopra è il cervello **sviluppato** (dopo il grembo), non un gene.
 
 `T` prova la rete scelta, `X` scrive il genoma completo (blocco per blocco, con i
 geni latenti) in un file di testo in `runs/genomi/`, `Esc` torna indietro. Il
