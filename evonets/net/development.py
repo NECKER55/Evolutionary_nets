@@ -82,7 +82,9 @@ def develop(g, cfg, rng: np.random.Generator, gain_index: int) -> None:
     reach = np.exp(g.meta[:, _conn_range_index()])
     p = connect_prob(cfg, dist, g.n_rec, reach) * (1.0 - np.exp(-np.abs(a)))
     g.conn = rng.random(p.shape) < p
-    gain = np.exp(g.traits[:, :, gain_index])  # (N, T)
+    from .brain import scale_gene
+
+    gain = scale_gene(g.traits[:, :, gain_index])  # (N, T)
     g.weights = np.clip(a * gain[:, :, None], -cfg.synapse_max, cfg.synapse_max) * g.conn
 
 

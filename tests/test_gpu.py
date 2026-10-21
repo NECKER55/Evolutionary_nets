@@ -149,7 +149,7 @@ def test_finished_worlds_stand_still_while_others_go_on():
 # --- Il mondo del cibo (docs/SPEC_MONDO.md) ---------------------------------
 
 FORAGE_ALL = dict(task="cibo", forage_abundance=0.5, forage_need=1.0, forage_prey=1.0, forage_predators=1.0,
-                  forage_scent=1.0)
+                  forage_scent=1.0, forage_obstacles=1.0)
 
 
 def forage_setup(net="rate", n=12, **kw):

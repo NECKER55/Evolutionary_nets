@@ -54,7 +54,7 @@ def pack_params(world, ctrl) -> dict:
         params.update(keep_n=b.keep, active_n=b.active)
     if isinstance(task, Foraging):  # le manopole di questo mondo
         cfg = world.cfg
-        params.update(c_food=p.c_food, c_pred=p.c_pred, food_rad=np.where(task.food_on, task.food_r, 0.0),
+        params.update(c_food=p.c_food, c_pred=p.c_pred, c_rock=p.c_rock, rock=task.rock, rock_r=task.rock_r, food_rad=np.where(task.food_on, task.food_r, 0.0),
                       pred_rad=np.where(task.pred_on, cfg.predator_radius, 0.0), food_r=task.food_r,
                       need=task.need, prey_speed=task.prey_speed, pred_speed=task.pred_speed, queue=task.queue,
                       scent_tau=task.scent_tau)

@@ -45,8 +45,10 @@ from . import ladder
 from .trial import Trial
 
 VERSION = 3  # 2: recettori universali; 3: sensi calibrati e movimento con il costo naturale
-LEVELS_VERSION = 6  # esame a livelli del mondo del cibo; 5: odori, nube che sfugge, 4 cibi al massimo;
-# 6: fino a 10 cibi in 240 s, cibo da 100 di energia, un'arena per agente
+_LEVELS_V6 = 6  # esame a livelli del mondo del cibo; 5: odori, nube che sfugge, 4 cibi al massimo;
+# 6: fino a 10 cibi in 240 s, cibo da 100 di energia, un'arena per agente;
+# 7: quarto stadio, le rocce (i livelli coprono la scala da 0 a 4)
+LEVELS_VERSION = 7
 EXAM_SEED = 2_000_000  # le arene della prova k partono da EXAM_SEED + 10_000 * k
 
 # Ambiente d'esame, fissato al momento della versione 3. Sono i valori di
@@ -74,6 +76,8 @@ ENVIRONMENT = dict(
     receptor_scale_thermal=100.0, receptor_scale_magnetic=100.0, receptor_scale_internal=70.0,
     # Il mondo del cibo (non usato dalla versione 3, che è nel mondo del bersaglio).
     task='bersaglio', forage_abundance=0.0, forage_need=0.0, forage_prey=0.0, forage_predators=0.0,
+    forage_obstacles=0.0, rock_count_max=8, rock_radius_min=6.0, rock_radius_max=16.0, rock_gap=10.0, rock_color=0.45,
+    rock_color_width=0.2, rock_albedo=0.4,
     food_count_easy=12, food_count_hard=3, food_radius_easy=4.0, food_radius_hard=2.0, food_need_easy=1,
     food_need_hard=5, prey_speed_max=12.0, prey_flee_range=15.0, predator_count_max=3, predator_speed_max=15.0,
     predator_range=40.0, predator_radius=1.5, predator_damage=60.0, food_energy=40.0, food_min_dist=20.0,
@@ -149,6 +153,7 @@ def level_world(d: dict) -> dict:
         "flee": e["prey_speed_max"] * d["forage_prey"],
         "scent": e["scent_time_max"] * d["forage_scent"],
         "predators": int(np.ceil(e["predator_count_max"] * d["forage_predators"])),
+        "rocks": int(np.ceil(e["rock_count_max"] * d.get("forage_obstacles", 0.0))),
     }
 
 
@@ -157,7 +162,7 @@ def _level(k: int, n: int = 8) -> Test:
     d = ladder.at(x)
     w = level_world(d)
     what = (f"{w['food']} cibi, {w['need']} da mangiare, prede a {w['flee']:.0f} u/s, nube in {w['scent']:.1f} s, "
-            f"{w['predators']} predatori")
+            f"{w['predators']} predatori, {w['rocks']} rocce")
     return Test(f"L{k}", f"livello {k}", what, {**FORAGE, **d}, task=Foraging)
 
 

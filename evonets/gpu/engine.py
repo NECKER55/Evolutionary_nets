@@ -75,8 +75,8 @@ def light(ph, ox, oy, ang, hz_pos, hz_r, target, target_r, has_target, objects=N
     """Come `signals.light`: per ogni recettore (K) e direzione campione (M),
     luce delle pareti, del bersaglio e del veleno, mediata sulle direzioni.
     `objects` = (posizioni (K, O, 2), raggi (K, O), tipi (O,)) degli oggetti
-    opachi della copia di mondo di ogni recettore (cibo 0, predatori 1): se
-    c'è, si aggiungono la luce del cibo e quella dei predatori."""
+    opachi della copia di mondo di ogni recettore (cibo 0, predatori 1, rocce
+    2): se c'è, si aggiungono la luce del cibo, dei predatori e delle rocce."""
     W, H, L = ph["arena_w"], ph["arena_h"], ph["light_attenuation"]
     dx, dy = jnp.cos(ang), jnp.sin(ang)  # (K, M)
     ox, oy = ox[:, None], oy[:, None]
@@ -121,7 +121,8 @@ def light(ph, ox, oy, ang, hz_pos, hz_r, target, target_r, has_target, objects=N
     if objects is None:
         return (jnp.where(hit_t, 0.0, fade).mean(1), jnp.where(hit_t, fade, 0.0).mean(1), glow.mean(1))
     return (jnp.where(hit_t | hit_o, 0.0, fade).mean(1), jnp.where(hit_t, fade, 0.0).mean(1), glow.mean(1),
-            jnp.where(hit_o & (kind == 0), fade, 0.0).mean(1), jnp.where(hit_o & (kind == 1), fade, 0.0).mean(1))
+            jnp.where(hit_o & (kind == 0), fade, 0.0).mean(1), jnp.where(hit_o & (kind == 1), fade, 0.0).mean(1),
+            jnp.where(hit_o & (kind == 2), fade, 0.0).mean(1))
 
 
 def quanta(ph, P, s):
@@ -136,17 +137,18 @@ def quanta(ph, P, s):
     ang = (s["heading"][:, None, None] + P["angles"]).reshape(N * R, -1)
     forage = "food" in s
     if forage:
-        o_pos = jnp.repeat(jnp.concatenate([s["food"], s["pred"]], 1), R, axis=0)
-        o_r = jnp.repeat(jnp.concatenate([P["food_rad"], P["pred_rad"]], 1), R, axis=0)
-        o_kind = jnp.concatenate([jnp.zeros(s["food"].shape[1], jnp.int32), jnp.ones(s["pred"].shape[1], jnp.int32)])
-        wall, targ, glow, food, pred = light(ph, px, py, ang, hz_pos, hz_r, s["target"], P["target_r"],
-                                             P["has_target"], (o_pos, o_r, o_kind))
+        o_pos = jnp.repeat(jnp.concatenate([s["food"], s["pred"], P["rock"]], 1), R, axis=0)
+        o_r = jnp.repeat(jnp.concatenate([P["food_rad"], P["pred_rad"], P["rock_r"]], 1), R, axis=0)
+        o_kind = jnp.concatenate([jnp.zeros(s["food"].shape[1], jnp.int32), jnp.ones(s["pred"].shape[1], jnp.int32),
+                                  jnp.full(P["rock"].shape[1], 2, jnp.int32)])
+        wall, targ, glow, food, pred, rock = light(ph, px, py, ang, hz_pos, hz_r, s["target"], P["target_r"],
+                                                   P["has_target"], (o_pos, o_r, o_kind))
     else:
         wall, targ, glow = light(ph, px, py, ang, hz_pos, hz_r, s["target"], P["target_r"], P["has_target"])
     out = (P["c_wall"] * wall.reshape(N, R) + P["c_target"] * targ.reshape(N, R)
            + P["c_glow"] * glow.reshape(N, R))
     if forage:
-        out += P["c_food"] * food.reshape(N, R) + P["c_pred"] * pred.reshape(N, R)
+        out += P["c_food"] * food.reshape(N, R) + P["c_pred"] * pred.reshape(N, R) + P["c_rock"] * rock.reshape(N, R)
     # Sostanze: tossina (dentro: intensità; fuori: odore se c'è), odore del bersaglio.
     ex = px[:, None] - hz_pos[None, :, 0]
     ey = py[:, None] - hz_pos[None, :, 1]
@@ -178,6 +180,12 @@ def quanta(ph, P, s):
     hi = s["pos"] >= jnp.stack([ph["arena_w"] - r, ph["arena_h"] - r])
     press = (lo[:, None, 0] * jnp.maximum(0.0, -nx) + hi[:, None, 0] * jnp.maximum(0.0, nx)
              + lo[:, None, 1] * jnp.maximum(0.0, -ny) + hi[:, None, 1] * jnp.maximum(0.0, ny))
+    if forage:  # rocce toccate: preme il lato che guarda verso la roccia
+        d = P["rock"] - s["pos"][:, None, :]  # (N, Kr, 2)
+        dist = jnp.sqrt((d ** 2).sum(-1))
+        touch = (P["rock_r"] > 0) & (dist <= P["rock_r"] + r + 1e-6)
+        facing = (d[:, None, :, 0] * nx[..., None] + d[:, None, :, 1] * ny[..., None]) / jnp.maximum(dist, 1e-9)[:, None]
+        press = press + (touch[:, None, :] * jnp.maximum(0.0, facing)).sum(-1)
     out += P["c_press"] * press
     # Vibrazioni (bersaglio e veleno), dentro l'apertura del recettore.
     centre = s["heading"][:, None] + P["centre"]
@@ -347,7 +355,8 @@ def physics(ph, P, s, actions, upkeep):
     forage, pain = {}, jnp.minimum(toxicity, 1.0)
     taste = s["taste"] * jnp.exp(-dt / ph["taste_tau"])
     if "food" in s:
-        energy, forage, bitten = foraging(ph, P, s, pos, energy, active)
+        energy, forage, bitten, pos, vel, touch = foraging(ph, P, s, pos, vel, energy, active)
+        bump = bump | touch
         pain = jnp.minimum(pain + bitten * active, 1.0)  # un morso fa male
         taste = jnp.minimum(taste + (forage["eaten"] - s["eaten"]), 1.0)  # il gusto del cibo
     alive = (s["alive"] > 0) & (energy > 0.0)
@@ -378,11 +387,35 @@ def scent(P, s):
     return on, trace
 
 
-def foraging(ph, P, s, pos, energy, active):
-    """Come `Foraging.step`: prede e predatori si muovono, i predatori
-    mordono, chi tocca il cibo lo mangia e il cibo ricompare dalla coda."""
+def push_out(pos, rocks, rad, body, vel=None, restitution=0.0):
+    """Come `tasks.push_out`: fuori dalle rocce, una alla volta; pos (N, ..., 2),
+    rocks (N, Kr, 2), rad (N, Kr). Restituisce (pos, vel, contatto)."""
+    extra = pos.ndim - 2
+    touch = jnp.zeros(pos.shape[:-1], bool)
+    for k in list(range(rocks.shape[1])) * 2:  # come tasks.PUSH_PASSES
+        c = rocks[:, k].reshape((rocks.shape[0],) + (1,) * extra + (2,))
+        r = rad[:, k].reshape((rocks.shape[0],) + (1,) * extra)
+        d = pos - c
+        dist = jnp.sqrt((d ** 2).sum(-1))
+        lim = r + body
+        inside = (r > 0.0) & (dist < lim)
+        unit = jnp.where(dist[..., None] > 1e-9, d / jnp.maximum(dist, 1e-9)[..., None], jnp.array([1.0, 0.0]))
+        pos = jnp.where(inside[..., None], c + unit * lim[..., None], pos)
+        if vel is not None:
+            vn = (vel * unit).sum(-1)
+            vel = jnp.where((inside & (vn < 0.0))[..., None], vel - ((1.0 + restitution) * vn)[..., None] * unit, vel)
+        touch = touch | ((r > 0.0) & (dist <= lim + 1e-6))
+    return pos, vel, touch
+
+
+def foraging(ph, P, s, pos, vel, energy, active):
+    """Come `Foraging.step`: le rocce fermano l'agente, prede e predatori si
+    muovono, i predatori mordono, chi tocca il cibo lo mangia e il cibo
+    ricompare dalla coda (mai dentro una roccia)."""
     dt = ph["dt"]
     W, H = ph["arena_w"], ph["arena_h"]
+    rocks, rock_r = P["rock"], P["rock_r"]
+    pos, vel, touch = push_out(pos, rocks, rock_r, ph["agent_radius"], vel, ph["wall_restitution"])
     act = active & (energy > 0.0)
     me = pos[:, None, :]
     # Prede: fuggono dall'agente vicino.
@@ -392,6 +425,7 @@ def foraging(ph, P, s, pos, energy, active):
     flee = (d < ph["prey_flee_range"]) & (P["food_rad"][..., None] > 0) & act[:, None, None]
     food = food + jnp.where(flee, away / jnp.maximum(d, 1e-9) * P["prey_speed"] * dt, 0.0)
     food = jnp.clip(food, jnp.stack([fr, fr]), jnp.stack([W - fr, H - fr]))
+    food = push_out(food, rocks, rock_r, fr)[0]
     # Predatori: inseguono l'agente vicino e mordono a contatto.
     pr = ph["predator_radius"]
     pred = s["pred"]
@@ -401,6 +435,7 @@ def foraging(ph, P, s, pos, energy, active):
     chase = (d < ph["predator_range"]) & pred_on[..., None] & act[:, None, None]
     pred = pred + jnp.where(chase, toward / jnp.maximum(d, 1e-9) * jnp.minimum(P["pred_speed"] * dt, d), 0.0)
     pred = jnp.clip(pred, jnp.stack([pr, pr]), jnp.stack([W - pr, H - pr]))
+    pred = push_out(pred, rocks, rock_r, pr)[0]
     d = jnp.sqrt(((me - pred) ** 2).sum(-1))
     bitten = ((d <= pr + ph["agent_radius"]) & pred_on).sum(1)
     energy = jnp.maximum(energy - ph["predator_damage"] * dt * bitten * act, 0.0)
@@ -417,12 +452,13 @@ def foraging(ph, P, s, pos, energy, active):
     far = jnp.sqrt(((a - me) ** 2).sum(-1)) >= ph["food_min_dist"]
     ghost = jnp.where(eat[..., None], food, s["ghost"])  # la nube del cibo mangiato resta lì e svanisce
     food = jnp.where(eat[..., None], jnp.where(far[..., None], a, b), food)
+    food = push_out(food, rocks, rock_r, fr)[0]  # il cibo non ricompare dentro una roccia
     n_eat = eat.sum(1)
     energy = jnp.where(n_eat > 0, jnp.minimum(energy + ph["food_energy"] * n_eat, ph["energy_max"]), energy)
     age = jnp.where(eat, 0.0, s["age"] + dt)
     ghost_t = jnp.where(eat, 0.0, s["ghost_t"] + dt)
     return energy, dict(food=food, pred=pred, ptr=s["ptr"] + 2 * n_eat, eaten=s["eaten"] + n_eat, age=age,
-                        ghost=ghost, ghost_t=ghost_t), bitten
+                        ghost=ghost, ghost_t=ghost_t), bitten, pos, vel, touch
 
 
 def make_step(net_type: str, n_hidden: int, substeps: int):

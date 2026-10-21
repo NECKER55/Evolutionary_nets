@@ -187,3 +187,69 @@ def test_without_keep_living_a_mature_agent_stops_as_before():
     w.pos[0] = w.task.food[0, 0]
     w.step(np.zeros((w.n, 2)))
     assert w.done[0] and not w.racing[0]
+
+
+# --- Le rocce (quarto stadio) --------------------------------------------------
+
+def rocky(n=4, **kw):
+    cfg, w = forage(n, forage_obstacles=1.0, **kw)
+    return cfg, w, w.task
+
+
+def test_rocks_appear_with_the_fourth_dial_and_nothing_starts_inside_them():
+    cfg, w, t = rocky(n=20)
+    assert t.n_rock == cfg.rock_count_max and (t.rock_r > 0).all()
+    edge = lambda p, body: (np.linalg.norm(p[:, :, None, :] - t.rock[:, None], axis=3) - t.rock_r[:, None]
+                            - body).min(axis=2)
+    assert (edge(t.food, t.food_r) >= -1e-6).all() and (edge(t.pred, cfg.predator_radius) >= -1e-6).all()
+    assert (edge(w.pos[:, None, :], cfg.agent_radius) > 0).all()
+    _, plain = forage(n=4)
+    assert plain.task.n_rock == 0 and not (plain.task.rock_r > 0).any()
+
+
+def test_a_rock_stops_the_agent_and_presses_on_the_side_that_touches_it():
+    cfg, w, t = rocky(n=1)
+    w.pos[0] = [100.0, 100.0]
+    t.rock[0, 0], t.rock_r[0, 0] = [100.0 + 10.0 + cfg.agent_radius + 0.2, 100.0], 10.0
+    w.heading[0] = 0.0
+    t.rock_r[0, 1:] = 0.0  # una roccia sola
+    for _ in range(20):
+        w.step(np.array([[1.0, 0.0]]))
+    gap = np.linalg.norm(w.pos[0] - t.rock[0, 0]) - t.rock_r[0, 0] - cfg.agent_radius
+    assert abs(gap) < 1e-6 and w.bump[0]
+    toward = (t.rock[0, 0] - w.pos[0]) / np.linalg.norm(t.rock[0, 0] - w.pos[0])
+    normals = np.array([toward, -toward])  # verso la roccia e dalla parte opposta
+    press = signals.pressure(cfg, w, np.array([0, 0]), normals)
+    assert press[0] > 0.99 and press[1] == 0.0
+
+
+def test_a_rock_hides_what_is_behind_it_and_is_seen_grey():
+    cfg, w, t = rocky(n=1)
+    w.pos[0] = [100.0, 100.0]
+    t.rock_r[0] = 0.0
+    t.food[0, 0] = [130.0, 100.0]
+    look = lambda: signals.light(cfg, w, w.pos[:1], np.zeros((1, 1)), np.array([0]))
+    assert look()["cibo"][0] > 0
+    t.rock[0, 0], t.rock_r[0, 0] = [115.0, 100.0], 5.0
+    seen = look()
+    assert seen["cibo"][0] == 0.0 and seen["roccia"][0] > 0.4
+
+
+def test_food_never_comes_back_inside_a_rock():
+    cfg, w, t = rocky(n=6, forage_abundance=0.0, mature_keep_living=True)
+    inside = 0
+    for _ in range(300):
+        w.pos[:] = t.food[:, 0]  # ognuno sopra il suo primo cibo: lo mangia, e il cibo ricompare
+        w.energy[:] = 100.0
+        w.step(np.zeros((w.n, 2)))
+        d = np.linalg.norm(t.food[:, :, None, :] - t.rock[:, None], axis=3) - t.rock_r[:, None]
+        inside += int((d < t.food_r - 1e-6).sum())
+    assert t.eaten.sum() > 200 and inside == 0
+
+
+def test_the_ladder_has_a_fourth_stage_and_old_runs_open_without_rocks():
+    from evonets.evo import ladder
+
+    assert ladder.TOP == 4.0 and ladder.STAGE_NAMES[-1] == "rocce"
+    assert ladder.at(3.5)["forage_obstacles"] == 0.5 and ladder.at(3.5)["forage_predators"] == 1.0
+    assert ladder.at(2.5)["forage_obstacles"] == 0.0

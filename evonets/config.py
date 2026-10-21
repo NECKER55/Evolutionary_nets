@@ -297,6 +297,7 @@ class Config:
     forage_prey: float = 0.0  # da cibo fermo a prede che fuggono a 12 u/s
     forage_scent: float = 0.0  # da nube d'odore istantanea a nube che si forma e svanisce in scent_time_max
     forage_predators: float = 0.0  # da nessuno a 3 predatori a 15 u/s
+    forage_obstacles: float = 0.0  # da nessuna roccia a rock_count_max rocce
     # Estremi delle manopole.
     food_count_easy: int = 12
     forage_own_arena: bool = True  # ogni agente in un'arena sua (cibo e predatori in posti diversi)
@@ -326,6 +327,17 @@ class Config:
     predator_albedo: float = 0.8
     predator_vibration: float = 0.5
     predator_vibration_freq: float = 0.4
+    # Rocce (quarto stadio della scala): dischi fermi e opachi. Bloccano il
+    # passaggio (all'agente, alle prede e ai predatori: un rifugio) e la vista
+    # (nascondono il cibo); gli odori e le vibrazioni le scavalcano. Grigie
+    # e opache sull'asse della luce. Il cibo non nasce mai dentro una roccia.
+    rock_count_max: int = 8
+    rock_radius_min: float = 6.0
+    rock_radius_max: float = 16.0
+    rock_gap: float = 10.0  # passaggio minimo tra due rocce (non si sovrappongono)
+    rock_color: float = 0.45
+    rock_color_width: float = 0.2
+    rock_albedo: float = 0.4
     # Odori (docs/SPEC_MONDO.md, sezione 9): il cibo e i predatori rilasciano
     # una molecola loro; diffusione e degradazione fanno una nube stabile
     # forza · exp(-d / odor_range), d dal bordo. Con forage_scent > 0 la nube

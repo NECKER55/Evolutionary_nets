@@ -50,7 +50,7 @@ def _light_kernel(origins, angles, arena_w, arena_h, L, target, target_r, hz_pos
     wall = np.zeros(k_all)
     targ = np.zeros(k_all)
     glow = np.zeros(k_all)
-    kinds = np.zeros((k_all, 2))  # luce degli oggetti dell'agente: cibo, predatori
+    kinds = np.zeros((k_all, 3))  # luce degli oggetti dell'agente: cibo, predatori, rocce
     for k in prange(k_all):
         ox, oy = origins[k, 0], origins[k, 1]
         for j in range(m):
@@ -110,6 +110,7 @@ def _light_kernel(origins, angles, arena_w, arena_h, L, target, target_r, hz_pos
         glow[k] /= m
         kinds[k, 0] /= m
         kinds[k, 1] /= m
+        kinds[k, 2] /= m
     return wall, targ, glow, kinds
 
 
@@ -139,7 +140,8 @@ def light(cfg, world, origins: np.ndarray, angles: np.ndarray, agent: np.ndarray
         np.ascontiguousarray(hz.pos, dtype=float).reshape(-1, 2), np.ascontiguousarray(hz.radius, dtype=float),
         np.ascontiguousarray(agent, dtype=np.int64), np.ascontiguousarray(obj_pos, dtype=float),
         np.ascontiguousarray(obj_r, dtype=float), np.ascontiguousarray(obj_kind, dtype=np.int64))
-    return {"parete": wall, "bersaglio": targ, "veleno": glow, "cibo": kinds[:, 0], "predatore": kinds[:, 1]}
+    return {"parete": wall, "bersaglio": targ, "veleno": glow, "cibo": kinds[:, 0], "predatore": kinds[:, 1],
+            "roccia": kinds[:, 2]}
 
 
 @njit(cache=True, parallel=True)
@@ -180,13 +182,21 @@ def chemicals(cfg, world, points: np.ndarray, agent: np.ndarray | None = None) -
 
 def pressure(cfg, world, agent: np.ndarray, normals: np.ndarray) -> np.ndarray:
     """Pressione (K,) sui recettori la cui normale (K, 2), nel riferimento del
-    mondo, guarda una parete che l'agente sta toccando."""
+    mondo, guarda una parete o una roccia che l'agente sta toccando."""
     r = cfg.agent_radius
     pos = world.pos[agent]
     lo, hi = pos <= r, pos >= np.array([cfg.arena_w - r, cfg.arena_h - r])
     # Pareti toccate: sinistra, destra (asse x), in basso, in alto (asse y).
-    return (lo[:, 0] * np.maximum(0.0, -normals[:, 0]) + hi[:, 0] * np.maximum(0.0, normals[:, 0])
-            + lo[:, 1] * np.maximum(0.0, -normals[:, 1]) + hi[:, 1] * np.maximum(0.0, normals[:, 1]))
+    out = (lo[:, 0] * np.maximum(0.0, -normals[:, 0]) + hi[:, 0] * np.maximum(0.0, normals[:, 0])
+           + lo[:, 1] * np.maximum(0.0, -normals[:, 1]) + hi[:, 1] * np.maximum(0.0, normals[:, 1]))
+    task = world.task
+    if getattr(task, "n_rock", 0):  # rocce toccate: preme il lato che guarda verso la roccia
+        d = task.rock[agent] - pos[:, None, :]  # (K, Kr, 2)
+        dist = np.linalg.norm(d, axis=2)
+        touch = (task.rock_r[agent] > 0) & (dist <= task.rock_r[agent] + r + 1e-6)
+        facing = (d * normals[:, None, :]).sum(axis=2) / np.maximum(dist, 1e-9)
+        out = out + (touch * np.maximum(0.0, facing)).sum(axis=1)
+    return out
 
 
 def vibrations(cfg, world, points: np.ndarray, agent: np.ndarray | None = None) -> list[tuple[float, np.ndarray, np.ndarray]]:

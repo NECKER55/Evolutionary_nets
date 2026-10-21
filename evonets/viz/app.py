@@ -499,7 +499,8 @@ class RunScreen(Screen):
             return []
         i, f = ladder.stage(cfg)
         if cfg.ladder == "scala":
-            head = (f"stadio {i + 1}/3, {ladder.STAGE_NAMES[i]}: {f:.0%}" if ladder.position(cfg) < ladder.TOP
+            head = (f"stadio {i + 1}/{len(ladder.STAGES)}, {ladder.STAGE_NAMES[i]}: {f:.0%}"
+                    if ladder.position(cfg) < ladder.TOP
                     else "scala in cima: mondo complesso")
         else:
             head = {"basico": "controllo: sempre il mondo basico",
@@ -509,6 +510,8 @@ class RunScreen(Screen):
             prey += f", nube in {task.scent_tau:.1f} s"
         pred = (f"{task.n_pred} predatori a {task.pred_speed:.1f} u/s" if task.n_pred
                 else "nessun predatore" + (" (dallo stadio 3)" if cfg.ladder == "scala" else ""))
+        if task.n_rock:
+            pred += f"; {task.n_rock} rocce"
         return [head, f"ora: {task.n_food} cibi r{task.food_r:.1f}, servono {task.need}; {prey}; {pred}"]
 
     def _env_text(self) -> str:

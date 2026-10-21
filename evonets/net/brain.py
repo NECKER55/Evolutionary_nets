@@ -56,6 +56,18 @@ PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist
 GENES = PLASTIC + ("gain", "boost", "closure")
 
 
+# Un gene sposta una velocità o una forza al più di e^12 volte (circa
+# 160.000) rispetto al suo valore di partenza: oltre non ha più significato
+# fisico, e i numeri a 32 bit della GPU traboccherebbero (l'ampiezza delle
+# mutazioni è un gene e può arrivare a 100).
+GENE_SPAN = 12.0
+
+
+def scale_gene(gene):
+    """e^gene, con il gene limitato a ±GENE_SPAN."""
+    return np.exp(np.clip(gene, -GENE_SPAN, GENE_SPAN))
+
+
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
@@ -530,17 +542,17 @@ class Brains:
         # Plasticità: M arriva a ogni neurone dai modulatori, per diffusione,
         # calando con la distanza (trasmissione di volume).
         p = self.traits[:, :, self.BASE_TRAITS :]
-        self.eta, self.rule = cfg.plasticity_initial_rate * np.exp(p[..., 0]), p[..., 1:5]
-        self.hebb = cfg.hebb_initial_rate * np.exp(p[..., 6])  # (N, T), del neurone che riceve
+        self.eta, self.rule = cfg.plasticity_initial_rate * scale_gene(p[..., 0]), p[..., 1:5]
+        self.hebb = cfg.hebb_initial_rate * scale_gene(p[..., 6])  # (N, T), del neurone che riceve
         d = self.traits[:, :, self.GAIN + 1 :]
-        self.boost = cfg.critical_initial_boost * np.exp(d[..., 0])  # (N, T): B
-        self.closure = cfg.critical_initial_tau * np.exp(d[..., 1])  # (N, T): τ_c, s
+        self.boost = cfg.critical_initial_boost * scale_gene(d[..., 0])  # (N, T): B
+        self.closure = cfg.critical_initial_tau * scale_gene(d[..., 1])  # (N, T): τ_c, s
         self.lived = np.zeros(self.n)  # secondi già vissuti in vite precedenti (li dà l'evoluzione)
-        self.value = cfg.value_initial * np.exp(g.value)  # (N, 2): forza dei nuclei di gusto e dolore
+        self.value = cfg.value_initial * scale_gene(g.value)  # (N, 2): forza dei nuclei di gusto e dolore
         self.target_act = sigmoid(p[..., 7])  # (N, T): a*
-        self.homeo = cfg.homeo_initial_rate * np.exp(p[..., 8])  # (N, T): h, per secondo
-        self.intrinsic = cfg.homeo_initial_rate * np.exp(p[..., 10])  # (N, T), per secondo
-        self.early_keep = np.exp(-cfg.dt / (cfg.early_initial_tau * np.exp(p[..., 9])))  # (N, T), per passo
+        self.homeo = cfg.homeo_initial_rate * scale_gene(p[..., 8])  # (N, T): h, per secondo
+        self.intrinsic = cfg.homeo_initial_rate * scale_gene(p[..., 10])  # (N, T), per secondo
+        self.early_keep = np.exp(-cfg.dt / (cfg.early_initial_tau * scale_gene(p[..., 9])))  # (N, T), per passo
         self.kmod = np.exp(-self.dist[:, :, R : R + H] / cfg.modulation_range) * mod[:, None, :]
         # Chi impara: con l'hebbiano di base e l'omeostasi, tutti (salvo plasticità spenta).
         self.learns = np.full(self.n, cfg.plasticity) & (

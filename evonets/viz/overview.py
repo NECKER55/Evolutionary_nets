@@ -22,6 +22,7 @@ from .render import (
     MODULATOR,
     PLAYER,
     PREDATOR,
+    ROCK,
     TARGET,
     TEXT,
     WALL,
@@ -33,8 +34,8 @@ BAND = (46, 52, 38)
 THIN = (88, 94, 112)  # la linea di ogni generazione: di sfondo, la media è quella da leggere
 WINDOW = 300  # generazioni mostrate nel grafico dei successi
 DONE_STAGE = (120, 96, 36)
-STAGE_NAMES = ("trovare il cibo", "inseguire il cibo che sfugge", "sfuggire ai predatori")
-STAGE_COLORS = (FOOD, (235, 150, 70), PREDATOR)
+STAGE_NAMES = ("trovare il cibo", "inseguire il cibo che sfugge", "sfuggire ai predatori", "muoversi tra le rocce")
+STAGE_COLORS = (FOOD, (235, 150, 70), PREDATOR, ROCK)
 CHANGE = 0.05  # differenza d'esame sotto la quale si parla di "stabile" (5 punti)
 
 
@@ -130,7 +131,7 @@ class Overview:
         # La barra: tre stadi, la parte fatta piena, il tratto percorso nelle
         # ultime 100 generazioni sotto, la posizione come una tacca.
         bar = pygame.Rect(x0, y + 4, w, 26)
-        seg = bar.w / 3
+        seg = bar.w / len(STAGE_NAMES)
         for i, name in enumerate(STAGE_NAMES):
             r = pygame.Rect(int(bar.x + i * seg), bar.y, int(seg) - 3, bar.h)
             pygame.draw.rect(s, IDLE, r, border_radius=4)
@@ -147,7 +148,8 @@ class Overview:
         y = bar.bottom + 14
 
         i, f = ladder.stage(cfg)
-        where = (f"Stadio {i + 1} di 3, {STAGE_NAMES[i]}: fatto al {pct(f)} (posizione {num(x, 2)} su 3)."
+        top = len(STAGE_NAMES)
+        where = (f"Stadio {i + 1} di {top}, {STAGE_NAMES[i]}: fatto al {pct(f)} (posizione {num(x, 2)} su {top})."
                  if x < ladder.TOP else "In cima alla scala: il mondo complesso.")
         y = para(s, app.font, where, x0, y, w, PLAYER)
         if hasattr(task, "need"):
@@ -221,16 +223,17 @@ class Overview:
 
     def _position(self, s, rect, hist) -> None:
         app = self.app
-        y = self._section(s, rect, "LA SCALA NEL TEMPO", "posizione da 0 a 3")
+        y = self._section(s, rect, "LA SCALA NEL TEMPO", f"posizione da 0 a {len(STAGE_NAMES)}")
         if not hist:
             return
         box = pygame.Rect(rect.x + 50, y + 4, rect.w - 70, rect.bottom - y - 26)
-        for i in range(3):  # una fascia per stadio, con il suo nome
-            top = box.bottom - box.h * (i + 1) / 3
+        n = len(STAGE_NAMES)
+        for i in range(n):  # una fascia per stadio, con il suo nome
+            top = box.bottom - box.h * (i + 1) / n
             img = app.small.render(STAGE_NAMES[i], True, STAGE_COLORS[i])
             s.blit(img, (box.right - img.get_width() - 4, top + 3))
         p = np.array([h.get("position", 0.0) for h in hist])
-        plot(s, box, app.small, ((p, PLAYER, 2),), ladder.TOP, (0, 1 / 3, 2 / 3, 1), "{:1.0f}")
+        plot(s, box, app.small, ((p, PLAYER, 2),), ladder.TOP, tuple(k / n for k in range(n + 1)), "{:1.0f}")
         self._x_labels(s, box, hist)
 
     # --- esame ------------------------------------------------------------

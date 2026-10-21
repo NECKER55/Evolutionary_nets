@@ -65,6 +65,34 @@ class MovingTarget(ReachTarget):
 FORMED = 1e6  # s: una nube in equilibrio da sempre (o una traccia svanita da sempre)
 
 
+PUSH_PASSES = 2  # le rocce non si toccano (`rock_gap`): una passata basta, la seconda è per sicurezza
+
+
+def push_out(pos, rocks, rad, body: float, vel=None, restitution: float = 0.0):
+    """Fuori dalle rocce: ogni punto (o corpo di raggio `body`) che sta dentro
+    una roccia viene spinto sul suo bordo; la velocità verso la roccia, se
+    data, rimbalza come su una parete. pos (N, ..., 2) con le rocce
+    dell'individuo: rocks (N, Kr, 2), rad (N, Kr) (0 = non c'è).
+    Restituisce (pos, vel, a contatto con una roccia (N, ...))."""
+    extra = pos.ndim - 2  # assi in più tra individuo e coordinate (oggetti)
+    touch = np.zeros(pos.shape[:-1], dtype=bool)
+    # Più passate: due rocce che si toccano possono rimandarsi un oggetto.
+    for k in list(range(rocks.shape[1])) * PUSH_PASSES:
+        c = rocks[:, k].reshape((len(rocks),) + (1,) * extra + (2,))
+        r = rad[:, k].reshape((len(rocks),) + (1,) * extra)
+        d = pos - c
+        dist = np.linalg.norm(d, axis=-1)
+        lim = r + body
+        inside = (r > 0.0) & (dist < lim)
+        unit = np.where(dist[..., None] > 1e-9, d / np.maximum(dist, 1e-9)[..., None], np.array([1.0, 0.0]))
+        pos = np.where(inside[..., None], c + unit * lim[..., None], pos)
+        if vel is not None:
+            vn = (vel * unit).sum(-1)
+            vel = np.where((inside & (vn < 0.0))[..., None], vel - ((1.0 + restitution) * vn)[..., None] * unit, vel)
+        touch |= (r > 0.0) & (dist <= lim + 1e-6)
+    return pos, vel, touch
+
+
 def lerp(a, b, t):
     return a + (b - a) * t
 
@@ -121,11 +149,49 @@ class Foraging:
         self.pred = np.broadcast_to(pred, (n, P, 2)).copy()
         self.pred_on = np.zeros((n, P), dtype=bool)
         self.pred_on[:, : self.n_pred] = True
+        # Rocce: fisse per tutta l'arena, in posti diversi per ognuno (come il cibo).
+        q = cfg.forage_obstacles
+        self.n_rock = int(np.ceil(cfg.rock_count_max * q)) if q > 0 else 0
+        Kr = cfg.rock_count_max
+        rmax = cfg.rock_radius_max
+        self.rock, self.rock_r = np.zeros((n, Kr, 2)), np.zeros((n, Kr))  # posti fissi: forma uguale a ogni livello
+        if self.n_rock:  # estratte solo se ci sono: senza rocce il mondo resta quello di prima
+            rocks, rad = self._place_rocks(cfg, rng, n if own else 1, Kr)
+            self.rock[:] = rocks
+            self.rock_r[:] = rad
+            self.rock_r[:, self.n_rock :] = 0.0  # le rocce che non ci sono
+        self.food = self._outside(self.food, self.food_r)
+        self.pred = self._outside(self.pred, cfg.predator_radius)
         self.eaten = np.zeros(n, dtype=int)
         self.scent_tau = cfg.forage_scent * cfg.scent_time_max
         self.age = np.full((n, K), FORMED)  # da quanto c'è il cibo di ogni posto (s)
         self.ghost = self.food.copy()  # dove era il cibo mangiato l'ultima volta
         self.ghost_t = np.full((n, K), FORMED)  # da quanto è stato mangiato (s)
+
+    @staticmethod
+    def _place_rocks(cfg, rng, copies: int, k: int) -> tuple[np.ndarray, np.ndarray]:
+        """k rocce per copia di mondo, a caso, che non si sovrappongono e
+        lasciano tra loro almeno `rock_gap` di passaggio (se non c'è posto,
+        una roccia resta più piccola)."""
+        rmax = cfg.rock_radius_max
+        pos, rad = np.zeros((copies, k, 2)), np.zeros((copies, k))
+        for j in range(k):  # una roccia alla volta, in tutte le copie insieme
+            r = rng.uniform(cfg.rock_radius_min, rmax, copies)
+            todo = np.ones(copies, dtype=bool)
+            for _ in range(100):
+                p = rng.uniform([rmax, rmax], [cfg.arena_w - rmax, cfg.arena_h - rmax], (copies, 2))
+                gaps = np.linalg.norm(pos[:, :j] - p[:, None], axis=2) - rad[:, :j] - r[:, None]
+                ok = todo & (gaps >= cfg.rock_gap).all(axis=1)
+                pos[ok, j], rad[ok, j] = p[ok], r[ok]
+                todo &= ~ok
+                if not todo.any():
+                    break
+            # chi non ha trovato posto resta senza questa roccia (raggio 0)
+        return pos, rad
+
+    def _outside(self, pos: np.ndarray, body: float) -> np.ndarray:
+        """Oggetti (N, K, 2) spinti fuori dalle rocce del loro individuo."""
+        return push_out(pos, self.rock, self.rock_r, body)[0] if self.n_rock else pos
 
     def _nearest(self, pos: np.ndarray, obj: np.ndarray, on: np.ndarray) -> np.ndarray:
         """Distanza di ogni agente (riga di `pos`) dall'oggetto acceso più
@@ -137,6 +203,9 @@ class Foraging:
         ok = self._nearest(pos, self.food, self.food_on) >= cfg.food_min_dist
         if self.n_pred:
             ok &= self._nearest(pos, self.pred, self.pred_on) >= cfg.predator_min_dist
+        if self.n_rock:  # non si nasce dentro una roccia
+            edge = np.linalg.norm(pos[:, None, :] - self.rock, axis=2) - self.rock_r
+            ok &= np.where(self.rock_r > 0, edge, np.inf).min(axis=1) >= cfg.agent_radius + 2.0
         return ok
 
     def spawned(self, world) -> None:
@@ -146,12 +215,14 @@ class Foraging:
 
     def discs(self, world):
         """Gli oggetti che si vedono, per agente: posizioni (N, O, 2), raggi
-        (N, O) (0 = non c'è) e tipo di ciascuno (O,): 0 cibo, 1 predatore."""
+        (N, O) (0 = non c'è) e tipo di ciascuno (O,): 0 cibo, 1 predatore,
+        2 roccia."""
         cfg = world.cfg
-        pos = np.concatenate([self.food, self.pred], axis=1)
+        pos = np.concatenate([self.food, self.pred, self.rock], axis=1)
         radius = np.concatenate([np.where(self.food_on, self.food_r, 0.0),
-                                 np.where(self.pred_on, cfg.predator_radius, 0.0)], axis=1)
-        kinds = np.r_[np.zeros(self.food.shape[1], dtype=int), np.ones(self.pred.shape[1], dtype=int)]
+                                 np.where(self.pred_on, cfg.predator_radius, 0.0), self.rock_r], axis=1)
+        kinds = np.r_[np.zeros(self.food.shape[1], dtype=int), np.ones(self.pred.shape[1], dtype=int),
+                      np.full(self.rock.shape[1], 2, dtype=int)]
         return pos, radius, kinds
 
     def scent(self) -> tuple[np.ndarray, np.ndarray]:
@@ -187,6 +258,10 @@ class Foraging:
         self.age += dt
         self.ghost_t += dt
         active = world.racing & (world.energy > 0.0)  # chi è morto ora non mangia più
+        if self.n_rock:  # le rocce fermano l'agente, come una parete
+            world.pos, world.vel, touch = push_out(world.pos, self.rock, self.rock_r, cfg.agent_radius,
+                                                   world.vel, cfg.wall_restitution)
+            world.bump |= touch
         me = world.pos[:, None, :]
         # Prede: fuggono dall'agente quando è vicino, rimbalzando sulle pareti.
         if self.prey_speed > 0:
@@ -195,7 +270,7 @@ class Foraging:
             flee = (d < cfg.prey_flee_range) & self.food_on[..., None] & active[:, None, None]
             step = np.where(flee, away / np.maximum(d, 1e-9) * self.prey_speed * dt, 0.0)
             r = self.food_r
-            self.food = np.clip(self.food + step, [r, r], [cfg.arena_w - r, cfg.arena_h - r])
+            self.food = self._outside(np.clip(self.food + step, [r, r], [cfg.arena_w - r, cfg.arena_h - r]), r)
         # Predatori: inseguono l'agente quando è abbastanza vicino.
         if self.n_pred:
             toward = me - self.pred
@@ -203,7 +278,7 @@ class Foraging:
             chase = (d < cfg.predator_range) & self.pred_on[..., None] & active[:, None, None]
             step = np.where(chase, toward / np.maximum(d, 1e-9) * np.minimum(self.pred_speed * dt, d), 0.0)
             r = cfg.predator_radius
-            self.pred = np.clip(self.pred + step, [r, r], [cfg.arena_w - r, cfg.arena_h - r])
+            self.pred = self._outside(np.clip(self.pred + step, [r, r], [cfg.arena_w - r, cfg.arena_h - r]), r)
             d = np.linalg.norm(world.pos[:, None, :] - self.pred, axis=2)
             bitten = ((d <= cfg.predator_radius + cfg.agent_radius) & self.pred_on).sum(axis=1)
             world.energy = np.maximum(world.energy - cfg.predator_damage * dt * bitten * active, 0.0)
@@ -219,6 +294,7 @@ class Foraging:
                 far = np.linalg.norm(a - world.pos[i]) >= cfg.food_min_dist
                 self.food[i, k] = a if far else b
                 self.ptr[i] += 2
+            self.food = self._outside(self.food, self.food_r)  # il cibo non ricompare dentro una roccia
             n_eat = eat.sum(axis=1)
             self.eaten += n_eat
             world.taste = np.minimum(world.taste + n_eat, 1.0)  # il gusto del cibo

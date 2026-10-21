@@ -189,6 +189,17 @@ Il progetto completo è in [SPEC_MONDO.md](SPEC_MONDO.md).
 | prede (`forage_prey`) | il cibo sta fermo | il cibo fugge a 12 u/s dall'agente entro 15 u |
 | nube d'odore (`forage_scent`) | sempre formata | si forma in 3 s quando il cibo compare; quella di un cibo mangiato resta dov'era e svanisce in 3 s |
 | predatori (`forage_predators`) | nessuno | 3 predatori (quasi blu, vibrano) che inseguono entro 40 u a 15 u/s e a contatto tolgono 60 di energia al secondo |
+| rocce (`forage_obstacles`) | nessuna | 8 rocce grigie di raggio 6–16, ferme, che non si toccano (tra due c'è sempre un passaggio di almeno 10 u) |
+
+- **Le rocce** (quarto stadio): sono opache e solide. Fermano l'agente come
+  una parete (rimbalzo anelastico, e il lato che le tocca sente la
+  pressione), le prede e i predatori: un predatore che insegue dritto si
+  blocca contro una roccia, che diventa un **rifugio**. Nascondono alla vista
+  ciò che sta dietro (anche il cibo); si vedono grigie e spente (0,45
+  sull'asse della luce, albedo 0,4). Odori e vibrazioni le scavalcano: dietro
+  una roccia il cibo si sente ma non si vede. Il cibo non nasce e non ricompare
+  mai dentro una roccia, e nessuno nasce dentro una roccia. Ogni agente ha le
+  sue rocce, come il suo cibo.
 
 - **Gli odori**: il cibo rilascia la sua molecola (0,6 sull'asse delle
   molecole), i predatori un'altra (0,35). Diffusione e degradazione fanno
@@ -199,7 +210,7 @@ Il progetto completo è in [SPEC_MONDO.md](SPEC_MONDO.md).
   anche tra un lato e l'altro del corpo.
 - **La scala** (`ladder`): con `scala` le manopole salgono una alla volta
   (abbondanza e cibi necessari insieme, poi prede e nube d'odore insieme,
-  poi predatori) se negli
+  poi predatori, poi rocce) se negli
   ultime 10 generazioni completa più del 50%, scendono sotto il 30%, e
   scendono di più se in una generazione non completa nessuno. Con `basico` o
   `complesso` restano ferme a 0 o a 1: sono le popolazioni di controllo. Ogni
