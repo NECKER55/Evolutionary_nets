@@ -190,6 +190,20 @@ Il progetto completo è in [SPEC_MONDO.md](SPEC_MONDO.md).
 | nube d'odore (`forage_scent`) | sempre formata | si forma in 3 s quando il cibo compare; quella di un cibo mangiato resta dov'era e svanisce in 3 s |
 | predatori (`forage_predators`) | nessuno | 3 predatori (quasi blu, vibrano) che inseguono entro 40 u a 15 u/s e a contatto tolgono 60 di energia al secondo |
 | rocce (`forage_obstacles`) | nessuna | 8 rocce grigie di raggio 6–16, ferme, che non si toccano (tra due c'è sempre un passaggio di almeno 10 u) |
+| frutti (`forage_variety`) | un frutto solo, rosso e buono | metà dei frutti cattivi: in ogni vita un colore (rosso o giallo) è buono e l'altro cattivo, a caso |
+
+- **I frutti** (quinto stadio): un mondo in cui imparare conviene, perché
+  cambia da una vita all'altra ma resta stabile dentro una vita. Ci sono due
+  frutti: rosso (0,85 sulla luce, molecola 0,6) e giallo (0,65, molecola
+  0,5). In ogni vita, per ogni agente, uno dei due colori è buono e l'altro
+  cattivo, scelto a caso; una quota dei posti (fino a metà, con la manopola)
+  ha il frutto cattivo, e ogni posto tiene il suo tipo quando il frutto
+  ricompare. Il frutto buono nutre (100), dà gusto e conta per riprodursi;
+  quello cattivo non nutre, dà dolore e toglie 30 di energia
+  (`bad_fruit_damage`): uno sbaglio insegna, non uccide. Con gusto, dolore e
+  il sistema di valore il cervello può imparare in pochi bocconi quale
+  colore mangiare in questa vita; nessun riflesso fisso può saperlo prima.
+  Il set di sensi "naturale" ha due occhi gialli (14 sensi).
 
 - **Le rocce** (quarto stadio): sono opache e solide. Fermano l'agente come
   una parete (rimbalzo anelastico, e il lato che le tocca sente la
@@ -210,7 +224,7 @@ Il progetto completo è in [SPEC_MONDO.md](SPEC_MONDO.md).
   anche tra un lato e l'altro del corpo.
 - **La scala** (`ladder`): con `scala` le manopole salgono una alla volta
   (abbondanza e cibi necessari insieme, poi prede e nube d'odore insieme,
-  poi predatori, poi rocce) se negli
+  poi predatori, poi rocce, poi frutti) se negli
   ultime 10 generazioni completa più del 50%, scendono sotto il 30%, e
   scendono di più se in una generazione non completa nessuno. Con `basico` o
   `complesso` restano ferme a 0 o a 1: sono le popolazioni di controllo. Ogni
