@@ -38,6 +38,7 @@ DONE_STAGE = (120, 96, 36)
 STAGE_NAMES = ("trovare il cibo", "inseguire il cibo che sfugge", "sfuggire ai predatori", "muoversi tra le rocce",
                "imparare quale frutto")
 STAGE_COLORS = (FOOD, (235, 150, 70), PREDATOR, ROCK, FRUIT)
+SHORT_NAMES = ("cibo", "fuga", "predatori", "rocce", "frutti")  # per le caselle della barra
 CHANGE = 0.05  # differenza d'esame sotto la quale si parla di "stabile" (5 punti)
 
 
@@ -140,7 +141,10 @@ class Overview:
             fill = float(np.clip(x - i, 0.0, 1.0))
             if fill > 0:
                 pygame.draw.rect(s, DONE_STAGE, (r.x, r.y, int(r.w * fill), r.h), border_radius=4)
-            label = app.small.render(f"{i + 1}. {name}", True, TEXT)
+            # Il nome breve, che sta nella casella; il nome intero è nella riga sotto la barra.
+            label = app.small.render(f"{i + 1}. {SHORT_NAMES[i]}", True, TEXT)
+            if label.get_width() > r.w - 6:
+                label = app.small.render(str(i + 1), True, TEXT)
             s.blit(label, label.get_rect(center=r.center))
         px = lambda v: int(bar.x + v / ladder.TOP * bar.w)
         if len(positions) > 1:
@@ -234,7 +238,7 @@ class Overview:
         n = len(STAGE_NAMES)
         for i in range(n):  # una fascia per stadio, con il suo nome
             top = box.bottom - box.h * (i + 1) / n
-            img = app.small.render(STAGE_NAMES[i], True, STAGE_COLORS[i])
+            img = app.small.render(f"{i + 1}. {SHORT_NAMES[i]}", True, STAGE_COLORS[i])
             s.blit(img, (box.right - img.get_width() - 4, top + 3))
         p = np.array([h.get("position", 0.0) for h in hist])
         plot(s, box, app.small, ((p, PLAYER, 2),), ladder.TOP, tuple(k / n for k in range(n + 1)), "{:1.0f}")
