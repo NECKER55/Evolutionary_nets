@@ -31,6 +31,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from ..net.brain import plasticity
+
 F = jnp.float32
 
 # Costanti della configurazione usate dal passo: passano come numeri (non
@@ -43,7 +45,7 @@ PHYS = (
     "toxin_molecule", "hazard_smell", "target_molecule", "target_smell", "smell_range", "vibration_range",
     "target_vibration", "target_vibration_freq", "hazard_vibration", "hazard_vibration_freq",
     "ambient_temperature", "heat_range", "target_heat", "hazard_heat", "receptor_dark", "receptor_saturation",
-    "sensor_noise", "synapse_max", "spike_gain", "life_max",
+    "sensor_noise", "synapse_max", "homeo_tau", "capture_rate", "spike_gain", "life_max",
     # Il mondo del cibo.
     "prey_flee_range", "predator_range", "predator_radius", "predator_damage", "food_energy", "food_min_dist",
     "predator_vibration", "predator_vibration_freq",
@@ -243,28 +245,25 @@ def respond(ph, P, s, key, racing):
 # --- Reti ------------------------------------------------------------------
 
 
-def learn(ph, P, w, pre, post, after_hidden, racing):
-    """Come `Brains._learn`: plasticità modulata, solo per chi impara ed è in gara."""
+def learn(ph, P, s, pre, post, after_hidden, racing):
+    """Come `Brains._learn` (la stessa `brain.plasticity`), solo per chi
+    impara ed è in gara. Restituisce lo stato della plasticità aggiornato."""
     M = jnp.einsum("nth,nh->nt", P["kmod"], after_hidden * P["mod_sign"])
-    rule = P["rule"]
-    drive = ((rule[..., 0] * post)[:, :, None] * pre[:, None, :] + rule[..., 1, None] * pre[:, None, :]
-             + (rule[..., 2] * post + rule[..., 3])[:, :, None])
-    nw = jnp.clip(w + (P["eta"] * M)[:, :, None] * drive * P["links"], -ph["synapse_max"], ph["synapse_max"])
-    sign = P["dale"][:, None, :]
-    nw = jnp.where(sign > 0, jnp.maximum(nw, 0.0), jnp.where(sign < 0, jnp.minimum(nw, 0.0), nw))
-    on = (P["learns"] * racing)[:, None, None] > 0
-    return jnp.where(on, nw, w)
+    p = {**P, "w_eff": s["w"], "early": s["early"], "bias_now": s["bias_now"], "avg": s["avg"]}
+    w, early, bias, avg = plasticity(ph, jnp, p, pre, post, M)
+    on = (P["learns"] * racing)[:, None] > 0
+    return dict(w=jnp.where(on[:, :, None], w, s["w"]), early=jnp.where(on[:, :, None], early, s["early"]),
+                bias_now=jnp.where(on, bias, s["bias_now"]), avg=jnp.where(on, avg, s["avg"]))
 
 
 def rate_brain(ph, P, s, obs, racing, n_hidden):
     """Come `Brains.step`: rete continua più plasticità."""
     before = s["state"]
     x = jnp.concatenate([obs, before], 1)
-    after = jnp.tanh(jnp.einsum("nts,ns->nt", s["w"], x) + P["bias"]) * P["target_on"]
+    after = jnp.tanh(jnp.einsum("nts,ns->nt", s["w"], x) + s["bias_now"]) * P["target_on"]
     on = racing[:, None] > 0
     after = jnp.where(on, after, before)
-    w = learn(ph, P, s["w"], x, after, after[:, :n_hidden], racing)
-    return dict(state=after, w=w), after[:, n_hidden:]
+    return dict(state=after, **learn(ph, P, s, x, after, after[:, :n_hidden], racing)), after[:, n_hidden:]
 
 
 def spike_brain(ph, P, s, obs, racing, n_hidden, substeps):
@@ -275,7 +274,7 @@ def spike_brain(ph, P, s, obs, racing, n_hidden, substeps):
     charge, spikes, state = s["charge"], s["spikes"], s["state"]
     for _ in range(substeps):
         x = jnp.concatenate([obs, spikes, state[:, h:]], 1)
-        current = jnp.einsum("nts,ns->nt", s["w"], x) + P["bias"]
+        current = jnp.einsum("nts,ns->nt", s["w"], x) + s["bias_now"]
         current = current.at[:, :h].multiply(ph["spike_gain"])
         charge = jnp.maximum(keep * charge + drive * current, -1.0)
         inner = charge[:, :h]
@@ -290,10 +289,10 @@ def spike_brain(ph, P, s, obs, racing, n_hidden, substeps):
     spikes = jnp.where(on, spikes, s["spikes"])
     state = jnp.where(on, state, s["state"])
     pre = jnp.concatenate([obs, state], 1)
-    w = learn(ph, P, s["w"], pre, state, state[:, :h], racing)
+    plastic = learn(ph, P, s, pre, state, state[:, :h], racing)
     m = state[:, h:]
     out = jnp.stack([m[:, 0] - m[:, 1], m[:, 2] - m[:, 3]], 1)
-    return dict(charge=charge, spikes=spikes, state=state, w=w), out
+    return dict(charge=charge, spikes=spikes, state=state, **plastic), out
 
 
 # --- Mondo -----------------------------------------------------------------

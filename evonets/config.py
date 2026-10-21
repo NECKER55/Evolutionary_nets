@@ -166,6 +166,29 @@ class Config:
     plasticity: bool = True
     plasticity_initial_rate: float = 0.001  # η0: velocità di partenza (il gene la moltiplica)
     plasticity_initial_rule: float = 0.5  # deviazione dei coefficienti A, B, C, D alla partenza
+    # Apprendimento hebbiano di base, sempre attivo (BCM sulle sinapsi
+    # eccitatorie, Vogels sulle inibitorie, traccia provvisoria che si
+    # consolida solo con un modulatore: vedi Brains._learn): velocità di
+    # partenza, che il gene di ogni neurone moltiplica. Misurato su una
+    # popolazione evoluta senza (corsa-20261020-200723, rete a impulsi, maturi
+    # 76,8% senza plasticità): 1e-4 neutrale (77,3%), 1e-3 un poco dannoso
+    # (71%; con la traccia resa permanente 5,6%), 1e-2 distruttivo. Con la
+    # prima regola (pre·post permanente, senza depressione e con l'inibizione
+    # che si spegneva) già 1e-4 dava lo 0,3%.
+    hebb_initial_rate: float = 1e-4
+    # Scaling omeostatico: forza di partenza h0 (per secondo, il gene la
+    # moltiplica) e tempo caratteristico della media dell'attività ā (s).
+    # Misurato sulla stessa popolazione: 1e-4 neutrale, 1e-3 un poco dannoso
+    # (maturi 70%), 1e-2 distruttivo (10%): i geni convertiti chiedono a ogni
+    # neurone, motori compresi, attività 0,5.
+    homeo_initial_rate: float = 1e-4
+    homeo_tau: float = 5.0
+    # Traccia provvisoria dell'hebbiano (early-LTP): in natura dura 1-3 ore in
+    # vite di anni; qui la durata di partenza (s), che il gene "persist" di
+    # ogni neurone moltiplica. Consolidamento: dove arriva un modulatore, la
+    # traccia diventa stabile a questa velocità (per secondo e per unità di |M|).
+    early_initial_tau: float = 30.0
+    capture_rate: float = 1.0
     modulatory_initial_share: float = 0.1  # quota di neuroni che nasce modulatrice
     modulation_range: float = 0.2  # quanto lontano arriva il modulatore, in lati del cervello
     synapse_max: float = 4.0  # forza massima di una sinapsi: le sinapsi vere saturano

@@ -11,9 +11,11 @@ def blank(net_type="rate"):
     """Un individuo senza collegamenti, con tutti i recettori e i neuroni
     interni accesi."""
     cfg = Config(net_type=net_type, net_hidden_slots=4, receptor_slots=N_REC, receptor_initial=N_REC)
-    g = NeuralController(cfg, 1).brains.genome.take([0])
+    b = NeuralController(cfg, 1).brains
+    g = b.genome.take([0])
     g.conn[:] = False
     g.active[:] = True
+    g.traits[:, :, b.BASE_TRAITS + 5] = -1.0  # nessun modulatore (non trasmettono)
     return cfg, g
 
 

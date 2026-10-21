@@ -12,6 +12,8 @@ MOD = PLASTIC.index("mod")
 def circuit(kind=Brains, mod_sign=+1.0, **kw):
     """Recettore r0 -> n0, e il modulatore n1 sempre attivo vicino a n0.
     Regola di n0: solo A (Hebb puro modulato)."""
+    kw.setdefault("hebb_initial_rate", 0.0)  # qui si prova la plasticità modulata: hebbiano di base spento
+    kw.setdefault("homeo_initial_rate", 0.0)  # e omeostasi spenta
     cfg = Config(net_hidden_slots=2, receptor_slots=R, receptor_initial=R, plasticity_initial_rate=0.05, **kw)
     b = kind(cfg, 1, 2 if kind is Brains else 4, 0)
     g = b.genome
@@ -122,4 +124,115 @@ def test_old_saves_open_without_plasticity(tmp_path):
     np.savez(tmp_path / "old.npz", **data)
     back = Evolution.load(Config(), tmp_path / "old.npz")
     assert back.ctrl.brains.traits.shape[2] == Brains.N_TRAITS
-    assert not back.ctrl.brains.learns.any() and "plasticità" in back.log[-1]["note"]
+    # Niente modulatori (la plasticità modulata è spenta); l'hebbiano di base parte dal suo valore iniziale.
+    assert not back.ctrl.brains.modulatory.any() and "plasticità" in back.log[-1]["note"]
+    assert np.allclose(back.ctrl.brains.hebb, Config().hebb_initial_rate)
+
+
+TARGET, HOMEO = Brains.BASE_TRAITS + PLASTIC.index("target"), Brains.BASE_TRAITS + PLASTIC.index("homeo")
+HEBB = Brains.BASE_TRAITS + PLASTIC.index("hebb")
+
+
+def plain(weight=0.5, **kw):
+    """r0 -> n0 senza modulatori e senza plasticità modulata."""
+    b = circuit(**kw)
+    g = b.genome
+    g.traits[0, :, Brains.BASE_TRAITS + MOD] = -1.0
+    g.traits[0, :, Brains.BASE_TRAITS] = -30.0
+    g.weights[0, 0, 0] = weight
+    b.set_genome(g)
+    return b, g
+
+
+def test_basic_hebbian_bcm_brings_activity_towards_the_desired_level_without_modulators():
+    """Regola BCM: sopra la soglia mobile θ = ā²/a* la sinapsi si rafforza,
+    sotto si indebolisce; a regime l'attività va verso a*. n0 parte da
+    tanh(0,5) ≈ 0,46."""
+    b, g = plain(hebb_initial_rate=0.05, homeo_tau=0.1)
+    for gene, sign in ((-2.0, -1), (2.0, +1)):  # a* ≈ 0,12 e 0,88
+        g.traits[0, :, TARGET] = gene
+        b.set_genome(g)
+        assert b.learns[0]
+        w = run(b, steps=3000)
+        assert np.sign(w - 0.5) == sign
+        assert abs(np.tanh(w) - b.target_act[0, 0]) < abs(np.tanh(0.5) - b.target_act[0, 0])
+    g.traits[0, :, HEBB] = -40.0  # il gene a zero la spegne
+    b.set_genome(g)
+    assert run(b) == 0.5
+
+
+def test_basic_hebbian_on_inhibitory_synapses_follows_vogels():
+    """Una sinapsi inibitoria si rafforza dove il neurone è più attivo del
+    desiderato e si indebolisce dove lo è meno; resta sempre inibitoria."""
+    for gene, stronger in ((-2.0, True), (2.0, False)):
+        b, g = plain(weight=-0.5, hebb_initial_rate=0.05)
+        g.traits[0, 0, 0] = 1.5  # n0 acceso dalla corrente di fondo: tanh(1,5 − 0,5) ≈ 0,76
+        g.traits[0, :, TARGET] = gene
+        b.set_genome(g)
+        w = run(b, steps=600)
+        assert w < 0 and (w < -0.5) == stronger
+
+
+def test_plasticity_changes_strength_never_the_kind_of_synapse():
+    """Spinta forte verso zero (a* bassissimo, omeostasi e BCM forti): la
+    sinapsi eccitatoria si indebolisce ma non diventa inibitoria; intanto il
+    neurone abbassa anche la propria eccitabilità."""
+    b, g = plain(hebb_initial_rate=1.0, homeo_initial_rate=50.0, homeo_tau=0.05)
+    g.traits[0, :, TARGET] = -8.0
+    b.set_genome(g)
+    w = run(b, steps=2000)
+    assert 0.0 <= w < 0.25 and b.bias_now[0, 0] < b.bias[0, 0]
+
+
+def test_homeostatic_scaling_of_inhibitory_synapses_goes_the_other_way():
+    """Neurone troppo zitto: le eccitatorie crescono, le inibitorie calano."""
+    b, g = plain(weight=-0.5, homeo_initial_rate=1.0, homeo_tau=0.1)
+    g.traits[0, 0, 0] = 0.8  # corrente di fondo: attività tanh(0,3) ≈ 0,29
+    g.traits[0, :, TARGET] = 2.0  # desidera 0,88
+    b.set_genome(g)
+    assert -0.5 < run(b, steps=600) <= 0.0
+
+
+def test_homeostatic_scaling_brings_activity_towards_the_desired_level():
+    """n0 riceve solo da r0, sempre a 1: con il peso 0,5 la sua attività è
+    tanh(0,5) ≈ 0,46. Se desidera meno, le sinapsi in entrata si indeboliscono;
+    se desidera di più, si rafforzano; con la forza a zero non cambia nulla."""
+    b, g = plain(homeo_initial_rate=1.0, homeo_tau=0.1)
+    for gene, sign in ((-2.0, -1), (2.0, +1)):  # a* ≈ 0,12 e 0,88
+        g.traits[0, :, TARGET] = gene
+        b.set_genome(g)
+        w = run(b, steps=600)
+        assert np.sign(w - 0.5) == sign
+        assert abs(np.tanh(w) - b.target_act[0, 0]) < abs(np.tanh(0.5) - b.target_act[0, 0])
+    g.traits[0, :, HOMEO] = -40.0
+    b.set_genome(g)
+    assert run(b) == 0.5
+
+
+def test_hebbian_trace_fades_unless_a_modulator_consolidates_it():
+    """La traccia provvisoria (early-LTP) svanisce: senza modulatori, finito lo
+    stimolo, la sinapsi torna verso il peso di nascita. Con un modulatore
+    acceso durante l'apprendimento la traccia diventa stabile e resta."""
+    def lesson(modulated):
+        b = circuit(hebb_initial_rate=0.5, early_initial_tau=1.0, capture_rate=5.0, homeo_tau=0.1)
+        g = b.genome
+        g.traits[0, :, Brains.BASE_TRAITS] = -30.0  # niente plasticità modulata: il modulatore solo consolida
+        g.traits[0, :, TARGET] = 2.0  # n0 desidera più attività di quella che ha: BCM rafforza
+        if not modulated:
+            g.traits[0, :, Brains.BASE_TRAITS + MOD] = -1.0
+        b.set_genome(g)
+        learned = run(b, steps=300)
+        rest = run(b, steps=900, value=0.0)  # stimolo spento: la traccia non si rinforza più
+        return learned, rest, float(np.abs(b.early[0, 0, 0]))
+    learned, rest, trace = lesson(False)
+    assert learned > 0.5 and rest - 0.5 < 0.2 * (learned - 0.5) and trace < 0.01
+    learned_m, rest_m, _ = lesson(True)
+    assert learned_m > 0.5 and rest_m - 0.5 > 0.8 * (learned_m - 0.5)
+
+
+def test_strengthening_slows_down_near_the_maximum():
+    b, g = plain(hebb_initial_rate=0.05, early_initial_tau=1e6, homeo_tau=0.1)
+    g.traits[0, :, TARGET] = 6.0
+    b.set_genome(g)
+    w = run(b, steps=3000)
+    assert 0.5 < w < b.cfg.synapse_max

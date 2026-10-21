@@ -51,7 +51,7 @@ def test_quanta_match_the_numpy_receptors():
 
 @pytest.mark.parametrize("net", ["rate", "spike-ei"])
 def test_brain_and_plasticity_match(net):
-    cfg, w, ctrl = setup(net)
+    cfg, w, ctrl = setup(net, homeo_initial_rate=2.0, homeo_tau=0.2, hebb_initial_rate=0.05)  # forti: si vedono
     b = ctrl.brains
     assert b.learns.any()
     ph, P, s = device(cfg, w, ctrl)

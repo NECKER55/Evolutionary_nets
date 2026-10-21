@@ -42,9 +42,9 @@ def pack_params(world, ctrl) -> dict:
         c_wall=p.c_wall, c_target=p.c_target, c_glow=p.c_glow, mu_c=p.mu_c, sg_c=p.sg_c, g_c=p.g_c,
         c_press=p.c_press, mu_m=p.mu_m, sg_m=p.sg_m, g_m=p.g_m, mu_t=p.mu_t, sg_t=p.sg_t, g_t=p.g_t,
         g_mag=p.g_mag, c_body=p.c_body, keep=p.keep, sub=p.sub, div=p.div,
-        links=b.links, bias=b.bias, target_on=b.target_on, eta=b.eta, rule=b.rule, kmod=b.kmod,
-        mod_sign=b._mod_sign, learns=b.learns, upkeep=b.upkeep,
-        dale=b.dale if b.dale is not None else np.zeros((b.n, b.n_in + b.n_hidden + b.n_out)),
+        links=b.links, target_on=b.target_on, eta=b.eta, rule=b.rule, kmod=b.kmod,
+        mod_sign=b._mod_sign, learns=b.learns, upkeep=b.upkeep, hebb=b.hebb, sign=b.sign, early_keep=b.early_keep,
+        homeo=b.homeo, target_act=b.target_act,
         anchor=hz.anchor.reshape(-1, 2), amp=hz.amp.reshape(-1, 2), omega=hz.omega.reshape(-1, 2),
         pulse_omega=hz.pulse_omega, base_radius=hz.base_radius,
         target_r=task.radius if has_target else 0.0, has_target=float(has_target),
@@ -71,7 +71,7 @@ def pack_state(world, ctrl, key) -> dict:
         pos=world.pos, vel=world.vel, heading=world.heading, ang_vel=world.ang_vel, energy=world.energy,
         alive=world.alive, done=world.done, bump=world.bump, pain=world.pain,
         phase=hz.phase.reshape(-1, 2), pulse_phase=hz.pulse_phase, target=target, target_vel=tvel,
-        t=world.t, state=b.state, w=b.w_eff, done_t=np.where(world.done, world.t, np.inf),
+        t=world.t, state=b.state, w=b.w_eff, avg=b.avg, early=b.early, bias_now=b.bias_now, done_t=np.where(world.done, world.t, np.inf),
         obs=ctrl.obs if ctrl.obs.shape == (b.n, b.n_in) else np.zeros((b.n, b.n_in)),
         m=ctrl.adapt if ctrl.adapt.shape == (b.n, b.n_in) else np.full((b.n, b.n_in), np.nan),
     )
@@ -105,7 +105,8 @@ def unpack(world, ctrl, s: dict) -> None:
         t.food, t.pred = g["food"], g["pred"]
         t.ptr, t.eaten = g["ptr"].astype(int), g["eaten"].astype(int)
         t.age, t.ghost, t.ghost_t = g["age"], g["ghost"], g["ghost_t"]
-    b.state, ctrl.obs, ctrl.adapt = g["state"], g["obs"], g["m"]
+    b.state, b.avg, ctrl.obs, ctrl.adapt = g["state"], g["avg"], g["obs"], g["m"]
+    b.early, b.bias_now = g["early"], g["bias_now"]
     if b.KIND == "spike-ei":
         b.charge, b.spikes = g["charge"], g["spikes"]
     if not np.array_equal(g["w"], b.w_eff):

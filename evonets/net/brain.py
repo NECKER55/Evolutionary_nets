@@ -31,7 +31,60 @@ PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", 
 # RICEVE: Δw = η · M · (A·pre·post + B·pre + C·post + D), con
 # η = plasticity_initial_rate · e^gene (gene 0 = plasticità debole di partenza).
 # "mod" > 0 rende un neurone interno modulatore: non trasmette, rilascia M.
-PLASTIC = ("eta", "A", "B", "C", "D", "mod")
+# "hebb": apprendimento hebbiano di base, sempre attivo, senza modulatori
+# (docs/SPEC_SVILUPPO.md, sezione 10): Δw = η_h · pre · post, con
+# η_h = hebb_initial_rate · e^gene.
+# "target" e "homeo": scaling omeostatico (docs/SPEC_SVILUPPO.md, sezione 4).
+# Il neurone tiene la media recente ā della propria attività e moltiplica le
+# sinapsi che riceve per exp(h · dt · (a* − ā)), con a* = sigmoide(target)
+# l'attività desiderata e h = homeo_initial_rate · e^homeo la forza.
+# "persist": quanto dura la traccia provvisoria (early-LTP) che l'hebbiano
+# lascia sulle sinapsi che il neurone riceve, τ = early_initial_tau · e^gene.
+PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist")
+
+
+def sigmoid(x):
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+# Le costanti della configurazione che usa `plasticity`.
+PLASTICITY_CONSTANTS = ("dt", "synapse_max", "homeo_tau", "capture_rate")
+
+
+def plasticity(cfg, xp, p, pre, post, m):
+    """Un passo di plasticità (vedi `Brains._learn`), uguale per NumPy e JAX
+    (`xp` è il modulo). `p`: i geni compilati e lo stato di chi impara; pre
+    (n, S), post (n, T), m (n, T) il modulatore che arriva a ogni neurone.
+    Restituisce (pesi, traccia provvisoria, corrente di fondo, ā)."""
+    dt, top = cfg["dt"], cfg["synapse_max"]
+    rate_pre, rate_post = xp.abs(pre), xp.abs(post)
+    avg = p["avg"] + (dt / cfg["homeo_tau"]) * (rate_post - p["avg"])
+    want, sign, links = p["target_act"], p["sign"], p["links"]
+    excit = sign > 0.0
+    gap = p["homeo"] * dt * (want - avg)  # (n, T): > 0 se il neurone è troppo zitto
+    # Omeostasi: scala tutta la sinapsi (parte stabile e traccia).
+    early = p["early"] * xp.exp(xp.where(excit, gap[:, :, None], -gap[:, :, None]))
+    stable = xp.abs(p["w_eff"]) * xp.exp(xp.where(excit, gap[:, :, None], -gap[:, :, None])) - early
+    bias = p["bias_now"] + gap * xp.where(post < 0.0, -1.0, 1.0)
+    # Consolidamento della traccia dove arriva un modulatore, poi decadimento.
+    caught = early * (1.0 - xp.exp(-cfg["capture_rate"] * xp.abs(m) * dt))[:, :, None]
+    stable = stable + caught
+    early = (early - caught) * p["early_keep"][:, :, None]
+    strength = stable + early
+
+    def saturate(d):  # i rafforzamenti rallentano vicino al massimo
+        return xp.where(d > 0.0, d * xp.maximum(1.0 - strength / top, 0.0), d)
+
+    theta = avg**2 / xp.maximum(want, 1e-3)
+    bcm = (rate_post * (rate_post - theta))[:, :, None] * rate_pre[:, None, :]
+    vogels = (rate_post - want)[:, :, None] * rate_pre[:, None, :]
+    early = early + saturate(p["hebb"][:, :, None] * xp.where(excit, bcm, vogels) * links)
+    rule = p["rule"]
+    drive = ((rule[..., 0] * post)[:, :, None] * pre[:, None, :] + rule[..., 1, None] * pre[:, None, :]
+             + (rule[..., 2] * post + rule[..., 3])[:, :, None])
+    stable = xp.clip(stable + saturate(sign * (p["eta"] * m)[:, :, None] * drive * links), 0.0, top)
+    strength = xp.clip(stable + early, 0.0, top)
+    return sign * strength, strength - stable, bias, avg
 
 
 def clamp_meta(meta: np.ndarray, cfg: Config) -> None:
@@ -270,10 +323,13 @@ class Brains:
 
     @classmethod
     def plastic_text(cls, traits: np.ndarray, hidden: bool) -> list[str]:
-        eta, a, b, c, d, mod = traits[cls.BASE_TRAITS:]
+        eta, a, b, c, d, mod, hebb, target, homeo, persist = traits[cls.BASE_TRAITS:]
         lines = [f"plasticità in entrata: η0 x {np.exp(eta):.2g}",
                  f"  A {a:+.2f} pre·post   B {b:+.2f} pre",
-                 f"  C {c:+.2f} post       D {d:+.2f}"]
+                 f"  C {c:+.2f} post       D {d:+.2f}",
+                 f"hebbiano di base: η_h0 x {np.exp(hebb):.2g}",
+                 f"omeostasi: attività desiderata {float(sigmoid(target)):.2f}, forza h0 x {np.exp(homeo):.2g}",
+                 f"traccia provvisoria: dura τ0 x {np.exp(persist):.2g}"]
         if hidden:
             lines.append("modulatore: sì (non trasmette, rilascia M)" if mod > 0
                          else f"modulatore: no (gene {mod:+.2f})")
@@ -295,6 +351,10 @@ class Brains:
         t[..., 1:5] = rng.normal(0.0, cfg.plasticity_initial_rule, t.shape[:2] + (4,))
         offset = NormalDist().inv_cdf(1.0 - cfg.modulatory_initial_share)
         t[..., 5] = rng.normal(0.0, 1.0, t.shape[:2]) - offset
+        t[..., 6] = rng.normal(0.0, 0.5, t.shape[:2])  # hebbiano di base: debole e diverso da individuo a individuo
+        t[..., 7] = rng.normal(0.0, 1.0, t.shape[:2])  # omeostasi: attività desiderata a caso,
+        t[..., 8] = rng.normal(0.0, 0.5, t.shape[:2])  # forza debole e casuale
+        t[..., 9] = rng.normal(0.0, 0.5, t.shape[:2])  # durata della traccia provvisoria
 
     def _init_genes(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
         """Per i tipi di rete che hanno geni con una distribuzione iniziale propria."""
@@ -343,8 +403,14 @@ class Brains:
         # calando con la distanza (trasmissione di volume).
         p = self.traits[:, :, self.BASE_TRAITS :]
         self.eta, self.rule = cfg.plasticity_initial_rate * np.exp(p[..., 0]), p[..., 1:5]
+        self.hebb = cfg.hebb_initial_rate * np.exp(p[..., 6])  # (N, T), del neurone che riceve
+        self.target_act = sigmoid(p[..., 7])  # (N, T): a*
+        self.homeo = cfg.homeo_initial_rate * np.exp(p[..., 8])  # (N, T): h, per secondo
+        self.early_keep = np.exp(-cfg.dt / (cfg.early_initial_tau * np.exp(p[..., 9])))  # (N, T), per passo
         self.kmod = np.exp(-self.dist[:, :, R : R + H] / cfg.modulation_range) * mod[:, None, :]
-        self.learns = mod.any(axis=1) & cfg.plasticity  # chi ha almeno un modulatore
+        # Chi impara: con l'hebbiano di base e l'omeostasi, tutti (salvo plasticità spenta).
+        self.learns = np.full(self.n, cfg.plasticity) & (
+            (self.hebb > 0).any(axis=1) | (self.homeo > 0).any(axis=1) | mod.any(axis=1))
         self._mod_sign = mod.astype(float)
         # Lunghezza totale dei collegamenti effettivi di ogni rete: il suo cablaggio.
         self.wire_length = (self.dist * self.links).sum(axis=(1, 2))
@@ -357,7 +423,12 @@ class Brains:
         self._prepared = None  # recettori pronti per il calcolo, da rifare
         self._compile_extra()
         self.w_eff = self._born_weights()
+        # Il tipo di ogni sinapsi, fissato alla nascita: +1 eccitatoria, -1
+        # inibitoria (legge di Dale per i neuroni, segno del gene per i sensi e
+        # per le reti continue). La plasticità cambia la forza, mai il tipo.
+        self.sign = np.where(self.w_eff < 0.0, -1.0, 1.0)
         self.learned = False
+        self._reset_activity()
 
     def _compile_extra(self) -> None:
         """Per i tipi di rete con geni compilati propri (prima dei pesi)."""
@@ -374,6 +445,16 @@ class Brains:
         si è imparato non si eredita e non passa da un'arena all'altra)."""
         self.state = np.zeros((self.n, self.n_hidden + self.n_out))
         self._forget()
+        self._reset_activity()
+
+    def _reset_activity(self) -> None:
+        """Media recente dell'attività per l'omeostasi: si nasce in equilibrio
+        (ā = a*), in attesa dell'attività spontanea prima della nascita. Si
+        nasce senza tracce provvisorie e con l'eccitabilità del genoma."""
+        self.avg = self.target_act.copy()
+        self.early = np.zeros_like(self.w_eff)
+        self.bias_now = self.bias.copy()
+        self._subset = None
 
     def _forget(self) -> None:
         if self.learned:
@@ -382,7 +463,7 @@ class Brains:
             self.learned = False
 
     # Geni compilati di cui `step_some` usa una copia ridotta.
-    SUBSET = ("w_eff", "bias", "target_on")
+    SUBSET = ("w_eff", "bias_now", "target_on")
 
     def _rows(self, rows: np.ndarray) -> dict:
         """Copie dei geni compilati per i soli individui `rows`. Si rifanno
@@ -424,10 +505,29 @@ class Brains:
         return np.concatenate([obs, before], axis=1)
 
     def _learn(self, rows, obs, before, after, sub=None) -> None:
-        """Plasticità modulata (docs/SPEC_FASE_E.md): per ogni collegamento
-        effettivo Δw = η · M · (A·pre·post + B·pre + C·post + D), con η, A, B,
-        C, D del neurone che riceve e M che arriva per diffusione dai
-        modulatori. Solo chi ha almeno un modulatore impara."""
+        """Plasticità durante la vita (docs/REGOLE.md, "Imparare durante la
+        vita"). Ogni sinapsi ha un tipo fisso (eccitatoria o inibitoria) e una
+        forza |w| in [0, synapse_max], somma di una parte stabile e di una
+        traccia provvisoria. Le attività contano come frequenze (|attività|).
+        A ogni passo, per ogni neurone che riceve:
+        - scaling omeostatico (Turrigiano): le sinapsi eccitatorie per
+          exp(h · dt · (a* − ā)), le inibitorie per l'inverso; ā è la media
+          recente dell'attività (tempo caratteristico `homeo_tau`);
+        - omeostasi dell'eccitabilità (Desai 1999): la corrente di fondo si
+          sposta di h · dt · (a* − ā) nel verso che avvicina l'attività ad a*;
+        - hebbiano di base, sempre attivo, con η_h del neurone: sulle
+          eccitatorie la regola BCM, Δ|w| = η_h · pre · post · (post − θ) con
+          la soglia mobile θ = ā² / a*; sulle inibitorie la regola di Vogels,
+          Δ|w| = η_h · pre · (post − a*). Scrive la traccia provvisoria
+          (early-LTP), che svanisce con il tempo τ del neurone (gene
+          "persist");
+        - consolidamento (tagging and capture, Frey e Morris 1997): dove c'è
+          un modulatore la traccia diventa stabile, una quota
+          1 − exp(−capture_rate · |M| · dt) a passo;
+        - plasticità modulata (docs/SPEC_FASE_E.md): Δ|w| = segno · η · M ·
+          (A·pre·post + B·pre + C·post + D), sulla parte stabile;
+        - saturazione graduale (van Rossum 2000): ogni rafforzamento è
+          moltiplicato per 1 − |w| / synapse_max."""
         if not self.cfg.plasticity:
             return
         local = np.flatnonzero(self.learns[rows])
@@ -438,18 +538,13 @@ class Brains:
         pre = self._pre(obs[local], before[local], after[local])  # (n, S)
         post = after[local]  # (n, T)
         m = np.einsum("nth,nh->nt", self.kmod[who], after[local, :H] * self._mod_sign[who])
-        rule = self.rule[who]
-        drive = ((rule[..., 0] * post)[:, :, None] * pre[:, None, :] + rule[..., 1, None] * pre[:, None, :]
-                 + (rule[..., 2] * post + rule[..., 3])[:, :, None])
-        w = self.w_eff[who] + (self.eta[who] * m)[:, :, None] * drive * self.links[who]
-        limit = self.cfg.synapse_max
-        np.clip(w, -limit, limit, out=w)
-        if self.dale is not None:  # un neurone eccitatorio non diventa inibitorio, e viceversa
-            sign = self.dale[who][:, None, :]
-            w = np.where(sign > 0, np.maximum(w, 0.0), np.where(sign < 0, np.minimum(w, 0.0), w))
-        self.w_eff[who] = w
+        p = {k: getattr(self, k)[who] for k in ("w_eff", "early", "bias_now", "avg", "sign", "links", "target_act",
+                                                "homeo", "hebb", "eta", "rule", "early_keep")}
+        consts = {k: getattr(self.cfg, k) for k in PLASTICITY_CONSTANTS}
+        w, early, bias, avg = plasticity(consts, np, p, pre, post, m)
+        self.w_eff[who], self.early[who], self.bias_now[who], self.avg[who] = w, early, bias, avg
         if sub is not None:
-            sub["w_eff"][local] = w
+            sub["w_eff"][local], sub["bias_now"][local] = w, bias
         elif self._subset is not None:
             self._subset = None
         self.learned = True
@@ -459,7 +554,7 @@ class Brains:
         copia ridotta). Restituisce (nuovo stato, uscite)."""
         get = g.get if isinstance(g, dict) else lambda k: getattr(g, k)
         x = np.concatenate([obs, state], axis=1)
-        z = (get("w_eff") @ x[:, :, None])[:, :, 0] + get("bias")
+        z = (get("w_eff") @ x[:, :, None])[:, :, 0] + get("bias_now")
         state = np.tanh(z) * get("target_on")
         return state, state[:, self.n_hidden :]
 
@@ -538,7 +633,7 @@ class SpikingBrains(Brains):
         """Tracce recenti degli impulsi (e livelli dei motori) dopo il passo."""
         return np.concatenate([obs, after], axis=1)
 
-    SUBSET = ("w_eff", "bias", "keep", "active")
+    SUBSET = ("w_eff", "bias_now", "keep", "active")
 
     def reset_state(self) -> None:
         h = self.n_hidden
@@ -548,6 +643,7 @@ class SpikingBrains(Brains):
         # Per il viewer e per i collegamenti in uscita dai motori: attività
         # recente dei neuroni interni (media mobile degli impulsi) e livello dei motori.
         self.state = np.zeros((self.n, h + self.n_out))
+        self._reset_activity()
 
     def step(self, obs: np.ndarray) -> np.ndarray:
         """obs (N, R) -> comandi (N, 2) in (-1, 1): spinta e sterzata."""
@@ -568,7 +664,7 @@ class SpikingBrains(Brains):
 
     def _advance(self, obs, states, g):
         get = g.get if isinstance(g, dict) else lambda k: getattr(g, k)
-        w_eff, bias, keep, active = get("w_eff"), get("bias"), get("keep"), get("active")
+        w_eff, bias, keep, active = get("w_eff"), get("bias_now"), get("keep"), get("active")
         charge, spikes, state = states
         h = self.n_hidden
         drive = 1.0 - keep

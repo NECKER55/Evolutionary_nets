@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from ..config import Config
-from ..net.brain import META, Genome, meta_start
+from ..net.brain import META, PLASTIC, Genome, meta_start
 from ..net.receptors import scales
 from . import ladder
 
@@ -29,8 +29,14 @@ from . import ladder
 #     ogni fenomeno (i file precedenti si convertono a parità di quanti);
 # 7 = il cervello cresce con le sue cellule (le distanze si ricalcolano);
 # 8 = discendenza dei geni (identità e famiglia, per l'incrocio tra omologhi)
-#     e gene del sesso (i file precedenti: identità = posto, sesso 0,5).
-FORMAT = 8
+#     e gene del sesso (i file precedenti: identità = posto, sesso 0,5);
+# 9 = apprendimento hebbiano di base (un gene per neurone; i file precedenti
+#     partono dal valore di partenza, gene 0);
+# 10 = scaling omeostatico (due geni per neurone; i file precedenti: gene 0,
+#     cioè attività desiderata 0,5 e forza di partenza);
+# 11 = traccia provvisoria e consolidamento (un gene per neurone, la durata;
+#     i file precedenti: gene 0, la durata di partenza).
+FORMAT = 11
 # Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
 # nullo, regola a zero, nessun modulatore.
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
@@ -52,6 +58,9 @@ CONVERSIONS = (
     (5, "sensibilità dei recettori convertite in moltiplicatori della scala fisica"),
     (6, "distanze nel cervello ricalcolate: ora il cervello cresce con le sue cellule"),
     (7, "discendenza dei geni dal loro posto, gene del sesso a 0,5"),
+    (8, "apprendimento hebbiano di base aggiunto (velocità di partenza)"),
+    (9, "scaling omeostatico aggiunto (forza di partenza)"),
+    (10, "traccia provvisoria dell'hebbiano aggiunta (durata di partenza)"),
 )
 
 
@@ -146,6 +155,9 @@ def load(cls, cfg: Config, path):
             if g.traits.shape[2] == base:
                 extra = np.broadcast_to(NO_PLASTICITY, g.traits.shape[:2] + (len(NO_PLASTICITY),))
                 g.traits = np.concatenate([g.traits, extra], axis=2)
+            missing = base + len(PLASTIC) - g.traits.shape[2]  # geni nati dopo (hebbiano, omeostasi, traccia): 0
+            if missing > 0:
+                g.traits = np.concatenate([g.traits, np.zeros(g.traits.shape[:2] + (missing,))], axis=2)
             return g
 
         # Dopo una selezione finale gli individui sono meno della popolazione:
