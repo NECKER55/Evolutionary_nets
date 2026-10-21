@@ -40,7 +40,10 @@ PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", 
 # l'attività desiderata e h = homeo_initial_rate · e^homeo la forza.
 # "persist": quanto dura la traccia provvisoria (early-LTP) che l'hebbiano
 # lascia sulle sinapsi che il neurone riceve, τ = early_initial_tau · e^gene.
-PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist")
+# "intrinsic": forza dell'omeostasi dell'eccitabilità (la corrente di fondo),
+# un meccanismo distinto dallo scaling delle sinapsi (Desai 1999):
+# homeo_initial_rate · e^gene.
+PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist", "intrinsic")
 
 
 def sigmoid(x):
@@ -51,13 +54,26 @@ def sigmoid(x):
 PLASTICITY_CONSTANTS = ("dt", "synapse_max", "homeo_tau", "capture_rate")
 
 
-def plasticity(cfg, xp, p, pre, post, m):
+def frequencies(xp, x, centred: bool):
+    """Le frequenze (≥ 0) che corrispondono alle attività `x` dei neuroni.
+    Nelle reti continue (`centred`) x = tanh(...) è lo scarto dalla frequenza
+    spontanea, a metà tra zitto (-1) e massimo (+1): la frequenza è (1 + x)/2.
+    Nelle reti a impulsi le attività sono già frequenze."""
+    return (1.0 + x) / 2.0 if centred else xp.maximum(x, 0.0)
+
+
+def plasticity(cfg, xp, p, pre, post, m, n_in: int, centred: bool):
     """Un passo di plasticità (vedi `Brains._learn`), uguale per NumPy e JAX
     (`xp` è il modulo). `p`: i geni compilati e lo stato di chi impara; pre
-    (n, S), post (n, T), m (n, T) il modulatore che arriva a ogni neurone.
-    Restituisce (pesi, traccia provvisoria, corrente di fondo, ā)."""
+    (n, S) con i primi `n_in` i sensi, post (n, T), m (n, T) il modulatore che
+    arriva a ogni neurone; `centred` per le reti continue (vedi
+    `frequencies`). Le regole di Hebb e l'omeostasi usano le frequenze; la
+    plasticità modulata, che è una regola scritta dai geni, i valori come
+    sono. Restituisce (pesi, traccia provvisoria, corrente di fondo, ā)."""
     dt, top = cfg["dt"], cfg["synapse_max"]
-    rate_pre, rate_post = xp.abs(pre), xp.abs(post)
+    senses = xp.maximum(pre[:, :n_in], 0.0)  # risposte dei recettori: già frequenze
+    rate_pre = xp.concatenate([senses, frequencies(xp, pre[:, n_in:], centred)], axis=1)
+    rate_post = frequencies(xp, post, centred)
     avg = p["avg"] + (dt / cfg["homeo_tau"]) * (rate_post - p["avg"])
     want, sign, links = p["target_act"], p["sign"], p["links"]
     excit = sign > 0.0
@@ -65,7 +81,7 @@ def plasticity(cfg, xp, p, pre, post, m):
     # Omeostasi: scala tutta la sinapsi (parte stabile e traccia).
     early = p["early"] * xp.exp(xp.where(excit, gap[:, :, None], -gap[:, :, None]))
     stable = xp.abs(p["w_eff"]) * xp.exp(xp.where(excit, gap[:, :, None], -gap[:, :, None])) - early
-    bias = p["bias_now"] + gap * xp.where(post < 0.0, -1.0, 1.0)
+    bias = p["bias_now"] + p["intrinsic"] * dt * (want - avg)  # più corrente, più frequenza
     # Consolidamento della traccia dove arriva un modulatore, poi decadimento.
     caught = early * (1.0 - xp.exp(-cfg["capture_rate"] * xp.abs(m) * dt))[:, :, None]
     stable = stable + caught
@@ -312,6 +328,7 @@ class Brains:
     """
 
     KIND = "rate"
+    CENTRED = True  # attività = scarto dalla frequenza spontanea (vedi `frequencies`)
     BASE_TRAITS = 1  # soglia; poi i geni della plasticità
     N_TRAITS = BASE_TRAITS + len(PLASTIC)
     OUT_LABELS = ("spinta", "sterzo")
@@ -323,13 +340,14 @@ class Brains:
 
     @classmethod
     def plastic_text(cls, traits: np.ndarray, hidden: bool) -> list[str]:
-        eta, a, b, c, d, mod, hebb, target, homeo, persist = traits[cls.BASE_TRAITS:]
+        eta, a, b, c, d, mod, hebb, target, homeo, persist, intrinsic = traits[cls.BASE_TRAITS:]
         lines = [f"plasticità in entrata: η0 x {np.exp(eta):.2g}",
                  f"  A {a:+.2f} pre·post   B {b:+.2f} pre",
                  f"  C {c:+.2f} post       D {d:+.2f}",
                  f"hebbiano di base: η_h0 x {np.exp(hebb):.2g}",
                  f"omeostasi: attività desiderata {float(sigmoid(target)):.2f}, forza h0 x {np.exp(homeo):.2g}",
-                 f"traccia provvisoria: dura τ0 x {np.exp(persist):.2g}"]
+                 f"traccia provvisoria: dura τ0 x {np.exp(persist):.2g}",
+                 f"omeostasi della soglia: forza h0 x {np.exp(intrinsic):.2g}"]
         if hidden:
             lines.append("modulatore: sì (non trasmette, rilascia M)" if mod > 0
                          else f"modulatore: no (gene {mod:+.2f})")
@@ -355,6 +373,7 @@ class Brains:
         t[..., 7] = rng.normal(0.0, 1.0, t.shape[:2])  # omeostasi: attività desiderata a caso,
         t[..., 8] = rng.normal(0.0, 0.5, t.shape[:2])  # forza debole e casuale
         t[..., 9] = rng.normal(0.0, 0.5, t.shape[:2])  # durata della traccia provvisoria
+        t[..., 10] = rng.normal(0.0, 0.5, t.shape[:2])  # omeostasi della soglia: debole e casuale
 
     def _init_genes(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
         """Per i tipi di rete che hanno geni con una distribuzione iniziale propria."""
@@ -406,6 +425,7 @@ class Brains:
         self.hebb = cfg.hebb_initial_rate * np.exp(p[..., 6])  # (N, T), del neurone che riceve
         self.target_act = sigmoid(p[..., 7])  # (N, T): a*
         self.homeo = cfg.homeo_initial_rate * np.exp(p[..., 8])  # (N, T): h, per secondo
+        self.intrinsic = cfg.homeo_initial_rate * np.exp(p[..., 10])  # (N, T), per secondo
         self.early_keep = np.exp(-cfg.dt / (cfg.early_initial_tau * np.exp(p[..., 9])))  # (N, T), per passo
         self.kmod = np.exp(-self.dist[:, :, R : R + H] / cfg.modulation_range) * mod[:, None, :]
         # Chi impara: con l'hebbiano di base e l'omeostasi, tutti (salvo plasticità spenta).
@@ -429,6 +449,10 @@ class Brains:
         self.sign = np.where(self.w_eff < 0.0, -1.0, 1.0)
         self.learned = False
         self._reset_activity()
+
+    def frequencies(self) -> np.ndarray:
+        """(N, H + n_out): la frequenza attuale di ogni neurone interno e motore."""
+        return frequencies(np, self.state, self.CENTRED)
 
     def _compile_extra(self) -> None:
         """Per i tipi di rete con geni compilati propri (prima dei pesi)."""
@@ -539,9 +563,9 @@ class Brains:
         post = after[local]  # (n, T)
         m = np.einsum("nth,nh->nt", self.kmod[who], after[local, :H] * self._mod_sign[who])
         p = {k: getattr(self, k)[who] for k in ("w_eff", "early", "bias_now", "avg", "sign", "links", "target_act",
-                                                "homeo", "hebb", "eta", "rule", "early_keep")}
+                                                "homeo", "intrinsic", "hebb", "eta", "rule", "early_keep")}
         consts = {k: getattr(self.cfg, k) for k in PLASTICITY_CONSTANTS}
-        w, early, bias, avg = plasticity(consts, np, p, pre, post, m)
+        w, early, bias, avg = plasticity(consts, np, p, pre, post, m, self.n_in, self.CENTRED)
         self.w_eff[who], self.early[who], self.bias_now[who], self.avg[who] = w, early, bias, avg
         if sub is not None:
             sub["w_eff"][local], sub["bias_now"][local] = w, bias
@@ -585,6 +609,7 @@ class SpikingBrains(Brains):
     """
 
     KIND = "spike-ei"
+    CENTRED = False
     BASE_TRAITS = 3  # corrente di fondo, perdita, tipo; poi la plasticità
     N_TRAITS = BASE_TRAITS + len(PLASTIC)
     OUT_LABELS = ("avanti", "indietro", "destra", "sinistra")

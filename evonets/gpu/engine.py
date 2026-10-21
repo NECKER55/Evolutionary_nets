@@ -245,12 +245,12 @@ def respond(ph, P, s, key, racing):
 # --- Reti ------------------------------------------------------------------
 
 
-def learn(ph, P, s, pre, post, after_hidden, racing):
+def learn(ph, P, s, pre, post, after_hidden, racing, centred):
     """Come `Brains._learn` (la stessa `brain.plasticity`), solo per chi
     impara ed è in gara. Restituisce lo stato della plasticità aggiornato."""
     M = jnp.einsum("nth,nh->nt", P["kmod"], after_hidden * P["mod_sign"])
     p = {**P, "w_eff": s["w"], "early": s["early"], "bias_now": s["bias_now"], "avg": s["avg"]}
-    w, early, bias, avg = plasticity(ph, jnp, p, pre, post, M)
+    w, early, bias, avg = plasticity(ph, jnp, p, pre, post, M, P["active"].shape[1], centred)
     on = (P["learns"] * racing)[:, None] > 0
     return dict(w=jnp.where(on[:, :, None], w, s["w"]), early=jnp.where(on[:, :, None], early, s["early"]),
                 bias_now=jnp.where(on, bias, s["bias_now"]), avg=jnp.where(on, avg, s["avg"]))
@@ -263,7 +263,7 @@ def rate_brain(ph, P, s, obs, racing, n_hidden):
     after = jnp.tanh(jnp.einsum("nts,ns->nt", s["w"], x) + s["bias_now"]) * P["target_on"]
     on = racing[:, None] > 0
     after = jnp.where(on, after, before)
-    return dict(state=after, **learn(ph, P, s, x, after, after[:, :n_hidden], racing)), after[:, n_hidden:]
+    return dict(state=after, **learn(ph, P, s, x, after, after[:, :n_hidden], racing, True)), after[:, n_hidden:]
 
 
 def spike_brain(ph, P, s, obs, racing, n_hidden, substeps):
@@ -289,7 +289,7 @@ def spike_brain(ph, P, s, obs, racing, n_hidden, substeps):
     spikes = jnp.where(on, spikes, s["spikes"])
     state = jnp.where(on, state, s["state"])
     pre = jnp.concatenate([obs, state], 1)
-    plastic = learn(ph, P, s, pre, state, state[:, :h], racing)
+    plastic = learn(ph, P, s, pre, state, state[:, :h], racing, False)
     m = state[:, h:]
     out = jnp.stack([m[:, 0] - m[:, 1], m[:, 2] - m[:, 3]], 1)
     return dict(charge=charge, spikes=spikes, state=state, **plastic), out

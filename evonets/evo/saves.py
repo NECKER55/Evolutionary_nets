@@ -35,8 +35,9 @@ from . import ladder
 # 10 = scaling omeostatico (due geni per neurone; i file precedenti: gene 0,
 #     cioè attività desiderata 0,5 e forza di partenza);
 # 11 = traccia provvisoria e consolidamento (un gene per neurone, la durata;
-#     i file precedenti: gene 0, la durata di partenza).
-FORMAT = 11
+#     i file precedenti: gene 0, la durata di partenza);
+# 12 = omeostasi della soglia con un gene proprio (i file precedenti: gene 0).
+FORMAT = 12
 # Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
 # nullo, regola a zero, nessun modulatore.
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
@@ -51,6 +52,10 @@ ADDED_IN_4 = {"r_tau": 0.0, "r_sub": 0.0, "r_div": 0.0}
 RUN_STATE = ("sim_mode", "sensor_set", "net_type", "population", "net_hidden_slots", "receptor_slots", "task",
              "n_hazards", "ladder",
              *ladder.DIALS, "exam_every")
+# Prima del formato 10 non c'era il gene dell'attività desiderata a*: aprendo
+# quei file, una vita di prova di tanti passi (10 s) misura l'attività media di
+# ogni neurone, che diventa il suo a* (la popolazione era in equilibrio).
+CALIBRATION_STEPS = 600
 # Cosa cambia aprendo un file di un formato vecchio: (fino al formato, nota).
 CONVERSIONS = (
     (3, "recettori senza adattamento sensoriale"),
@@ -61,6 +66,7 @@ CONVERSIONS = (
     (8, "apprendimento hebbiano di base aggiunto (velocità di partenza)"),
     (9, "scaling omeostatico aggiunto (forza di partenza)"),
     (10, "traccia provvisoria dell'hebbiano aggiunta (durata di partenza)"),
+    (11, "omeostasi della soglia con un gene proprio (forza di partenza)"),
 )
 
 
@@ -76,6 +82,37 @@ def code_version() -> str:
         return head + ("+modifiche" if dirty else "")
     except (OSError, subprocess.SubprocessError):
         return "sconosciuta"
+
+
+def calibrate(evo, g: Genome, steps: int = CALIBRATION_STEPS) -> None:
+    """Sul posto: a* di ogni neurone di `g` = la sua frequenza media in una
+    vita di prova nel mondo della corsa, con la plasticità spenta (com'era
+    nata la popolazione). Il mondo e le reti tornano poi come prima."""
+    world, ctrl, cfg = evo.world, evo.ctrl, evo.cfg
+    b = ctrl.brains
+    kept = b.genome, world.n, cfg.plasticity
+    cfg.plasticity = False
+    world.n = len(g)
+    world.reset()
+    b.set_genome(g)
+    ctrl.reset(world.seed)
+    total = np.zeros((len(g), b.n_hidden + b.n_out))
+    count = np.zeros(len(g))
+    try:
+        for _ in range(steps):
+            racing = world.racing.copy()
+            world.step(ctrl.act(world), ctrl.upkeep)
+            total[racing] += b.frequencies()[racing]
+            count[racing] += 1
+    finally:
+        cfg.plasticity = kept[2]
+        world.n = kept[1]
+        world.reset()
+        b.set_genome(kept[0])
+        ctrl.reset(world.seed)
+        evo._sim = None
+    mean = np.clip(total / np.maximum(count, 1.0)[:, None], 0.02, 0.98)
+    g.traits[:, :, b.BASE_TRAITS + PLASTIC.index("target")] = np.log(mean / (1.0 - mean))
 
 
 def save(evo, path) -> None:
@@ -166,7 +203,11 @@ def load(cls, cfg: Config, path):
         cfg.population = int(d["population"])
         cfg.net_type = str(d["net_type"])
         evo = cls(cfg, int(d["world_seed"]))
-        evo.ctrl.brains.set_genome(genome())
+        tune = fmt < 10  # senza il gene dell'attività desiderata: si tara
+        population = genome()
+        if tune:
+            calibrate(evo, population)
+        evo.ctrl.brains.set_genome(population)
         evo.ctrl.reset(evo.world.seed)
         evo.age = d["age"]
         evo.ids, evo.next_id, evo.born = d["ids"], int(d["next_id"]), d["born"]
@@ -179,8 +220,12 @@ def load(cls, cfg: Config, path):
         evo.history = json.loads(str(d["history"]))
         if "lp_weights" in d:
             evo.last_parents = genome("lp_")
+            if tune:
+                calibrate(evo, evo.last_parents)
         if "ch_weights" in d:
             ch = genome("ch_")
+            if tune:
+                calibrate(evo, ch)
             evo.champions = [(int(g), int(a), ch.take([k]), int(i))
                              for k, (g, a, i) in enumerate(zip(d["ch_generation"], d["ch_age"], d["ch_id"]))]
         if "selection" in d:
@@ -191,6 +236,9 @@ def load(cls, cfg: Config, path):
     notes = []
     if fmt < FORMAT:
         parts = [text for upto, text in CONVERSIONS if fmt <= upto]
+        if fmt < 10:
+            parts.append(f"attività desiderata di ogni neurone tarata su una vita di prova di "
+                         f"{CALIBRATION_STEPS * cfg.dt:.0f} s")
         notes.append(f"salvataggio di formato {fmt}: convertito ({'; '.join(parts)})")
     if unknown:
         notes.append("costanti salvate che questo codice non conosce più: " + ", ".join(unknown))

@@ -43,7 +43,7 @@ def pack_params(world, ctrl) -> dict:
         c_press=p.c_press, mu_m=p.mu_m, sg_m=p.sg_m, g_m=p.g_m, mu_t=p.mu_t, sg_t=p.sg_t, g_t=p.g_t,
         g_mag=p.g_mag, c_body=p.c_body, keep=p.keep, sub=p.sub, div=p.div,
         links=b.links, target_on=b.target_on, eta=b.eta, rule=b.rule, kmod=b.kmod,
-        mod_sign=b._mod_sign, learns=b.learns, upkeep=b.upkeep, hebb=b.hebb, sign=b.sign, early_keep=b.early_keep,
+        mod_sign=b._mod_sign, learns=b.learns, upkeep=b.upkeep, hebb=b.hebb, sign=b.sign, intrinsic=b.intrinsic, early_keep=b.early_keep,
         homeo=b.homeo, target_act=b.target_act,
         anchor=hz.anchor.reshape(-1, 2), amp=hz.amp.reshape(-1, 2), omega=hz.omega.reshape(-1, 2),
         pulse_omega=hz.pulse_omega, base_radius=hz.base_radius,

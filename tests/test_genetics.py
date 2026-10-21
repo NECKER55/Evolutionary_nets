@@ -205,7 +205,9 @@ def test_breaking_is_easier_than_repairing_and_long_genes_break_more():
     mu = np.full(50, 0.001)
     rec, neu = knockout(g, mu)
     assert np.allclose(rec, 1 - 0.999 ** RECEPTOR_GENE_LENGTH)
-    assert (neu[:, 0] > 3 * neu[:, 1]).all()  # più collegamenti, più fragile (31 geni contro 7)
+    own, inputs = g.traits.shape[2], g.conn.shape[2]  # geni propri; collegamenti in ingresso
+    assert np.allclose(neu[:, 0], 1 - 0.999 ** (own + inputs)) and np.allclose(neu[:, 1], 1 - 0.999 ** own)
+    assert (neu[:, 0] > 2 * neu[:, 1]).all()  # più collegamenti, più fragile
     assert (neu[:, 1] > 2 * 0.001).all()  # rompere è più probabile che riparare (μ)
 
 

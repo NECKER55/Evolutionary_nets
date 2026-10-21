@@ -133,6 +133,34 @@ TARGET, HOMEO = Brains.BASE_TRAITS + PLASTIC.index("target"), Brains.BASE_TRAITS
 HEBB = Brains.BASE_TRAITS + PLASTIC.index("hebb")
 
 
+def test_saves_without_the_desired_activity_are_tuned_on_a_trial_life(tmp_path):
+    """Un salvataggio del formato 9 non ha il gene dell'attività desiderata:
+    aprendolo, a* di ogni neurone diventa la sua frequenza media in una vita
+    di prova (la popolazione era in equilibrio), non 0,5 per tutti."""
+    e = Evolution(Config(population=10, net_type="spike-ei"), 0)
+    e.save(tmp_path / "pop.npz")
+    data = dict(np.load(tmp_path / "pop.npz"))
+    old = SpikingBrains.BASE_TRAITS + PLASTIC.index("hebb") + 1  # geni fino all'hebbiano
+    for k in list(data):
+        if k.endswith("traits"):
+            data[k] = data[k][:, :, :old]
+    data["format"] = np.array(9)
+    np.savez(tmp_path / "old.npz", **data)
+    back = Evolution.load(Config(), tmp_path / "old.npz")
+    b = back.ctrl.brains
+    motors = b.target_act[:, b.n_hidden:]  # i motori lavorano sempre: hanno un'attività vera
+    assert not np.allclose(motors, 0.5) and ((motors >= 0.02) & (motors <= 0.98)).all()
+    assert "tarata" in back.log[-1]["note"]
+    assert back.world.n == 10 and back.world.t == 0.0
+    again = Evolution.load(Config(), tmp_path / "old.npz")
+    assert np.allclose(again.ctrl.brains.target_act, b.target_act)  # ripetibile
+
+
+def freq(w):
+    """Frequenza di n0 quando r0 = 1 gli arriva con il peso w (rete continua)."""
+    return (1.0 + np.tanh(w)) / 2.0
+
+
 def plain(weight=0.5, **kw):
     """r0 -> n0 senza modulatori e senza plasticità modulata."""
     b = circuit(**kw)
@@ -147,7 +175,7 @@ def plain(weight=0.5, **kw):
 def test_basic_hebbian_bcm_brings_activity_towards_the_desired_level_without_modulators():
     """Regola BCM: sopra la soglia mobile θ = ā²/a* la sinapsi si rafforza,
     sotto si indebolisce; a regime l'attività va verso a*. n0 parte da
-    tanh(0,5) ≈ 0,46."""
+    tanh(0,5) ≈ 0,46, cioè frequenza (1 + 0,46)/2 ≈ 0,73."""
     b, g = plain(hebb_initial_rate=0.05, homeo_tau=0.1)
     for gene, sign in ((-2.0, -1), (2.0, +1)):  # a* ≈ 0,12 e 0,88
         g.traits[0, :, TARGET] = gene
@@ -155,7 +183,7 @@ def test_basic_hebbian_bcm_brings_activity_towards_the_desired_level_without_mod
         assert b.learns[0]
         w = run(b, steps=3000)
         assert np.sign(w - 0.5) == sign
-        assert abs(np.tanh(w) - b.target_act[0, 0]) < abs(np.tanh(0.5) - b.target_act[0, 0])
+        assert abs(freq(w) - b.target_act[0, 0]) < abs(freq(0.5) - b.target_act[0, 0])
     g.traits[0, :, HEBB] = -40.0  # il gene a zero la spegne
     b.set_genome(g)
     assert run(b) == 0.5
@@ -164,13 +192,13 @@ def test_basic_hebbian_bcm_brings_activity_towards_the_desired_level_without_mod
 def test_basic_hebbian_on_inhibitory_synapses_follows_vogels():
     """Una sinapsi inibitoria si rafforza dove il neurone è più attivo del
     desiderato e si indebolisce dove lo è meno; resta sempre inibitoria."""
-    for gene, stronger in ((-2.0, True), (2.0, False)):
+    for gene, stronger in ((-2.0, True), (4.0, False)):  # a* ≈ 0,12 e 0,98
         b, g = plain(weight=-0.5, hebb_initial_rate=0.05)
-        g.traits[0, 0, 0] = 1.5  # n0 acceso dalla corrente di fondo: tanh(1,5 − 0,5) ≈ 0,76
+        g.traits[0, 0, 0] = 1.5  # n0 acceso dalla corrente di fondo: frequenza (1 + tanh(1)) / 2 ≈ 0,88
         g.traits[0, :, TARGET] = gene
         b.set_genome(g)
         w = run(b, steps=600)
-        assert w < 0 and (w < -0.5) == stronger
+        assert w <= 0 and (w < -0.5) == stronger  # al più si spegne: non diventa eccitatoria
 
 
 def test_plasticity_changes_strength_never_the_kind_of_synapse():
@@ -187,7 +215,7 @@ def test_plasticity_changes_strength_never_the_kind_of_synapse():
 def test_homeostatic_scaling_of_inhibitory_synapses_goes_the_other_way():
     """Neurone troppo zitto: le eccitatorie crescono, le inibitorie calano."""
     b, g = plain(weight=-0.5, homeo_initial_rate=1.0, homeo_tau=0.1)
-    g.traits[0, 0, 0] = 0.8  # corrente di fondo: attività tanh(0,3) ≈ 0,29
+    g.traits[0, 0, 0] = 0.8  # corrente di fondo: frequenza (1 + tanh(0,3)) / 2 ≈ 0,65
     g.traits[0, :, TARGET] = 2.0  # desidera 0,88
     b.set_genome(g)
     assert -0.5 < run(b, steps=600) <= 0.0
@@ -195,7 +223,7 @@ def test_homeostatic_scaling_of_inhibitory_synapses_goes_the_other_way():
 
 def test_homeostatic_scaling_brings_activity_towards_the_desired_level():
     """n0 riceve solo da r0, sempre a 1: con il peso 0,5 la sua attività è
-    tanh(0,5) ≈ 0,46. Se desidera meno, le sinapsi in entrata si indeboliscono;
+    tanh(0,5) ≈ 0,46, frequenza ≈ 0,73. Se desidera meno, le sinapsi in entrata si indeboliscono;
     se desidera di più, si rafforzano; con la forza a zero non cambia nulla."""
     b, g = plain(homeo_initial_rate=1.0, homeo_tau=0.1)
     for gene, sign in ((-2.0, -1), (2.0, +1)):  # a* ≈ 0,12 e 0,88
@@ -203,7 +231,7 @@ def test_homeostatic_scaling_brings_activity_towards_the_desired_level():
         b.set_genome(g)
         w = run(b, steps=600)
         assert np.sign(w - 0.5) == sign
-        assert abs(np.tanh(w) - b.target_act[0, 0]) < abs(np.tanh(0.5) - b.target_act[0, 0])
+        assert abs(freq(w) - b.target_act[0, 0]) < abs(freq(0.5) - b.target_act[0, 0])
     g.traits[0, :, HOMEO] = -40.0
     b.set_genome(g)
     assert run(b) == 0.5
