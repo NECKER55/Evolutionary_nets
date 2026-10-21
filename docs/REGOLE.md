@@ -393,20 +393,29 @@ pezzo di corteccia:
   - Sinapsi inibitorie, regola di Vogels: Δ|w| = η_h · pre · (post − a*).
     L'inibizione cresce dove il neurone è più attivo del desiderato e cala
     dove lo è meno: tiene in equilibrio eccitazione e inibizione.
+- **Frequenze**: le regole di Hebb e l'omeostasi lavorano sulle frequenze,
+  sempre ≥ 0. Nella rete a impulsi l'attività è già una frequenza; nella rete
+  continua x = tanh(...) è lo scarto dalla frequenza spontanea, e la frequenza
+  è (1 + x)/2 (x = 0: il neurone spara al suo ritmo di riposo).
 - **Scaling omeostatico, sempre attivo**: ogni neurone interno e ogni motore
-  tiene la media recente ā della propria attività (|attività|, tempo
-  caratteristico 5 s, `homeo_tau`) e moltiplica le sinapsi eccitatorie che
-  riceve per exp(h · dt · (a* − ā)) e quelle inibitorie per l'inverso (come
-  ha misurato Turrigiano). Con la stessa forza h il neurone sposta anche la
-  propria **eccitabilità** (la corrente di fondo) di h · dt · (a* − ā), nel
-  verso che avvicina l'attività ad a* (Desai 1999).
+  tiene la media ā della propria frequenza su un tempo lungo (120 s,
+  `homeo_tau`: molto più di qualsiasi comportamento, come in natura dove
+  sono ore) e moltiplica le sinapsi eccitatorie che riceve per
+  exp(h · dt · (a* − ā)) e quelle inibitorie per l'inverso (come ha misurato
+  Turrigiano). Geni del neurone: l'attività desiderata a* = sigmoide(gene) e
+  la forza h = `homeo_initial_rate` · e^gene (partenza 1e-4 per secondo:
+  neutrale). Chi è troppo attivo si indebolisce gli ingressi, chi è troppo
+  zitto se li rafforza. Si nasce in equilibrio (ā = a*).
+- **Omeostasi dell'eccitabilità** (Desai 1999), un meccanismo distinto con
+  un gene proprio ("intrinsic", stessa partenza): la corrente di fondo si
+  sposta di h_i · dt · (a* − ā), cioè cresce se il neurone è troppo zitto.
 - **Saturazione graduale** (van Rossum 2000): ogni rafforzamento è
   moltiplicato per 1 − |w| / `synapse_max`: una sinapsi grande cresce sempre
-  meno, invece di sbattere contro un tetto. Due geni del neurone: l'attività desiderata
-  a* = sigmoide(gene) e la forza h = `homeo_initial_rate` · e^gene (partenza
-  1e-4 per secondo: neutrale). Chi è troppo attivo si indebolisce gli
-  ingressi, chi è troppo zitto se li rafforza. Si nasce in equilibrio
-  (ā = a*). Come le altre plasticità, ciò che cambia non si eredita.
+  meno, invece di sbattere contro un tetto.
+- Come le altre plasticità, ciò che cambia durante la vita non si eredita.
+- **Salvataggi di prima del formato 10** (senza a*): aprendoli, una vita di
+  prova di 10 s misura la frequenza media di ogni neurone, che diventa il suo
+  a* (la popolazione era in equilibrio); costa circa mezzo minuto, una volta.
 
 - Ogni neurone ha, tra i suoi geni, una **regola di plasticità** per le
   sinapsi che riceve: Δw = η · M · (A·pre·post + B·pre + C·post + D). η, A, B,

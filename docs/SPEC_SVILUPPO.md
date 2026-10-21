@@ -1,7 +1,8 @@
 # Specifica: lo sviluppo del cervello (genoma indiretto)
 
-Stato: **bozza da approvare**, rivista il 2026-10-21 (sezione 10). Nulla di
-quanto descritto qui è ancora nel codice.
+Stato: **approvata**, rivista il 2026-10-21 (sezioni 10 e 11). Nel codice
+c'è la plasticità durante la vita (sezione 10); lo sviluppo vero e proprio
+(marcatori, tabella, grembo) non ancora: il piano è nella sezione 11.
 
 Scelte dell'utente (2026-10-14):
 
@@ -284,10 +285,90 @@ all'apprendimento.
    sovrascrittura. Resta: l'omeostasi forte (≥ 1e-3) danneggia le popolazioni
    convertite (a* = 0,5 per tutti i neuroni), e l'hebbiano forte dello
    sviluppo arriverà con l'attività spontanea.
-2. Sviluppo: marcatori, tabella, guadagno, crescita degli assoni, attività
-   spontanea, omeostasi; mutazioni, incrocio tra omologhi dei marcatori; formato
-   12. Prima nel motore NumPy (lo sviluppo si fa alla nascita, sulla CPU), poi la
-   vita sulla GPU (hebbiano e omeostasi nel passo).
-3. Controllo con lo XOR.
-4. Interfaccia: colore dell'identità dei neuroni, tabella di affinità.
-5. Confronto nel mondo.
+2. Il resto del lavoro segue il piano della sezione 11 (approvato il
+   2026-10-21), che sostituisce i vecchi punti 2–5.
+
+## 11. Piano verso un cervello che si sviluppa come in natura (2026-10-21)
+
+Approvato dall'utente il 2026-10-21 ("come in natura": le scelte aperte le
+decide l'assistente, con l'opzione più naturale). Ogni fase si chiude con test,
+misura di neutralità su una popolazione evoluta, documentazione e commit. Il
+mondo (un mondo in cui imparare conviene, rumore della bravura, selezione a
+soglia, durata delle vite, arena unica) si affronta dopo, a parte.
+
+**Problemi da risolvere.** Dalla tabella del confronto con la natura:
+(1) il genoma scrive ogni peso; (2) mancano tipi di cellule condivisi;
+(3) manca l'attività spontanea con Hebb prima della nascita; (4) mancano i
+periodi critici; (5) mancano segnali di valore innati; (6) l'architettura a
+regioni deve poter emergere. Lasciati indietro prima: (7) l'omeostasi danneggia
+le popolazioni convertite (a* = 0,5 per tutti); (8) si nasce con ā = a*;
+(9) senza selezione i tassi di mutazione derivano e il cervello si gonfia;
+(10) la rete continua ha attività negative, che non esistono; (11) omeostasi
+delle sinapsi e della soglia con lo stesso gene; (12) tempi compressi (limite
+accettato, legato al mondo); (13) controllo XOR, colori dell'identità,
+confronto con più semi.
+
+**Fase 0 — pulizia (7, 9, 10, 11).**
+- (10) La rete continua: x = tanh(...) è lo scarto dalla frequenza
+  spontanea; le regole di apprendimento usano la frequenza (1 + x)/2 ≥ 0 (e i
+  sensi come sono, ≥ 0). La dinamica non cambia.
+- (11) Gene proprio per l'omeostasi della soglia ("intrinsic").
+- (7) Taratura alla conversione: aprendo un salvataggio senza il gene
+  dell'attività desiderata, una vita di prova misura l'attività media di ogni
+  neurone e a* la prende come valore (la popolazione era già in equilibrio).
+- (9) Misurare se la deriva dei tassi viene dal limite minimo (sponda) e se
+  con la selezione i tassi scendono (barriera della deriva, Lynch).
+
+*Fase 0 fatta il 2026-10-21.* (10) frequenza = (1 + x)/2 nelle reti
+continue, `brain.frequencies`. (11) gene "intrinsic", formato 12. (7) taratura
+alla conversione (`saves.calibrate`, 10 s, circa 30 s di calcolo una volta);
+inoltre ā su 120 s invece di 5 (punto 12: con 5 s l'omeostasi combatteva ogni
+singolo comportamento). Misura sulla popolazione di corsa-20261020-200723
+(maturi 76,8% senza plasticità): omeostasi 1e-2 dal 5% (a* = 0,5) al 38%
+(tarato) e al 48% (tarato, 120 s); 1e-4 neutrale. Il danno che resta è
+atteso: un'omeostasi forte imposta a una popolazione evoluta senza è un grande
+cambio di fisiologia (1,5–2 volte i pesi in una vita); se l'omeostasi aiuti
+quando evolve insieme al resto lo dice solo una corsa da zero. (9) senza
+selezione i tassi derivano senza spinta (16 semi: spostamento medio 0 entro
+l'errore; con il limite a 1e-12 è uguale): il gonfiamento viene
+dall'asimmetria (una famiglia sopra la soglia cresce in modo esponenziale,
+sotto resta a zero), come nei genomi a selezione rilassata. Con la selezione i
+tassi scendono (corsa-20261020-200723: ampiezza 0,3 → 0,026, duplicazione
+0,005 → 0,002). Nessuna modifica.
+
+**Fase 1 — sviluppo (1, 2).** La specifica delle sezioni 2–5 e 10: marcatori
+(2 all'inizio), tabella di affinità, probabilità di collegamento da affinità e
+distanza, peso iniziale = affinità × guadagno, duplicazione e divergenza dei
+marcatori, incrocio tra omologhi dei marcatori, `genome = "diretto" |
+"sviluppo"`, marcatori dei sensi fissi in modalità "cervello", salvataggi con il
+fenotipo. Scelta aperta: marcatori legati alla posizione (gradienti come
+Eph/efrine, che in natura fanno le mappe).
+
+**Fase 2 — grembo (3, 8).** Pochi secondi di attività spontanea prima della
+nascita (rumore nei sensi, scelta: indipendente o a onde correlate tra sensi
+vicini), con Hebb, omeostasi e soglia; la traccia si consolida da sola (lo
+sviluppo fissa ciò che si forma); ā nasce dall'attività vera. Sulla GPU.
+
+**Fase 3 — periodi critici (4).** η_h(età) = η_h · (r + (1 − r) · e^(−età/τ_c)),
+con τ_c e r geni del neurone; la plasticità modulata resta aperta.
+
+**Fase 4 — valore innato (5).** Sensi del gusto (quando si mangia) e del dolore
+(danno); in modalità "cervello" due neuroni di valore fissi (gusto → M
+positivo, dolore → M negativo, come dopamina e noradrenalina). Scelta aperta:
+se nella simulazione completa partono presenti o evolvono da zero.
+
+**Fase 5 — vedere tipi e regioni (2, 6, 13).** Colore dell'identità dei
+neuroni, tabella di affinità nell'esploratore, statistiche (marcatori, tipi,
+uso dei modulatori). L'architettura non si impone.
+
+**Fase 6 — verifiche (13).** Controllo con lo XOR (diretto contro sviluppo);
+"un neurone in più"; confronto con più semi in modalità "cervello" (diretto,
+diretto + plasticità, sviluppo, sviluppo + valore), regole bloccate, misure
+decise prima. Le corse lunghe partono solo con il via dell'utente.
+
+```
+Fase 0 ──► Fase 1 ──► Fase 2 ──► Fase 3
+             │                     │
+             └──► Fase 5           ▼
+Fase 4 (in parallelo) ──────► Fase 6 ──► Mondo
+```
