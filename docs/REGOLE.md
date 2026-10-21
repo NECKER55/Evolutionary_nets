@@ -705,6 +705,19 @@ ereditati; quelli eventualmente ritoccati valgono per i figli del figlio.
 Nessun tasso scende sotto 1e-5 (`mutation_floor`): la copiatura perfetta non
 esiste.
 
+**Le ampiezze hanno un tetto naturale.** In natura gli effetti delle
+mutazioni sono per lo più piccoli (la varianza che aggiungono in una
+generazione è circa un millesimo di quella dovuta all'ambiente) e i mutatori
+cambiano i tassi di un fattore. Un ritocco sposta quindi un gene al più di
+circa 1 (quanto differiscono due individui alla partenza), una posizione di
+0,3 lati del cervello, un gene di recettore di 0,2 volte la sua scala; la
+portata dei collegamenti λ arriva al più a 3. Senza tetto l'ampiezza, che
+muta con se stessa, si autoalimentava: senza selezione in 60 generazioni
+arrivava a 100 e i geni a ±170 (corretto il 2026-10-21). Una sinapsi, anche
+nel genoma diretto, non supera mai il suo massimo fisico (`synapse_max`), né
+nel genoma né alla nascita; una velocità della plasticità (e^gene) non sale
+oltre e^12 volte quella di partenza (ma può spegnersi del tutto).
+
 | Mutazione | Valore di partenza del tasso | Costante iniziale |
 |---|---|---|
 | ritocco di un peso o di un gene proprio | 10% per ogni gene, di poco (±0,3) | `mut_weight_prob`, `mut_weight_std` |
