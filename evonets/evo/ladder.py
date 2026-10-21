@@ -3,8 +3,9 @@
 Le manopole (`forage_*` nella configurazione) salgono a stadi, uno alla volta:
 prima abbondanza e cibi necessari insieme, poi il cibo che sfugge (prede che
 scappano e nube d'odore che si forma e svanisce), poi i predatori, poi le
-rocce (ostacoli e rifugi). Tutta la scala si riassume quindi in una sola
-**posizione** x tra 0 (tutto basico) e 4 (tutto complesso): lo stadio i ha le sue manopole a
+rocce (ostacoli e rifugi), poi i frutti (buoni o cattivi a seconda della
+vita: si impara quale mangiare). Tutta la scala si riassume quindi in una
+sola **posizione** x tra 0 (tutto basico) e 5 (tutto complesso): lo stadio i ha le sue manopole a
 clip(x - i, 0, 1). Salire muove il primo stadio non ancora al massimo,
 scendere l'ultimo non ancora a zero.
 
@@ -25,7 +26,7 @@ Modi (`cfg.ladder`): "scala" = progressione adattiva; "basico" e
 import numpy as np
 
 STAGES = (("forage_abundance", "forage_need"), ("forage_prey", "forage_scent"), ("forage_predators",),
-          ("forage_obstacles",))
+          ("forage_obstacles",), ("forage_variety",))
 DIALS = tuple(d for stage in STAGES for d in stage)
 TOP = float(len(STAGES))
 MODES = ("", "scala", "basico", "complesso")
@@ -42,7 +43,7 @@ def position(cfg) -> float:
     return float(sum(np.mean([getattr(cfg, d) for d in stage]) for stage in STAGES))
 
 
-STAGE_NAMES = ("abbondanza e cibi necessari", "prede e odore che sfugge", "predatori", "rocce")
+STAGE_NAMES = ("abbondanza e cibi necessari", "prede e odore che sfugge", "predatori", "rocce", "frutti")
 
 
 def stage(cfg) -> tuple[int, float]:

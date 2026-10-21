@@ -139,6 +139,19 @@ class Foraging:
         self.food = np.broadcast_to(food, (n, K, 2)).copy()
         self.food_on = np.zeros((n, K), dtype=bool)
         self.food_on[:, : self.n_food] = True
+        # Frutti: in ogni vita uno dei due colori è buono (`good`, 0 rosso o 1
+        # giallo, a caso per ognuno) e una quota dei posti (fino a metà, con
+        # la manopola) ha frutti cattivi, dell'altro colore. Ogni posto tiene
+        # il suo tipo anche quando il frutto ricompare.
+        self.bad = np.zeros((n, K), dtype=bool)
+        self.good = np.zeros(n, dtype=int)
+        n_bad = int(round(self.n_food * 0.5 * cfg.forage_variety))
+        if n_bad:  # estratti solo se servono: senza frutti cattivi il mondo resta quello di prima
+            self.good = rng.integers(0, 2, n)
+            for i in range(n):
+                self.bad[i, rng.choice(self.n_food, n_bad, replace=False)] = True
+        self.color = np.where(self.bad, 1 - self.good[:, None], self.good[:, None])  # (N, K): 0 rosso, 1 giallo
+        self.bad_eaten = np.zeros(n, dtype=int)
         self.queue = rng.uniform(lo, hi, (self.QUEUE, 2))
         # Con l'arena propria ognuno scorre la coda da un punto suo: il cibo
         # ricompare in posti diversi per ciascuno (la coda resta comune, così
@@ -215,14 +228,17 @@ class Foraging:
 
     def discs(self, world):
         """Gli oggetti che si vedono, per agente: posizioni (N, O, 2), raggi
-        (N, O) (0 = non c'è) e tipo di ciascuno (O,): 0 cibo, 1 predatore,
-        2 roccia."""
+        (N, O) (0 = non c'è) e tipo di ciascuno (O,): 0 cibo rosso, 1
+        predatore, 2 roccia, 3 frutto giallo (ogni cibo compare due volte, una
+        per colore, con raggio 0 nel colore che non ha)."""
         cfg = world.cfg
-        pos = np.concatenate([self.food, self.pred, self.rock], axis=1)
-        radius = np.concatenate([np.where(self.food_on, self.food_r, 0.0),
-                                 np.where(self.pred_on, cfg.predator_radius, 0.0), self.rock_r], axis=1)
-        kinds = np.r_[np.zeros(self.food.shape[1], dtype=int), np.ones(self.pred.shape[1], dtype=int),
-                      np.full(self.rock.shape[1], 2, dtype=int)]
+        K = self.food.shape[1]
+        pos = np.concatenate([self.food, self.pred, self.rock, self.food], axis=1)
+        radius = np.concatenate([np.where(self.food_on & (self.color == 0), self.food_r, 0.0),
+                                 np.where(self.pred_on, cfg.predator_radius, 0.0), self.rock_r,
+                                 np.where(self.food_on & (self.color == 1), self.food_r, 0.0)], axis=1)
+        kinds = np.r_[np.zeros(K, dtype=int), np.ones(self.pred.shape[1], dtype=int),
+                      np.full(self.rock.shape[1], 2, dtype=int), np.full(K, 3, dtype=int)]
         return pos, radius, kinds
 
     def scent(self) -> tuple[np.ndarray, np.ndarray]:
@@ -244,7 +260,10 @@ class Foraging:
             d = np.maximum(np.linalg.norm(p - self.food[agent], axis=2) - self.food_r, 0.0)
             dg = np.maximum(np.linalg.norm(p - self.ghost[agent], axis=2) - self.food_r, 0.0)
             c = (on[agent] * np.exp(-d / lam) + trace[agent] * np.exp(-dg / lam)) * self.food_on[agent]
-            out.append((cfg.food_molecule, cfg.food_smell * c.sum(axis=1)))
+            red = self.color[agent] == 0  # ogni frutto profuma della molecola del suo colore
+            out.append((cfg.food_molecule, cfg.food_smell * (c * red).sum(axis=1)))
+            if self.bad.any():
+                out.append((cfg.fruit_molecule, cfg.food_smell * (c * ~red).sum(axis=1)))
         if cfg.predator_smell > 0.0 and self.n_pred:
             d = np.maximum(np.linalg.norm(points[:, None, :] - self.pred[agent], axis=2) - cfg.predator_radius, 0.0)
             c = np.exp(-d / lam) * self.pred_on[agent]
@@ -295,10 +314,14 @@ class Foraging:
                 self.food[i, k] = a if far else b
                 self.ptr[i] += 2
             self.food = self._outside(self.food, self.food_r)  # il cibo non ricompare dentro una roccia
-            n_eat = eat.sum(axis=1)
+            n_eat = (eat & ~self.bad).sum(axis=1)  # i frutti buoni nutrono e hanno gusto
+            n_bad = (eat & self.bad).sum(axis=1)  # i cattivi fanno male e tolgono energia
             self.eaten += n_eat
+            self.bad_eaten += n_bad
             world.taste = np.minimum(world.taste + n_eat, 1.0)  # il gusto del cibo
-            world.energy = np.minimum(world.energy + cfg.food_energy * n_eat, cfg.energy_max)
+            world.pain = np.minimum(world.pain + n_bad, 1.0)
+            world.energy = np.clip(world.energy + cfg.food_energy * n_eat - cfg.bad_fruit_damage * n_bad, 0.0,
+                                   cfg.energy_max)
 
     def completed(self, world) -> np.ndarray:
         return self.eaten >= self.need

@@ -512,6 +512,8 @@ class RunScreen(Screen):
                 else "nessun predatore" + (" (dallo stadio 3)" if cfg.ladder == "scala" else ""))
         if task.n_rock:
             pred += f"; {task.n_rock} rocce"
+        if task.bad.any():
+            pred += f"; {int(task.bad[0].sum())} frutti cattivi"
         return [head, f"ora: {task.n_food} cibi r{task.food_r:.1f}, servono {task.need}; {prey}; {pred}"]
 
     def _env_text(self) -> str:

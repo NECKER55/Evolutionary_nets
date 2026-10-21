@@ -23,6 +23,7 @@ from .render import (
     PLAYER,
     PREDATOR,
     ROCK,
+    FRUIT,
     TARGET,
     TEXT,
     WALL,
@@ -34,8 +35,9 @@ BAND = (46, 52, 38)
 THIN = (88, 94, 112)  # la linea di ogni generazione: di sfondo, la media è quella da leggere
 WINDOW = 300  # generazioni mostrate nel grafico dei successi
 DONE_STAGE = (120, 96, 36)
-STAGE_NAMES = ("trovare il cibo", "inseguire il cibo che sfugge", "sfuggire ai predatori", "muoversi tra le rocce")
-STAGE_COLORS = (FOOD, (235, 150, 70), PREDATOR, ROCK)
+STAGE_NAMES = ("trovare il cibo", "inseguire il cibo che sfugge", "sfuggire ai predatori", "muoversi tra le rocce",
+               "imparare quale frutto")
+STAGE_COLORS = (FOOD, (235, 150, 70), PREDATOR, ROCK, FRUIT)
 CHANGE = 0.05  # differenza d'esame sotto la quale si parla di "stabile" (5 punti)
 
 
@@ -207,6 +209,8 @@ class Overview:
                 f"{avg[-1]:.0f}%.")
         if cfg.task == "cibo":
             text += f" Cibi mangiati in media: {num(hist[-1].get('eaten', 0.0))}."
+            if hist[-1].get("bad_eaten", 0.0) > 0:
+                text += f" Frutti cattivi mangiati: {num(hist[-1]['bad_eaten'])}."
         y = para(s, app.font, text, x0, y, w)
         box = pygame.Rect(rect.x + 50, y + 8, rect.w - 70, rect.bottom - y - 30)
         if cfg.ladder == "scala":  # la fascia in cui la scala resta ferma

@@ -298,6 +298,7 @@ class Config:
     forage_scent: float = 0.0  # da nube d'odore istantanea a nube che si forma e svanisce in scent_time_max
     forage_predators: float = 0.0  # da nessuno a 3 predatori a 15 u/s
     forage_obstacles: float = 0.0  # da nessuna roccia a rock_count_max rocce
+    forage_variety: float = 0.0  # da un frutto solo a metà dei frutti cattivi (quale colore lo è cambia ogni vita)
     # Estremi delle manopole.
     food_count_easy: int = 12
     forage_own_arena: bool = True  # ogni agente in un'arena sua (cibo e predatori in posti diversi)
@@ -338,6 +339,13 @@ class Config:
     rock_color: float = 0.45
     rock_color_width: float = 0.2
     rock_albedo: float = 0.4
+    # Frutti (quinto stadio): due tipi, rosso (food_color, food_molecule) e
+    # giallo (questi). In ogni vita, per ogni agente, uno dei due colori è
+    # buono e l'altro cattivo, a caso: si impara quale mangiare. Il cattivo
+    # non nutre, fa male (dolore) e toglie bad_fruit_damage di energia.
+    fruit_color: float = 0.65
+    fruit_molecule: float = 0.5
+    bad_fruit_damage: float = 30.0
     # Odori (docs/SPEC_MONDO.md, sezione 9): il cibo e i predatori rilasciano
     # una molecola loro; diffusione e degradazione fanno una nube stabile
     # forza · exp(-d / odor_range), d dal bordo. Con forage_scent > 0 la nube

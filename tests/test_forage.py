@@ -250,6 +250,57 @@ def test_food_never_comes_back_inside_a_rock():
 def test_the_ladder_has_a_fourth_stage_and_old_runs_open_without_rocks():
     from evonets.evo import ladder
 
-    assert ladder.TOP == 4.0 and ladder.STAGE_NAMES[-1] == "rocce"
+    assert ladder.TOP == 5.0 and ladder.STAGE_NAMES[3] == "rocce"
     assert ladder.at(3.5)["forage_obstacles"] == 0.5 and ladder.at(3.5)["forage_predators"] == 1.0
     assert ladder.at(2.5)["forage_obstacles"] == 0.0
+
+
+# --- I frutti (quinto stadio) --------------------------------------------------
+
+def test_without_the_fruit_dial_every_fruit_is_red_and_good():
+    cfg, w = forage(n=10)
+    t = w.task
+    assert not t.bad.any() and (t.color == 0).all() and (t.good == 0).all()
+
+
+def test_with_the_fruit_dial_half_the_fruits_are_bad_and_the_good_colour_changes_with_the_life():
+    cfg, w = forage(n=40, forage_variety=1.0)
+    t = w.task
+    assert (t.bad[:, : t.n_food].sum(axis=1) == t.n_food // 2).all()
+    assert (t.color == np.where(t.bad, 1 - t.good[:, None], t.good[:, None])).all()
+    assert set(t.good.tolist()) == {0, 1}  # per alcuni il buono è il rosso, per altri il giallo
+
+
+def test_a_good_fruit_feeds_and_tastes_a_bad_one_hurts():
+    cfg, w = forage(n=2, forage_variety=1.0)
+    t = w.task
+    good = int(np.flatnonzero(~t.bad[0] & t.food_on[0])[0])
+    bad = int(np.flatnonzero(t.bad[1] & t.food_on[1])[0])
+    w.pos[0], w.pos[1] = t.food[0, good], t.food[1, bad]
+    w.energy[:] = 100.0
+    w.step(np.zeros((2, 2)))
+    assert t.eaten.tolist() == [1, 0] and t.bad_eaten.tolist() == [0, 1]
+    assert w.taste[0] == 1.0 and w.pain[1] == 1.0 and w.taste[1] == 0.0
+    assert w.energy[0] > 150.0 and w.energy[1] < 100.0 - cfg.bad_fruit_damage + 1.0
+
+
+def test_the_yellow_fruit_is_seen_yellow_and_smells_of_its_own_molecule():
+    cfg, w = forage(n=1, forage_variety=1.0, food_smell=1.0)
+    t = w.task
+    w.pos[0] = [100.0, 70.0]
+    t.food_on[0] = False
+    t.food_on[0, 0] = True
+    t.color[0, 0] = 1
+    t.food[0, 0] = [110.0, 70.0]
+    seen = signals.light(cfg, w, w.pos[:1], np.zeros((1, 1)), np.array([0]))
+    assert seen["frutto"][0] > 0.4 and seen["cibo"][0] == 0.0
+    smells = dict(t.odors(w, w.pos[:1], np.array([0])))
+    assert smells[cfg.fruit_molecule][0] > 0 and smells[cfg.food_molecule][0] == 0.0
+
+
+def test_brain_mode_sees_yellow():
+    from evonets.net.senses import senses
+
+    names = {s.name for s in senses(Config(sim_mode="cervello"))}
+    assert {"occhio giallo sinistro", "occhio giallo destro"} <= names
+

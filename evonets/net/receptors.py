@@ -152,6 +152,7 @@ def stimuli(cfg, world, genes: ReceptorGenes, rows=None) -> np.ndarray:
         + spectral(mu_l, sg_l, cfg.predator_color, cfg.predator_color_width, cfg.predator_albedo)
         * seen["predatore"].reshape(n, R)
         + spectral(mu_l, sg_l, cfg.rock_color, cfg.rock_color_width, cfg.rock_albedo) * seen["roccia"].reshape(n, R)
+        + spectral(mu_l, sg_l, cfg.fruit_color, cfg.food_color_width, cfg.food_albedo) * seen["frutto"].reshape(n, R)
     )
 
     # Sostanze, nel punto del corpo dove sta il recettore.
@@ -270,6 +271,8 @@ class Prepared:
                                    cfg.predator_albedo)
         self.c_rock = L * spectral(mu[..., LIGHT], sg[..., LIGHT], cfg.rock_color, cfg.rock_color_width,
                                    cfg.rock_albedo)
+        self.c_fruit = L * spectral(mu[..., LIGHT], sg[..., LIGHT], cfg.fruit_color, cfg.food_color_width,
+                                    cfg.food_albedo)
         self.mu_c, self.sg_c, self.g_c = mu[..., CHEMICAL], sg[..., CHEMICAL], C
         self.c_press = M * tuning(0.0, mu[..., MECHANICAL], sg[..., MECHANICAL])
         self.mu_m, self.sg_m, self.g_m = mu[..., MECHANICAL], sg[..., MECHANICAL], M
@@ -296,7 +299,8 @@ class Prepared:
         seen = signals.light(cfg, world, points, (heading[..., None] + self.angles).reshape(n * R, -1), agent)
         out = (self.c_wall * seen["parete"].reshape(n, R) + self.c_target * seen["bersaglio"].reshape(n, R)
                + self.c_glow * seen["veleno"].reshape(n, R) + self.c_food * seen["cibo"].reshape(n, R)
-               + self.c_pred * seen["predatore"].reshape(n, R) + self.c_rock * seen["roccia"].reshape(n, R))
+               + self.c_pred * seen["predatore"].reshape(n, R) + self.c_rock * seen["roccia"].reshape(n, R)
+               + self.c_fruit * seen["frutto"].reshape(n, R))
         for molecule, conc in signals.chemicals(cfg, world, points, agent):
             out += self.g_c * tuning(molecule, self.mu_c, self.sg_c) * conc.reshape(n, R)
         if world.bump[rows].any():

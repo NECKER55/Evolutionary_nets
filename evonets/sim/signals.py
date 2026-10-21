@@ -50,7 +50,7 @@ def _light_kernel(origins, angles, arena_w, arena_h, L, target, target_r, hz_pos
     wall = np.zeros(k_all)
     targ = np.zeros(k_all)
     glow = np.zeros(k_all)
-    kinds = np.zeros((k_all, 3))  # luce degli oggetti dell'agente: cibo, predatori, rocce
+    kinds = np.zeros((k_all, 4))  # luce degli oggetti dell'agente: cibo rosso, predatori, rocce, frutti gialli
     for k in prange(k_all):
         ox, oy = origins[k, 0], origins[k, 1]
         for j in range(m):
@@ -111,6 +111,7 @@ def _light_kernel(origins, angles, arena_w, arena_h, L, target, target_r, hz_pos
         kinds[k, 0] /= m
         kinds[k, 1] /= m
         kinds[k, 2] /= m
+        kinds[k, 3] /= m
     return wall, targ, glow, kinds
 
 
@@ -141,7 +142,7 @@ def light(cfg, world, origins: np.ndarray, angles: np.ndarray, agent: np.ndarray
         np.ascontiguousarray(agent, dtype=np.int64), np.ascontiguousarray(obj_pos, dtype=float),
         np.ascontiguousarray(obj_r, dtype=float), np.ascontiguousarray(obj_kind, dtype=np.int64))
     return {"parete": wall, "bersaglio": targ, "veleno": glow, "cibo": kinds[:, 0], "predatore": kinds[:, 1],
-            "roccia": kinds[:, 2]}
+            "roccia": kinds[:, 2], "frutto": kinds[:, 3]}
 
 
 @njit(cache=True, parallel=True)

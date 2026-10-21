@@ -20,6 +20,7 @@ WALL = (200, 204, 215)
 FOOD = (235, 80, 70)  # il cibo è rosso anche per gli agenti (0,85 sull'asse della luce)
 PREDATOR = (90, 110, 255)  # i predatori quasi blu (0,05)
 ROCK = (120, 128, 112)  # le rocce grigie (0,45, colore spento)
+FRUIT = (235, 200, 60)  # il frutto giallo (0,65)
 TRAIL = 240  # punti della scia dell'agente seguito (uno per fotogramma)
 # Colore di un recettore secondo il fenomeno a cui è più sensibile (bianco se
 # generalista): luce, sostanze, meccanica, temperatura, magnetismo, interno.
@@ -138,9 +139,12 @@ class Renderer:
                                        max(2, int(task.food_r * s)), 1)
         for k in np.flatnonzero(task.food_on[i]):
             c = self._px(task.food[i, k])
+            color = FOOD if task.color[i, k] == 0 else FRUIT
             if task.prey_speed > 0:
-                pygame.draw.circle(self.overlay, (*FOOD, 40), c, int(cfg.prey_flee_range * s), 1)
-            pygame.draw.circle(self.overlay, (*FOOD, 255), c, max(2, int(task.food_r * s)))
+                pygame.draw.circle(self.overlay, (*color, 40), c, int(cfg.prey_flee_range * s), 1)
+            pygame.draw.circle(self.overlay, (*color, 255), c, max(2, int(task.food_r * s)))
+            if task.bad[i, k]:  # per chi guarda: questo, in questa vita, è cattivo
+                pygame.draw.circle(self.overlay, (40, 20, 20, 255), c, max(3, int(task.food_r * s) + 2), 2)
         for k in np.flatnonzero(task.rock_r[i] > 0):
             pygame.draw.circle(self.overlay, (*ROCK, 255), self._px(task.rock[i, k]), max(2, int(task.rock_r[i, k] * s)))
         for k in np.flatnonzero(task.pred_on[i]):

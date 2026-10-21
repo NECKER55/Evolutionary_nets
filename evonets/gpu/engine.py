@@ -49,7 +49,8 @@ PHYS = (
     # Il mondo del cibo.
     "prey_flee_range", "predator_range", "predator_radius", "predator_damage", "food_energy", "food_min_dist",
     "predator_vibration", "predator_vibration_freq",
-    "food_molecule", "food_smell", "predator_molecule", "predator_smell", "odor_range",
+    "food_molecule", "food_smell", "predator_molecule", "predator_smell", "odor_range", "fruit_molecule",
+    "bad_fruit_damage",
 )
 
 
@@ -75,8 +76,8 @@ def light(ph, ox, oy, ang, hz_pos, hz_r, target, target_r, has_target, objects=N
     """Come `signals.light`: per ogni recettore (K) e direzione campione (M),
     luce delle pareti, del bersaglio e del veleno, mediata sulle direzioni.
     `objects` = (posizioni (K, O, 2), raggi (K, O), tipi (O,)) degli oggetti
-    opachi della copia di mondo di ogni recettore (cibo 0, predatori 1, rocce
-    2): se c'è, si aggiungono la luce del cibo, dei predatori e delle rocce."""
+    opachi della copia di mondo di ogni recettore (cibo rosso 0, predatori 1,
+    rocce 2, frutti gialli 3): se c'è, si aggiunge la luce di ciascun tipo."""
     W, H, L = ph["arena_w"], ph["arena_h"], ph["light_attenuation"]
     dx, dy = jnp.cos(ang), jnp.sin(ang)  # (K, M)
     ox, oy = ox[:, None], oy[:, None]
@@ -122,7 +123,7 @@ def light(ph, ox, oy, ang, hz_pos, hz_r, target, target_r, has_target, objects=N
         return (jnp.where(hit_t, 0.0, fade).mean(1), jnp.where(hit_t, fade, 0.0).mean(1), glow.mean(1))
     return (jnp.where(hit_t | hit_o, 0.0, fade).mean(1), jnp.where(hit_t, fade, 0.0).mean(1), glow.mean(1),
             jnp.where(hit_o & (kind == 0), fade, 0.0).mean(1), jnp.where(hit_o & (kind == 1), fade, 0.0).mean(1),
-            jnp.where(hit_o & (kind == 2), fade, 0.0).mean(1))
+            jnp.where(hit_o & (kind == 2), fade, 0.0).mean(1), jnp.where(hit_o & (kind == 3), fade, 0.0).mean(1))
 
 
 def quanta(ph, P, s):
@@ -137,18 +138,22 @@ def quanta(ph, P, s):
     ang = (s["heading"][:, None, None] + P["angles"]).reshape(N * R, -1)
     forage = "food" in s
     if forage:
-        o_pos = jnp.repeat(jnp.concatenate([s["food"], s["pred"], P["rock"]], 1), R, axis=0)
-        o_r = jnp.repeat(jnp.concatenate([P["food_rad"], P["pred_rad"], P["rock_r"]], 1), R, axis=0)
-        o_kind = jnp.concatenate([jnp.zeros(s["food"].shape[1], jnp.int32), jnp.ones(s["pred"].shape[1], jnp.int32),
-                                  jnp.full(P["rock"].shape[1], 2, jnp.int32)])
-        wall, targ, glow, food, pred, rock = light(ph, px, py, ang, hz_pos, hz_r, s["target"], P["target_r"],
-                                                   P["has_target"], (o_pos, o_r, o_kind))
+        red = P["color"] == 0  # ogni cibo compare due volte, una per colore (raggio 0 in quello che non ha)
+        K = s["food"].shape[1]
+        o_pos = jnp.repeat(jnp.concatenate([s["food"], s["pred"], P["rock"], s["food"]], 1), R, axis=0)
+        o_r = jnp.repeat(jnp.concatenate([jnp.where(red, P["food_rad"], 0.0), P["pred_rad"], P["rock_r"],
+                                          jnp.where(red, 0.0, P["food_rad"])], 1), R, axis=0)
+        o_kind = jnp.concatenate([jnp.zeros(K, jnp.int32), jnp.ones(s["pred"].shape[1], jnp.int32),
+                                  jnp.full(P["rock"].shape[1], 2, jnp.int32), jnp.full(K, 3, jnp.int32)])
+        wall, targ, glow, food, pred, rock, fruit = light(ph, px, py, ang, hz_pos, hz_r, s["target"], P["target_r"],
+                                                          P["has_target"], (o_pos, o_r, o_kind))
     else:
         wall, targ, glow = light(ph, px, py, ang, hz_pos, hz_r, s["target"], P["target_r"], P["has_target"])
     out = (P["c_wall"] * wall.reshape(N, R) + P["c_target"] * targ.reshape(N, R)
            + P["c_glow"] * glow.reshape(N, R))
     if forage:
-        out += P["c_food"] * food.reshape(N, R) + P["c_pred"] * pred.reshape(N, R) + P["c_rock"] * rock.reshape(N, R)
+        out += (P["c_food"] * food.reshape(N, R) + P["c_pred"] * pred.reshape(N, R) + P["c_rock"] * rock.reshape(N, R)
+                + P["c_fruit"] * fruit.reshape(N, R))
     # Sostanze: tossina (dentro: intensità; fuori: odore se c'è), odore del bersaglio.
     ex = px[:, None] - hz_pos[None, :, 0]
     ey = py[:, None] - hz_pos[None, :, 1]
@@ -170,9 +175,10 @@ def quanta(ph, P, s):
 
         on, trace = scent(P, s)
         food_on = (P["food_rad"] > 0)[:, None, :]
-        fc = ((on[:, None, :] * cloud(s["food"], P["food_r"]) + trace[:, None, :] * cloud(s["ghost"], P["food_r"]))
-              * food_on).sum(-1)
-        out += P["g_c"] * _tuning(ph["food_molecule"], P["mu_c"], P["sg_c"]) * ph["food_smell"] * fc
+        fc = (on[:, None, :] * cloud(s["food"], P["food_r"]) + trace[:, None, :] * cloud(s["ghost"], P["food_r"])) * food_on
+        red = (P["color"] == 0)[:, None, :]  # ogni frutto profuma della molecola del suo colore
+        out += P["g_c"] * _tuning(ph["food_molecule"], P["mu_c"], P["sg_c"]) * ph["food_smell"] * (fc * red).sum(-1)
+        out += P["g_c"] * _tuning(ph["fruit_molecule"], P["mu_c"], P["sg_c"]) * ph["food_smell"] * (fc * ~red).sum(-1)
         pc = (cloud(s["pred"], ph["predator_radius"]) * (P["pred_rad"] > 0)[:, None, :]).sum(-1)
         out += P["g_c"] * _tuning(ph["predator_molecule"], P["mu_c"], P["sg_c"]) * ph["predator_smell"] * pc
     # Pressione sui lati che toccano una parete.
@@ -357,7 +363,7 @@ def physics(ph, P, s, actions, upkeep):
     if "food" in s:
         energy, forage, bitten, pos, vel, touch = foraging(ph, P, s, pos, vel, energy, active)
         bump = bump | touch
-        pain = jnp.minimum(pain + bitten * active, 1.0)  # un morso fa male
+        pain = jnp.minimum(pain + bitten * active + (forage["bad_eaten"] - s["bad_eaten"]), 1.0)  # morsi e frutti cattivi
         taste = jnp.minimum(taste + (forage["eaten"] - s["eaten"]), 1.0)  # il gusto del cibo
     alive = (s["alive"] > 0) & (energy > 0.0)
     # Il bersaglio (se si muove) e chi lo raggiunge.
@@ -453,11 +459,16 @@ def foraging(ph, P, s, pos, vel, energy, active):
     ghost = jnp.where(eat[..., None], food, s["ghost"])  # la nube del cibo mangiato resta lì e svanisce
     food = jnp.where(eat[..., None], jnp.where(far[..., None], a, b), food)
     food = push_out(food, rocks, rock_r, fr)[0]  # il cibo non ricompare dentro una roccia
-    n_eat = eat.sum(1)
-    energy = jnp.where(n_eat > 0, jnp.minimum(energy + ph["food_energy"] * n_eat, ph["energy_max"]), energy)
+    bad = P["bad"] > 0
+    n_all = eat.sum(1)
+    n_eat = (eat & ~bad).sum(1)  # i frutti buoni nutrono e hanno gusto
+    n_bad = (eat & bad).sum(1)  # i cattivi fanno male e tolgono energia
+    energy = jnp.where(n_all > 0, jnp.clip(energy + ph["food_energy"] * n_eat - ph["bad_fruit_damage"] * n_bad,
+                                           0.0, ph["energy_max"]), energy)
     age = jnp.where(eat, 0.0, s["age"] + dt)
     ghost_t = jnp.where(eat, 0.0, s["ghost_t"] + dt)
-    return energy, dict(food=food, pred=pred, ptr=s["ptr"] + 2 * n_eat, eaten=s["eaten"] + n_eat, age=age,
+    return energy, dict(food=food, pred=pred, ptr=s["ptr"] + 2 * n_all, eaten=s["eaten"] + n_eat,
+                        bad_eaten=s["bad_eaten"] + n_bad, age=age,
                         ghost=ghost, ghost_t=ghost_t), bitten, pos, vel, touch
 
 
