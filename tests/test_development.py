@@ -217,3 +217,38 @@ def test_only_newborns_go_through_the_womb_and_the_direct_genome_never_does():
         assert np.array_equal(g.born_avg[k], before[int(e.ids[k])], equal_nan=True)
     d = Evolution(Config(population=12, engine="numpy"), 0)
     assert np.isnan(d.ctrl.brains.genome.born_avg).all()
+
+
+# --- Vedere l'identità ---------------------------------------------------------
+
+def test_cells_with_the_same_markers_have_the_same_colour_and_type():
+    cfg, b = grown(n=1)
+    g = b.genome
+    g.active[0, :4] = True
+    g.n_mark[0, 0] = g.n_mark[0, 1] = [3.0, -3.0, 0.0, 0.0]  # due neuroni gemelli
+    g.n_mark[0, 2] = [-3.0, 3.0, 0.0, 0.0]
+    g.n_mark[0, 3] = [3.0, 3.0, 0.0, 0.0]
+    g.m_grad[:] = 0.0
+    colours = dev.identity(g, 0)
+    R = g.n_rec
+    assert np.allclose(colours[R], colours[R + 1]) and not np.allclose(colours[R], colours[R + 2])
+    assert dev.cell_types(g, 0, R + np.arange(4)) == 3
+
+
+def test_a_marker_and_its_copies_share_a_colour():
+    cfg, b = grown(n=1)
+    g = b.genome
+    dev.duplicate_marker(g, 0, 0, 2, 10**12)
+    c = dev.marker_colors(g, 0)
+    assert np.allclose(c[0], c[2]) and not np.allclose(c[0], c[1])
+
+
+def test_generation_statistics_count_markers_types_and_value():
+    e = Evolution(Config(population=12, genome="sviluppo", engine="numpy"), 0)
+    s = e.run_generation()
+    assert s["markers"] == 2.0 and "types" in s and s["value"] == [1.0, 1.0]
+    from evonets.net.anatomy import Anatomy
+
+    a = Anatomy(e.cfg, e.ctrl.brains.genome.take([0]))
+    assert a.summary()["markers"] == 2 and a.color.shape == (a.n_nodes, 3)
+    assert any("marcatori espressi" in line for line in a.describe(a.n_nodes - 1))

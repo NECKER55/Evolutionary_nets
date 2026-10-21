@@ -139,3 +139,53 @@ def marker_genes(g, c: int, k: int) -> np.ndarray:
     """I geni del marcatore k dell'individuo c (per la somiglianza tra copie)."""
     return np.concatenate([g.r_mark[c, :, k], g.n_mark[c, :, k], g.m_grad[c, k], g.m_table[c, k, :],
                            g.m_table[c, :, k]])
+
+
+# --- Per vedere l'identità (interfaccia e statistiche) ---------------------
+
+def marker_colors(g, i: int) -> np.ndarray:
+    """(M, 3) un colore per ogni marcatore dell'individuo i, dalla sua
+    famiglia: un marcatore e le sue copie hanno lo stesso colore, in tutti gli
+    individui della stessa discendenza."""
+    import colorsys
+
+    hue = (np.asarray(g.m_fam[i], dtype=float) * 0.6180339887) % 1.0
+    return np.array([colorsys.hsv_to_rgb(h, 0.75, 1.0) for h in hue]) * 255.0
+
+
+def identity(g, i: int) -> np.ndarray:
+    """(S, 3) il colore dell'identità di ogni cellula (recettori, interni,
+    motori) dell'individuo i: la miscela dei colori dei marcatori che esprime,
+    pesati per quanto li esprime; più espressione, più luce. Due cellule dello
+    stesso colore si legano agli stessi partner: sono dello stesso tipo."""
+    e = expression(g.take([i]), fixed_senses=False)[0]  # (S, M)
+    total = e.sum(axis=1, keepdims=True)
+    mix = (e @ marker_colors(g, i)) / np.maximum(total, 1e-9)
+    light = np.clip(total / max(1.0, float(g.m_active[i].sum()) * 0.5), 0.25, 1.0)
+    grey = np.full(3, 90.0)
+    return np.where(total > 1e-6, grey + (mix - grey) * light, grey).clip(0, 255)
+
+
+def cell_types(g, i: int, cells: np.ndarray, tol: float = 0.25, e: np.ndarray | None = None) -> int:
+    """Quanti tipi distinti tra le cellule `cells` (indici di sorgente)
+    dell'individuo i: due cellule sono dello stesso tipo se esprimono ogni
+    marcatore in quantità che differiscono meno di `tol`. `e`: le espressioni
+    (S, M) dell'individuo, se già calcolate."""
+    if not len(cells) or not g.m_active[i].any():
+        return 0
+    if e is None:
+        e = expression(g.take([i]), fixed_senses=False)[0]
+    centres: list[np.ndarray] = []
+    for v in e[cells][:, g.m_active[i]]:
+        if not any(np.abs(v - c).max() < tol for c in centres):
+            centres.append(v)
+    return len(centres)
+
+
+def population_stats(g) -> dict:
+    """Marcatori accesi e tipi di neuroni interni, in media per individuo."""
+    if not g.n_markers:
+        return {}
+    e = expression(g, fixed_senses=False)
+    types = [cell_types(g, i, g.n_rec + np.flatnonzero(g.active[i]), e=e[i]) for i in range(len(g))]
+    return {"markers": float(g.m_active.sum(axis=1).mean()), "types": float(np.mean(types))}

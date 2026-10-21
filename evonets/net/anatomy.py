@@ -6,7 +6,7 @@ from collections import deque
 
 import numpy as np
 
-from . import receptors
+from . import development, receptors
 from .brain import META, Genome, live_links
 from .controllers import NeuralController
 from .geometry import motor_anchors, receptor_anchors
@@ -73,6 +73,12 @@ class Anatomy:
             if self.useful[reached].any():
                 self.useful[self.n_in + h] = True
         self.depth = self._depth_from_senses()
+        # Sviluppo: identità di ogni cellula (colore dei marcatori che esprime).
+        self.markers = genome.n_markers > 0 and bool(genome.m_active[0].any())
+        if self.markers:
+            self.expression = development.expression(genome, cfg.sim_mode == "cervello")[0]  # (S, M)
+            self.color = development.identity(genome, 0)
+            self.marker_color = development.marker_colors(genome, 0)
 
     # --- struttura ---------------------------------------------------------
 
@@ -164,6 +170,10 @@ class Anatomy:
         }
         if self.inhibitory is not None:
             out["inhibitory"] = int((self.inhibitory & self.exists[hidden]).sum())
+        if self.markers:
+            out["markers"] = int(self.genome.m_active[0].sum())
+            cells = self.n_in + np.flatnonzero(self.exists[hidden])
+            out["types"] = development.cell_types(self.genome, 0, cells, e=self.expression)
         return out
 
     # --- descrizione -------------------------------------------------------
@@ -196,6 +206,10 @@ class Anatomy:
             d = int(self.depth[v])
             lines.append(f"distanza dai recettori: {d} pass{'o' if d == 1 else 'i'}" if d > 0
                          else "nessun recettore lo raggiunge")
+        if self.markers:
+            on = np.flatnonzero(self.genome.m_active[0])
+            expr = ", ".join(f"m{int(k)} {self.expression[v, k]:.2f}" for k in on)
+            lines.append(f"marcatori espressi (0-1): {expr}")
         if self.is_modulator(v):
             reached = self.modulated_by(v)
             lines.append(f"non trasmette: rilascia M, che arriva a {len(reached)} neuroni")

@@ -1,7 +1,7 @@
 import numpy as np
 import pygame
 
-from ..net import receptors, senses
+from ..net import development, receptors, senses
 from ..sim.world import World
 
 BG = (14, 16, 22)
@@ -294,6 +294,8 @@ class Renderer:
                 pygame.draw.line(layer, (*color, alpha), a, b, 1)
 
         genes = brains.receptors
+        g = brains.genome
+        identity = development.identity(g, i) if g.n_markers and g.m_active[i].any() else None
         for k, p in pos.items():
             pygame.draw.circle(layer, self._signal(values[k]), p, 4)
             if k < brains.n_in:  # il bordo dice a cosa è sensibile il recettore
@@ -312,6 +314,8 @@ class Renderer:
                 if hid < brains.n_hidden and brains.modulatory[i, hid]:
                     rim = MODULATOR
                 pygame.draw.circle(layer, rim, p, 5 if rim is not TEXT else 4, 1)
+                if identity is not None and hid < brains.n_hidden:  # sviluppo: il colore del tipo
+                    pygame.draw.circle(layer, tuple(int(c) for c in identity[k]), p, 7, 1)
         for o, name in enumerate(brains.OUT_LABELS):
             p = pos[brains.n_in + brains.n_hidden + o]
             v = brains.state[i, brains.n_hidden + o]

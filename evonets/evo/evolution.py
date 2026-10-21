@@ -5,6 +5,7 @@ import numpy as np
 from ..config import Config
 from ..net.brain import META, Genome, pad
 from ..net.controllers import NeuralController
+from ..net.development import population_stats
 from ..net.womb import prenatal
 from ..sim.world import World
 from . import ladder, saves
@@ -258,6 +259,10 @@ class Evolution:
             # Plasticità: modulatori per individuo, quota di chi può imparare.
             "modulators": float(brains.modulatory.sum(axis=1).mean()),
             "learners": float(brains.learns.mean()),
+            # Sistema di valore innato: forza media dei nuclei di gusto e dolore.
+            "value": [float(v) for v in brains.value.mean(axis=0)],
+            # Sviluppo: marcatori accesi e tipi di neuroni interni.
+            **population_stats(brains.genome),
             "mutation": {k: float(np.exp(np.median(brains.genome.meta[:, i]))) for i, k in enumerate(META)},
             "oldest": int(self.age.max()),
             "oldest_id": int(self.ids[np.argmax(self.age)]),
