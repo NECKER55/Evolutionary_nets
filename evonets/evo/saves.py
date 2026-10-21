@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from ..config import Config
-from ..net.brain import META, PLASTIC, Genome, meta_start
+from ..net.brain import GENES, META, PLASTIC, Genome, meta_start
 from ..net.receptors import scales
 from . import ladder
 
@@ -36,8 +36,10 @@ from . import ladder
 #     cioè attività desiderata 0,5 e forza di partenza);
 # 11 = traccia provvisoria e consolidamento (un gene per neurone, la durata;
 #     i file precedenti: gene 0, la durata di partenza);
-# 12 = omeostasi della soglia con un gene proprio (i file precedenti: gene 0).
-FORMAT = 12
+# 12 = omeostasi della soglia con un gene proprio (i file precedenti: gene 0);
+# 13 = sviluppo: marcatori, gradienti, tabella di affinità, gene del guadagno
+#     (i file precedenti si aprono con il genoma diretto, guadagno 1).
+FORMAT = 13
 # Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
 # nullo, regola a zero, nessun modulatore.
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
@@ -49,7 +51,7 @@ ADDED_IN_4 = {"r_tau": 0.0, "r_sub": 0.0, "r_div": 0.0}
 # conservano; tutte le altre costanti sono regole e vengono sempre dal codice
 # attuale, così ogni corsa si può continuare con le regole più recenti (i
 # cambi finiscono nel registro).
-RUN_STATE = ("sim_mode", "sensor_set", "net_type", "population", "net_hidden_slots", "receptor_slots", "task",
+RUN_STATE = ("sim_mode", "sensor_set", "genome", "net_type", "population", "net_hidden_slots", "receptor_slots", "task",
              "n_hazards", "ladder",
              *ladder.DIALS, "exam_every")
 # Prima del formato 10 non c'era il gene dell'attività desiderata a*: aprendo
@@ -67,6 +69,7 @@ CONVERSIONS = (
     (9, "scaling omeostatico aggiunto (forza di partenza)"),
     (10, "traccia provvisoria dell'hebbiano aggiunta (durata di partenza)"),
     (11, "omeostasi della soglia con un gene proprio (forza di partenza)"),
+    (12, "gene del guadagno aggiunto; genoma diretto (lo sviluppo non c'era)"),
 )
 
 
@@ -174,6 +177,8 @@ def load(cls, cfg: Config, path):
         for k in RUN_STATE:
             if k in saved:
                 setattr(cfg, k, saved[k])
+        if "genome" not in saved:  # prima dello sviluppo il genoma era sempre diretto
+            cfg.genome = "diretto"
         rules = {k: [saved.get(k), getattr(cfg, k)] for k in sorted(fields - set(RUN_STATE) - {"engine"})
                  if saved.get(k) != getattr(cfg, k)}
 
@@ -182,7 +187,7 @@ def load(cls, cfg: Config, path):
         def genome(prefix=""):
             shape = d[prefix + "r_active"].shape
             g = Genome(*(d[prefix + f] if prefix + f in d
-                         else None if f in Genome.LINEAGE else np.full(shape, ADDED_IN_4[f])
+                         else None if f in Genome.LINEAGE + Genome.MARKERS else np.full(shape, ADDED_IN_4[f])
                          for f in Genome.FIELDS))
             if g.meta.shape[1] < len(META):  # geni nati dopo (il sesso): il valore di partenza
                 start = np.log(np.maximum(meta_start(cfg), cfg.mutation_floor))[g.meta.shape[1]:]
@@ -192,7 +197,7 @@ def load(cls, cfg: Config, path):
             if g.traits.shape[2] == base:
                 extra = np.broadcast_to(NO_PLASTICITY, g.traits.shape[:2] + (len(NO_PLASTICITY),))
                 g.traits = np.concatenate([g.traits, extra], axis=2)
-            missing = base + len(PLASTIC) - g.traits.shape[2]  # geni nati dopo (hebbiano, omeostasi, traccia): 0
+            missing = base + len(GENES) - g.traits.shape[2]  # geni nati dopo (hebbiano, omeostasi, ...): 0
             if missing > 0:
                 g.traits = np.concatenate([g.traits, np.zeros(g.traits.shape[:2] + (missing,))], axis=2)
             return g

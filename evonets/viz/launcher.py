@@ -90,6 +90,11 @@ class Launcher(Screen):
                           help="Solo cervello: tutti hanno gli stessi 10 sensi (net/senses.py), che non "
                                "cambiano; evolve solo il cervello. Ignorato se si riprende un salvataggio.")
         self.sim.select(defaults.get("sim") or "evoluzione")
+        self.genome = Choice("Genoma", [("diretto", "scrive ogni sinapsi"),
+                                        ("sviluppo", "sviluppo: marcatori e affinità")],
+                             help="Sviluppo: il cervello nasce dai marcatori delle cellule e da una tabella di "
+                                  "affinità (docs/SPEC_SVILUPPO.md). Ignorato se si riprende un salvataggio.")
+        self.genome.select(defaults.get("genome") or "diretto")
         self.task = Choice("Mondo", [("bersaglio", "bersaglio e veleno (il mondo di prima)"),
                                      ("cibo", "nutrirsi: cibo, prede e predatori")],
                            help="Il compito. Nel mondo del cibo si riproduce chi mangia almeno N cibi; il veleno "
@@ -117,7 +122,7 @@ class Launcher(Screen):
                            on_change=self._loaded)
         self.save = Text("Salva in", defaults.get("save") or self._fresh_name(),
                          help="Dove salvare: tasto S, fine delle generazioni, uscita dalla corsa.")
-        self.fields = [self.mode, self.sim, self.net, self.agents, self.task, self.ladder, self.chance, self.seed,
+        self.fields = [self.mode, self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.chance, self.seed,
                        self.gens, self.exam_every, self.select, self.load, self.save]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
@@ -135,7 +140,7 @@ class Launcher(Screen):
         """Scelto un salvataggio (o nessuno). Le righe che vengono dal file si
         disattivano e mostrano i valori del file; tornando a "nessuno" riprendono
         quelli scelti a mano."""
-        fields = (self.sim, self.net, self.agents, self.task, self.ladder, self.chance, self.seed)
+        fields = (self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.chance, self.seed)
         if path is not None and getattr(self, "_mine", None) is None:
             self._mine = [f.value if isinstance(f, Number) else f.index for f in fields]
         if path is None and getattr(self, "_mine", None) is not None:
@@ -148,7 +153,7 @@ class Launcher(Screen):
         if path is not None:
             self._show_saved(path)
         self.net.enabled = self.agents.enabled = self.chance.enabled = self.task.enabled = path is None
-        self.sim.enabled = path is None
+        self.sim.enabled = self.genome.enabled = path is None
         if path is not None:
             self.save.value, self.save.edited = path, False
         elif not self.save.edited:
@@ -165,7 +170,8 @@ class Launcher(Screen):
         except Exception:  # file illeggibile: lo dirà save_info
             return
         for field, value in ((self.net, net), (self.task, saved.get("task") or "bersaglio"),
-                             (self.ladder, saved.get("ladder")), (self.sim, saved.get("sim_mode") or "evoluzione")):
+                             (self.ladder, saved.get("ladder")), (self.sim, saved.get("sim_mode") or "evoluzione"),
+                             (self.genome, saved.get("genome") or "diretto")):
             if value in [v for v, _ in field.options]:
                 field.select(value)
         self.agents.value = n
@@ -174,7 +180,8 @@ class Launcher(Screen):
             self.seed.value = seed
 
     def _config(self) -> Config:
-        cfg = Config(net_type=self.net.value, task=self.task.value, sim_mode=self.sim.value)
+        cfg = Config(net_type=self.net.value, task=self.task.value, sim_mode=self.sim.value,
+                     genome=self.genome.value)
         cfg.population = self.agents.fixed()
         if cfg.task == "cibo":
             cfg.n_hazards = 0  # il veleno resta spento in tutta la scala

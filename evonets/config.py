@@ -133,6 +133,19 @@ class Config:
     # evolve solo il cervello.
     sim_mode: str = "evoluzione"
     sensor_set: str = "naturale"
+    # Genoma del cervello: "diretto" = scrive ogni sinapsi (peso e
+    # collegamento); "sviluppo" = scrive le regole per costruirle (marcatori,
+    # gradienti, tabella di affinità, guadagno: net/development.py), come in
+    # natura. I salvataggi di prima dello sviluppo si aprono con "diretto".
+    genome: str = "diretto"
+    # Sviluppo: posti e marcatori accesi alla partenza (i posti crescono come
+    # quelli dei neuroni), dispersione delle espressioni (scala logistica), dei
+    # gradienti e della tabella di affinità alla partenza.
+    marker_slots: int = 4
+    marker_initial: int = 2
+    marker_initial_std: float = 1.5
+    marker_gradient_std: float = 2.0
+    marker_table_std: float = 2.0
     pool_fill: float = 0.8
     pool_step: int = 8
     # Il corpo primordiale: recettori accesi, a ventaglio davanti, generalisti

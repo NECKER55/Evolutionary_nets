@@ -14,7 +14,8 @@ valori di partenza e un errore minimo di copiatura (`mutation_floor`).
 import numpy as np
 
 from ..config import Config
-from ..net.brain import META, META_INDEX, Genome, clamp_meta, pad
+from ..net import development
+from ..net.brain import GENES, META, META_INDEX, PLASTIC, Genome, clamp_meta, pad
 from ..net.geometry import brain_side, connect_prob, distances
 from ..net.receptors import MAX_APERTURE, MIN_APERTURE
 
@@ -44,7 +45,7 @@ def crossover(parents: Genome, mothers: np.ndarray, fathers: np.ndarray,
     """
     child = parents.take(mothers)  # la madre fa da cornice
     for c in np.flatnonzero(mothers != fathers):
-        _recombine(child, int(c), parents, int(fathers[c]), rng)
+        _recombine(child, int(c), parents, int(mothers[c]), int(fathers[c]), rng)
         unequal_crossing_over(child, int(c), rng, split)
     return child
 
@@ -79,8 +80,8 @@ def _compose(on_m, id_m, on_f, id_f, rng):
     return on, from_father, inserted
 
 
-def _recombine(g: Genome, c: int, p: Genome, f: int, rng: np.random.Generator) -> None:
-    """Il figlio c (copia della madre) riceve i blocchi del padre f."""
+def _recombine(g: Genome, c: int, p: Genome, mo: int, f: int, rng: np.random.Generator) -> None:
+    """Il figlio c (copia della madre mo) riceve i blocchi del padre f."""
     R, H, n_out = g.n_rec, g.n_hidden, g.n_out
     old_r, old_h = g.r_id[c].copy(), g.h_id[c].copy()
     r_on, rec_f, rec_new = _compose(g.r_active[c], g.r_id[c], p.r_active[f], p.r_id[f], rng)
@@ -122,6 +123,75 @@ def _recombine(g: Genome, c: int, p: Genome, f: int, rng: np.random.Generator) -
         g.conn[c][np.ix_(mother_rows, fresh)] = False
     if rng.random() < 0.5:
         g.meta[c] = p.meta[f]
+    if g.n_markers:
+        cells = ({j: ("f", kf) for j, kf in rec_f.items()}, {t: ("f", tf) for t, tf in rows.items()})
+        _recombine_markers(g, c, p, mo, f, cells, rng)
+
+
+def _recombine_markers(g: Genome, c: int, p: Genome, mo: int, f: int, cells, rng) -> None:
+    """I marcatori nell'incrocio (docs/SPEC_SVILUPPO.md, sezione 10). Ogni
+    gene di marcatore (esistenza, gradiente, riga della tabella: come si lega
+    sull'assone) passa intero da un genitore, abbinato per identità; uno solo
+    di un genitore passa con probabilità 1/2. Le colonne della tabella e le
+    espressioni nelle cellule seguono le identità: una cellula presa da un
+    genitore esprime ogni marcatore come in quel genitore, se lui lo ha;
+    altrimenti come nell'altro genitore, se ha la stessa cellula; altrimenti
+    poco (gene 0). `cells` = ({recettore: fonte}, {destinatario: fonte}) per
+    le cellule prese dal padre."""
+    on, from_f, _ = _compose(p.m_active[mo], p.m_id[mo], p.m_active[f], p.m_id[f], rng)
+    M = g.n_markers
+    ids = p.m_id[mo].copy()
+    src = [("m", k) for k in range(M)]
+    for k, kf in from_f.items():
+        ids[k], src[k] = p.m_id[f, kf], ("f", kf)
+    g.m_active[c], g.m_id[c] = on, ids
+    who = {"m": mo, "f": f}
+    slot = {}  # identità -> posto, in ogni genitore (i marcatori accesi prevalgono su quelli spenti)
+    for key, i in who.items():
+        slot[key] = {int(p.m_id[i, k]): k for k in np.flatnonzero(~p.m_active[i])}
+        slot[key].update({int(p.m_id[i, k]): k for k in np.flatnonzero(p.m_active[i])})
+    for k, (key, kk) in enumerate(src):
+        g.m_fam[c, k], g.m_grad[c, k] = p.m_fam[who[key], kk], p.m_grad[who[key], kk]
+    # Tabella: la riga a viene dal genitore del marcatore a; ogni colonna b
+    # dal posto che ha in quel genitore il marcatore b.
+    for a, (key, ka) in enumerate(src):
+        i = who[key]
+        for b in range(M):
+            kb = slot[key].get(int(ids[b]))
+            g.m_table[c, a, b] = p.m_table[i, ka, kb] if kb is not None else 0.0
+
+    def express(marks_p, cell_p_of, child_marks):
+        """child_marks (cellule, M) del figlio; cell_p_of(key) = posto della
+        stessa cellula nel genitore key (o None)."""
+        for b in range(M):
+            gid = int(ids[b])
+            for cell in range(child_marks.shape[0]):
+                own, other = cell_p_of(cell)
+                value = 0.0
+                for key, pc in (own, other):
+                    if pc is not None and gid in slot[key]:
+                        value = marks_p[who[key], pc, slot[key][gid]]
+                        break
+                child_marks[cell, b] = value
+
+    rec_cells, tgt_cells = cells
+    r_where = {key: {int(p.r_id[who[key], k]): k for k in range(p.n_rec)} for key in who}
+    h_where = {key: {int(p.h_id[who[key], k]): k for k in range(p.n_hidden)} for key in who}
+
+    def receptor(cell):
+        key, pc = rec_cells.get(cell, ("m", cell))
+        other = "m" if key == "f" else "f"
+        return (key, pc), (other, r_where[other].get(int(g.r_id[c, cell])))
+
+    def target(cell):
+        key, pc = tgt_cells.get(cell, ("m", cell))
+        other = "m" if key == "f" else "f"
+        if cell >= g.n_hidden:  # motori: sempre gli stessi
+            return (key, pc), (other, cell)
+        return (key, pc), (other, h_where[other].get(int(g.h_id[c, cell])))
+
+    express(p.r_mark, receptor, g.r_mark[c])
+    express(p.n_mark, target, g.n_mark[c])
 
 
 def _similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -148,8 +218,11 @@ def unequal_crossing_over(g: Genome, c: int, rng: np.random.Generator, split: bo
     probabilità pari alla loro somiglianza (1 se identiche, sempre meno man
     mano che divergono)."""
     p = float(np.exp(g.meta[c, META_INDEX["dup"]]))
-    for on, fam, genes, copy in ((g.r_active, g.r_fam, _receptor_genes, None),
-                                 (g.active, g.h_fam, _neuron_genes, duplicate_neuron)):
+    kinds = [(g.r_active, g.r_fam, _receptor_genes, None), (g.active, g.h_fam, _neuron_genes, duplicate_neuron)]
+    if g.n_markers:
+        kinds.append((g.m_active, g.m_fam, development.marker_genes,
+                      lambda g_, i, k, f, r: development.duplicate_marker(g_, i, k, f, new_id(r))))
+    for on, fam, genes, copy in kinds:
         slots = np.flatnonzero(on[c])
         for family in np.unique(fam[c, slots]):
             members = [int(k) for k in slots if fam[c, k] == family]
@@ -198,6 +271,7 @@ def duplicate_neuron(g: Genome, i: int, h: int, f: int, rng: np.random.Generator
     g.weights[i, :, src_h] *= 0.5
     g.weights[i, :, src_f] *= 0.5
     g.traits[i, f] = g.traits[i, h]
+    g.n_mark[i, f] = g.n_mark[i, h]  # stessa identità (sviluppo)
     g.active[i, f] = True
     g.h_id[i, f], g.h_fam[i, f] = new_id(rng), g.h_fam[i, h]
     std = np.exp(g.meta[i, META_INDEX["pos_std"]])
@@ -224,6 +298,7 @@ def duplicate_receptor(g: Genome, i: int, k: int, f: int, rng: np.random.Generat
     esattamente neutrale."""
     for field in Genome.RECEPTOR_FIELDS:
         getattr(g, field)[i, f] = getattr(g, field)[i, k]
+    g.r_mark[i, f] = g.r_mark[i, k]  # stessa identità (sviluppo)
     for a in (g.weights, g.conn):
         a[i, :, f] = a[i, :, k]
     g.r_id[i, f], g.r_fam[i, f] = new_id(rng), g.r_fam[i, k]
@@ -245,7 +320,10 @@ def _duplicate(g: Genome, rng: np.random.Generator, p: np.ndarray, split: bool =
     liberi la duplicazione non avviene (i posti crescono alla generazione
     dopo, vedi `grow`). `split`: vedi `duplicate_receptor`."""
     receptor = lambda g_, i, k, f, r: duplicate_receptor(g_, i, k, f, r, split)
+    marker = lambda g_, i, k, f, r: development.duplicate_marker(g_, i, k, f, new_id(r))
     kinds = ((g.active, duplicate_neuron), (g.r_active, receptor)) if receptors else ((g.active, duplicate_neuron),)
+    if g.n_markers:
+        kinds += ((g.m_active, marker),)
     for active, copy in kinds:
         events = np.argwhere(active & (rng.random(active.shape) < p[:, None]))
         for i, k in events:
@@ -274,7 +352,10 @@ def knockout(g: Genome, mu: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     più lungo e più fragile. Un recettore ha lunghezza fissa."""
     m = np.minimum(1.0, mu)[:, None]
     n_traits = g.traits.shape[2]
-    length = n_traits + g.conn[:, : g.n_hidden, :].sum(axis=2)
+    if g.n_markers:  # sviluppo: i collegamenti non sono geni, i marcatori espressi sì
+        length = n_traits + np.broadcast_to(g.m_active.sum(axis=1)[:, None], g.active.shape)
+    else:
+        length = n_traits + g.conn[:, : g.n_hidden, :].sum(axis=2)
     return 1.0 - (1.0 - m) ** RECEPTOR_GENE_LENGTH * np.ones(g.r_active.shape), 1.0 - (1.0 - m) ** length
 
 
@@ -301,7 +382,12 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     # cambia un tasso di un fattore, non di una quantità fissa). I tassi usati
     # in questa nascita sono quelli ereditati, letti prima del ritocco.
     p_w, std_w = rate("weight_prob"), base("weight_std")
-    for values in (g.weights, g.traits, g.meta):
+    fixed = cfg.sim_mode == "cervello"  # sensi fissi: i geni dei recettori non mutano mai
+    developed = g.n_markers > 0  # sviluppo: i pesi non sono geni, i marcatori sì
+    genes = [g.traits, g.meta] + ([g.n_mark, g.m_grad, g.m_table] if developed else [g.weights])
+    if developed and not fixed:
+        genes.append(g.r_mark)
+    for values in genes:
         values += chance(values.shape, p_w) * noise(values.shape, std_w)
     clamp_meta(g.meta, cfg)
 
@@ -309,21 +395,23 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     p_pos, std_pos = rate("pos_prob"), base("pos_std")
     g.pos += chance(g.pos.shape[:2], p_pos)[:, :, None] * noise(g.pos.shape, std_pos)
     np.clip(g.pos, 0.0, 1.0, out=g.pos)
-    fixed = cfg.sim_mode == "cervello"  # sensi fissi: i geni dei recettori non mutano mai
     if not fixed:
         g.r_y += chance(g.r_y.shape, p_pos) * noise(g.r_y.shape, std_pos)
         np.clip(g.r_y, 0.0, 1.0, out=g.r_y)
         _mutate_receptors(g, cfg, chance, noise, p_w, base("rec_drift"))
 
-    # 4. Collegamenti: uno nuovo compare con una probabilità che cala con la
-    # distanza, come alla nascita, con la portata λ dell'individuo.
-    n_rec, n_out = g.n_rec, g.n_out
-    dist = distances(cfg, g.pos, g.r_y, n_out, brain_side(cfg, g.r_active, g.active, n_out))
-    shape = connect_prob(cfg, dist, n_rec, base("conn_range")) / cfg.net_conn_prob
-    p_add = np.minimum(1.0, rate("conn_add")[:, None, None] * shape)
-    appear = ~g.conn & (rng.random(g.conn.shape) < p_add)
-    vanish = g.conn & chance(g.conn.shape, rate("conn_del"))
-    g.conn ^= appear | vanish
+    # 4. Collegamenti (genoma diretto): uno nuovo compare con una probabilità
+    # che cala con la distanza, come alla nascita, con la portata λ
+    # dell'individuo. Con lo sviluppo i collegamenti non sono geni: nascono
+    # dai marcatori.
+    if not developed:
+        n_rec, n_out = g.n_rec, g.n_out
+        dist = distances(cfg, g.pos, g.r_y, n_out, brain_side(cfg, g.r_active, g.active, n_out))
+        shape = connect_prob(cfg, dist, n_rec, base("conn_range")) / cfg.net_conn_prob
+        p_add = np.minimum(1.0, rate("conn_add")[:, None, None] * shape)
+        appear = ~g.conn & (rng.random(g.conn.shape) < p_add)
+        vanish = g.conn & chance(g.conn.shape, rate("conn_del"))
+        g.conn ^= appear | vanish
 
     # 5. Neuroni e recettori si rompono o (raramente) si riparano; poi le
     # duplicazioni. Vedi `knockout`.
@@ -334,6 +422,11 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     if not fixed:
         g.r_active = np.where(g.r_active, rng.random(g.r_active.shape) >= on,
                               rng.random(g.r_active.shape) < np.minimum(1.0, mu)[:, None])
+    if developed:  # anche un marcatore si rompe (più facilmente se lega molti altri) o si ripara
+        length = development.MARKER_BASE_LENGTH + 2 * g.m_active.sum(axis=1)
+        broken = 1.0 - (1.0 - np.minimum(1.0, mu)) ** length
+        g.m_active = np.where(g.m_active, rng.random(g.m_active.shape) >= broken[:, None],
+                              rng.random(g.m_active.shape) < np.minimum(1.0, mu)[:, None])
     _duplicate(g, rng, np.minimum(1.0, rate("dup")), cfg.receptor_dup_split, receptors=not fixed)
 
 
@@ -390,6 +483,8 @@ def reproduce(parents: Genome, n_children: int, cfg: Config, rng: np.random.Gene
                     fathers[c] = rng.choice(n_parents, p=w / w.sum())
     children = crossover(parents, mothers, fathers, rng, cfg.receptor_dup_split)
     mutate(children, cfg, rng)
+    if children.n_markers:  # ogni figlio sviluppa il suo cervello; i genitori tengono il loro
+        development.develop(children, cfg, rng, children.traits.shape[2] - len(GENES) + len(PLASTIC))
     return children
 
 
@@ -402,7 +497,10 @@ def grow(genome: Genome, cfg: Config) -> Genome:
         r += cfg.pool_step
     if genome.active.sum(axis=1).max(initial=0) > cfg.pool_fill * h:
         h += cfg.pool_step
-    return pad(genome, r, h)
+    m = genome.n_markers
+    if m and genome.m_active.sum(axis=1).max(initial=0) > cfg.pool_fill * m:
+        m += max(1, cfg.pool_step // 2)
+    return pad(genome, r, h, m)
 
 
 __all__ = ["META", "crossover", "grow", "mutate", "reproduce"]

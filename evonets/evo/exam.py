@@ -97,7 +97,8 @@ FORAGE = dict(task="cibo", n_hazards=0, life_max=240.0, food_count_hard=4, food_
 # l'esame la include (in ENVIRONMENT, con il suo valore d'esame: di solito
 # "spenta" per la versione 1) o se segue la corsa (qui).
 FROM_RUN = frozenset({
-    "sim_mode", "sensor_set", "net_type", "net_weight_std", "net_conn_prob", "net_conn_range", "net_self_prob",
+    "sim_mode", "sensor_set", "genome", "marker_slots", "marker_initial", "marker_initial_std",
+    "marker_gradient_std", "marker_table_std", "net_type", "net_weight_std", "net_conn_prob", "net_conn_range", "net_self_prob",
     "net_hidden_slots", "receptor_slots", "pool_fill", "pool_step", "brain_density",
     "receptor_initial", "receptor_initial_spread_deg", "receptor_initial_aperture_deg",
     "receptor_initial_gain", "receptor_initial_width", "receptor_initial_tau", "receptor_initial_adaptation",

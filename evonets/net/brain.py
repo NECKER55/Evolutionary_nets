@@ -44,6 +44,10 @@ PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", 
 # un meccanismo distinto dallo scaling delle sinapsi (Desai 1999):
 # homeo_initial_rate · e^gene.
 PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist", "intrinsic")
+# Dopo la plasticità, i geni propri usati dallo sviluppo (development.py):
+# "gain", quanto pesano gli ingressi che il neurone riceve (come il numero di
+# recettori postsinaptici), in scala logaritmica: peso = affinità · e^gain.
+GENES = PLASTIC + ("gain",)
 
 
 def sigmoid(x):
@@ -148,6 +152,17 @@ class Genome:
     sue copie). Un gene che non viene da una duplicazione ha l'identità del suo
     posto: tutti discendono dagli stessi antenati. Una copia riceve
     un'identità nuova e la famiglia dell'originale.
+
+    Sviluppo (`Config.genome = "sviluppo"`, vedi development.py), M posti per
+    i geni dei marcatori: `r_mark` (N, R, M) e `n_mark` (N, T, M) quanto ogni
+    recettore e ogni neurone interno o motore esprime ogni marcatore (in scala
+    logistica), `m_grad` (N, M, 2) quanto l'espressione di ogni marcatore
+    segue la posizione nel cervello (gradienti, come Eph ed efrine),
+    `m_table` (N, M, M) la tabella di affinità (marcatore sull'assone ->
+    marcatore sul bersaglio, con segno), `m_active`, `m_id`, `m_fam` (N, M)
+    esistenza e discendenza dei marcatori. Con il genoma diretto M = 0. In
+    questo caso `weights` e `conn` sono il cervello sviluppato (il fenotipo),
+    non geni: nascono dallo sviluppo e non mutano.
     """
 
     weights: np.ndarray
@@ -171,12 +186,21 @@ class Genome:
     h_id: np.ndarray | None = None
     r_fam: np.ndarray | None = None
     h_fam: np.ndarray | None = None
+    r_mark: np.ndarray | None = None
+    n_mark: np.ndarray | None = None
+    m_grad: np.ndarray | None = None
+    m_table: np.ndarray | None = None
+    m_active: np.ndarray | None = None
+    m_id: np.ndarray | None = None
+    m_fam: np.ndarray | None = None
 
     FIELDS = ("weights", "traits", "conn", "active", "pos", "r_active", "r_sens", "r_mu", "r_width",
               "r_body", "r_look", "r_aperture", "r_y", "r_tau", "r_sub", "r_div", "meta",
-              "r_id", "h_id", "r_fam", "h_fam")
+              "r_id", "h_id", "r_fam", "h_fam",
+              "r_mark", "n_mark", "m_grad", "m_table", "m_active", "m_id", "m_fam")
     RECEPTOR_FIELDS = FIELDS[5:16]
-    LINEAGE = FIELDS[17:]
+    LINEAGE = FIELDS[17:21]
+    MARKERS = FIELDS[21:]
 
     def __post_init__(self):
         n = len(self.weights)
@@ -184,7 +208,17 @@ class Genome:
                             ("h_id", self.active.shape[1]), ("h_fam", self.active.shape[1])):
             if getattr(self, name) is None:  # i geni del posto: discendenza comune
                 setattr(self, name, np.broadcast_to(np.arange(slots, dtype=np.int64), (n, slots)).copy())
-
+        if self.m_active is None:  # senza marcatori (genoma diretto)
+            self.m_active = np.zeros((n, 0), dtype=bool)
+        m = self.m_active.shape[1]
+        empty = {"r_mark": (n, self.r_active.shape[1], m), "n_mark": (n, self.weights.shape[1], m),
+                 "m_grad": (n, m, 2), "m_table": (n, m, m)}
+        for name, shape in empty.items():
+            if getattr(self, name) is None:
+                setattr(self, name, np.zeros(shape))
+        for name in ("m_id", "m_fam"):
+            if getattr(self, name) is None:
+                setattr(self, name, np.broadcast_to(np.arange(m, dtype=np.int64), (n, m)).copy())
     def __len__(self) -> int:
         return len(self.weights)
 
@@ -199,6 +233,11 @@ class Genome:
     @property
     def n_out(self) -> int:
         return self.weights.shape[1] - self.n_hidden
+
+    @property
+    def n_markers(self) -> int:
+        """Posti per i marcatori (0 con il genoma diretto)."""
+        return self.m_active.shape[1]
 
     @property
     def receptors(self) -> ReceptorGenes:
@@ -218,19 +257,21 @@ class Genome:
         """Uno sotto l'altro; i posti vengono pareggiati al più grande."""
         r = max(p.n_rec for p in parts)
         h = max(p.n_hidden for p in parts)
-        parts = [pad(p, r, h) for p in parts]
+        m = max(p.n_markers for p in parts)
+        parts = [pad(p, r, h, m) for p in parts]
         return Genome(*(np.concatenate([getattr(p, f) for p in parts]) for f in Genome.FIELDS))
 
 
-def pad(g: Genome, n_rec: int, n_hidden: int) -> Genome:
-    """Lo stesso genoma con più posti (spenti, geni a zero) per recettori e
-    neuroni interni. Non cambia nulla per l'individuo: i posti nuovi non
-    esistono finché una mutazione non li accende o una duplicazione non li
-    riempie."""
-    dr, dh = n_rec - g.n_rec, n_hidden - g.n_hidden
-    if dr == 0 and dh == 0:
+def pad(g: Genome, n_rec: int, n_hidden: int, n_markers: int | None = None) -> Genome:
+    """Lo stesso genoma con più posti (spenti, geni a zero) per recettori,
+    neuroni interni e marcatori. Non cambia nulla per l'individuo: i posti
+    nuovi non esistono finché una mutazione non li accende o una duplicazione
+    non li riempie."""
+    m = g.n_markers if n_markers is None else n_markers
+    dr, dh, dm = n_rec - g.n_rec, n_hidden - g.n_hidden, m - g.n_markers
+    if dr == 0 and dh == 0 and dm == 0:
         return g
-    if dr < 0 or dh < 0:
+    if dr < 0 or dh < 0 or dm < 0:
         raise ValueError("pad: i posti possono solo crescere")
     n, r, h = len(g), g.n_rec, g.n_hidden
 
@@ -254,7 +295,21 @@ def pad(g: Genome, n_rec: int, n_hidden: int) -> Genome:
         r_fam=np.concatenate([g.r_fam, np.broadcast_to(np.arange(r, r + dr), (n, dr))], axis=1),
         h_id=np.concatenate([g.h_id, np.broadcast_to(np.arange(h, h + dh), (n, dh))], axis=1),
         h_fam=np.concatenate([g.h_fam, np.broadcast_to(np.arange(h, h + dh), (n, dh))], axis=1),
+        **_pad_markers(g, grow, r, dr, h, dh, dm),
     )
+
+
+def _pad_markers(g: Genome, grow, r: int, dr: int, h: int, dh: int, dm: int) -> dict:
+    """I campi dei marcatori con i posti nuovi: recettori dopo R, interni dopo
+    H, marcatori in fondo (spenti, con l'identità del loro posto)."""
+    n, m = len(g), g.n_markers
+    r_mark = grow(grow(g.r_mark, 1, r, dr), 2, m, dm)
+    n_mark = grow(grow(g.n_mark, 1, h, dh), 2, m, dm)
+    table = grow(grow(g.m_table, 1, m, dm), 2, m, dm)
+    new_ids = np.broadcast_to(np.arange(m, m + dm), (n, dm))
+    return dict(r_mark=r_mark, n_mark=n_mark, m_grad=grow(g.m_grad, 1, m, dm), m_table=table,
+                m_active=grow(g.m_active, 1, m, dm), m_id=np.concatenate([g.m_id, new_ids], axis=1),
+                m_fam=np.concatenate([g.m_fam, new_ids], axis=1))
 
 
 def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Generator) -> Genome:
@@ -330,7 +385,8 @@ class Brains:
     KIND = "rate"
     CENTRED = True  # attività = scarto dalla frequenza spontanea (vedi `frequencies`)
     BASE_TRAITS = 1  # soglia; poi i geni della plasticità
-    N_TRAITS = BASE_TRAITS + len(PLASTIC)
+    N_TRAITS = BASE_TRAITS + len(GENES)
+    GAIN = BASE_TRAITS + len(PLASTIC)  # il gene del guadagno
     OUT_LABELS = ("spinta", "sterzo")
 
     @classmethod
@@ -340,14 +396,15 @@ class Brains:
 
     @classmethod
     def plastic_text(cls, traits: np.ndarray, hidden: bool) -> list[str]:
-        eta, a, b, c, d, mod, hebb, target, homeo, persist, intrinsic = traits[cls.BASE_TRAITS:]
+        eta, a, b, c, d, mod, hebb, target, homeo, persist, intrinsic = traits[cls.BASE_TRAITS:][:len(PLASTIC)]
         lines = [f"plasticità in entrata: η0 x {np.exp(eta):.2g}",
                  f"  A {a:+.2f} pre·post   B {b:+.2f} pre",
                  f"  C {c:+.2f} post       D {d:+.2f}",
                  f"hebbiano di base: η_h0 x {np.exp(hebb):.2g}",
                  f"omeostasi: attività desiderata {float(sigmoid(target)):.2f}, forza h0 x {np.exp(homeo):.2g}",
                  f"traccia provvisoria: dura τ0 x {np.exp(persist):.2g}",
-                 f"omeostasi della soglia: forza h0 x {np.exp(intrinsic):.2g}"]
+                 f"omeostasi della soglia: forza h0 x {np.exp(intrinsic):.2g}",
+                 f"guadagno degli ingressi (sviluppo): x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC)]):.2g}"]
         if hidden:
             lines.append("modulatore: sì (non trasmette, rilascia M)" if mod > 0
                          else f"modulatore: no (gene {mod:+.2f})")
@@ -359,6 +416,18 @@ class Brains:
         genome = primordial(cfg, n, n_out, self.N_TRAITS, rng)
         self._init_genes(cfg, rng, genome)
         self._init_plasticity(cfg, rng, genome)
+        genome.traits[:, :, self.GAIN] = 0.0  # guadagno 1: conta solo con lo sviluppo
+        if cfg.genome == "sviluppo":  # il primo cervello nasce dai marcatori
+            from . import development
+
+            genome.traits[:, :, self.GAIN] = rng.normal(0.0, 0.2, genome.traits.shape[:2])
+
+            for name, value in development.initial_markers(cfg, n, genome.n_rec, genome.weights.shape[1],
+                                                           rng).items():
+                setattr(genome, name, value)
+            genome.m_id = np.broadcast_to(np.arange(cfg.marker_slots, dtype=np.int64), (n, cfg.marker_slots)).copy()
+            genome.m_fam = genome.m_id.copy()
+            development.develop(genome, cfg, rng, self.GAIN)
         self.set_genome(genome)
 
     def _init_plasticity(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
@@ -611,7 +680,8 @@ class SpikingBrains(Brains):
     KIND = "spike-ei"
     CENTRED = False
     BASE_TRAITS = 3  # corrente di fondo, perdita, tipo; poi la plasticità
-    N_TRAITS = BASE_TRAITS + len(PLASTIC)
+    N_TRAITS = BASE_TRAITS + len(GENES)
+    GAIN = BASE_TRAITS + len(PLASTIC)  # il gene del guadagno
     OUT_LABELS = ("avanti", "indietro", "destra", "sinistra")
 
     @classmethod
