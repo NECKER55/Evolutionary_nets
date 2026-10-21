@@ -218,7 +218,8 @@ all'apprendimento.
 
 ### Aggiornamenti dovuti al codice di oggi
 
-- **Formato dei salvataggi**: 9 (non 6). I salvataggi di oggi si aprono con
+- **Formato dei salvataggi**: 12 (non 6; il 9 è l'hebbiano, il 10 l'omeostasi,
+  l'11 la traccia provvisoria). I salvataggi di oggi si aprono con
   `genome = "diretto"`.
 - **Incrocio tra omologhi**: anche i marcatori portano identità e famiglia (come
   i geni dei neuroni). La tabella di affinità si incrocia riga per riga,
@@ -239,9 +240,53 @@ all'apprendimento.
 ### Ordine di lavoro
 
 1. Hebbiano di base (anche nel genoma diretto) nei due motori, con i test.
+   **Fatto il 2026-10-21** (gene `hebb` in coda ai geni della plasticità,
+   formato 9). Misura sulla popolazione di `corsa-20261020-200723`, evoluta
+   senza: con velocità di partenza 1e-4 i maturi crollano dal 77% allo 0,3%
+   (in 14.000 passi di vita la regola di Hebb, senza scaling omeostatico,
+   deforma il riflesso); 1e-5 un poco dannoso; **1e-6 neutrale**, scelto come
+   partenza. Lo scaling omeostatico (sezione 4) diventa quindi la condizione
+   perché l'hebbiano possa crescere: va fatto prima o insieme allo sviluppo.
+1b. Scaling omeostatico (sezione 4) nei due motori, con i test. **Fatto il
+   2026-10-21** (geni `target` e `homeo` in coda alla plasticità, formato 10;
+   ā = media di |attività| con τ = 5 s; si nasce con ā = a*, in attesa
+   dell'attività spontanea). Misura sulla stessa popolazione: forza 1e-4
+   neutrale (scelta come partenza), 1e-3 un poco dannosa, 1e-2 distruttiva
+   (i geni convertiti chiedono a ogni neurone, motori compresi, attività 0,5).
+   **L'omeostasi non salva l'hebbiano forte**: con hebbiano 1e-4 i maturi
+   restano allo 0–0,3% con qualsiasi forza. L'omeostasi tiene il livello di
+   attività, non il disegno dei pesi che fa il riflesso: l'hebbiano deve
+   crescere insieme all'evoluzione (che sceglie a*, h, η_h insieme), non
+   essere imposto a una popolazione evoluta senza.
+1c. Correzioni del 2026-10-21 (scelte dall'utente, "più simile possibile alla
+   natura"), dopo aver visto che le due regole erano approssimate male:
+   l'hebbiano solo rafforzava (nella rete a impulsi pre e post sono ≥ 0),
+   indeboliva l'inibizione invece di rafforzarla e poteva invertire il segno
+   delle sinapsi dei sensi; lo scaling rafforzava anche l'inibizione di un
+   neurone troppo zitto. Ora: BCM con soglia mobile θ = ā²/a* sulle
+   eccitatorie, Vogels (2011) sulle inibitorie, scaling opposto per le
+   inibitorie (Turrigiano), e la plasticità (anche quella modulata) cambia
+   solo la forza |w|, mai il tipo della sinapsi. Stessa misura: hebbiano 1e-4
+   ora 76,2% di maturi (prima 0,3%), 1e-3 5%; partenza portata a 1e-5
+   (neutrale). Parte del guadagno viene dal fatto che BCM, a parità di η_h,
+   cambia i pesi meno di pre·post (il fattore post − θ). Restano scorciatoie
+   dichiarate: tempi compressi (τ = 5 s invece di ore), si nasce con ā = a*,
+   nessuna omeostasi dell'eccitabilità propria (la soglia).
+1d. Contro la sovrascrittura, come in natura (2026-10-21, scelte dell'utente):
+   traccia provvisoria dell'hebbiano (early-LTP) che svanisce con un tempo che
+   è gene del neurone ("persist", partenza 30 s) e si consolida solo con un
+   modulatore (|M|, tagging and capture); saturazione graduale dei
+   rafforzamenti (1 − |w|/synapse_max); omeostasi dell'eccitabilità (la
+   corrente di fondo, stessa forza h). Formato 11. Una sola funzione
+   (`brain.plasticity`) per NumPy e GPU. Misura (maturi; 76,8% senza
+   plasticità): hebbiano 1e-4 77,3% (partenza ora 1e-4), 1e-3 71%, ma 5,6% se
+   la traccia è resa permanente: è la traccia provvisoria che impedisce la
+   sovrascrittura. Resta: l'omeostasi forte (≥ 1e-3) danneggia le popolazioni
+   convertite (a* = 0,5 per tutti i neuroni), e l'hebbiano forte dello
+   sviluppo arriverà con l'attività spontanea.
 2. Sviluppo: marcatori, tabella, guadagno, crescita degli assoni, attività
    spontanea, omeostasi; mutazioni, incrocio tra omologhi dei marcatori; formato
-   9. Prima nel motore NumPy (lo sviluppo si fa alla nascita, sulla CPU), poi la
+   12. Prima nel motore NumPy (lo sviluppo si fa alla nascita, sulla CPU), poi la
    vita sulla GPU (hebbiano e omeostasi nel passo).
 3. Controllo con lo XOR.
 4. Interfaccia: colore dell'identità dei neuroni, tabella di affinità.

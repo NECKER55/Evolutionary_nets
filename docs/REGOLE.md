@@ -364,11 +364,49 @@ pezzo di corteccia:
 - Gli anelli trattengono informazione da un passo all'altro: sono la **memoria**
   dell'agente. Non esiste altra memoria.
 - Alla nascita tutti i neuroni partono da zero.
-- **I pesi possono cambiare durante la vita**, se l'individuo ha dei neuroni
-  modulatori: vedi "Imparare durante la vita" qui sotto. Ciò che si impara non
-  si eredita.
+- **I pesi cambiano durante la vita** (hebbiano di base, omeostasi e, se ci
+  sono neuroni modulatori, plasticità modulata): vedi "Imparare durante la
+  vita" qui sotto. Ciò che si impara non si eredita.
 
 **Imparare durante la vita** (dettagli in [SPEC_FASE_E.md](SPEC_FASE_E.md)).
+
+- **La plasticità cambia la forza, mai il tipo**: ogni sinapsi nasce
+  eccitatoria o inibitoria (per la legge di Dale nei neuroni a impulsi, dal
+  segno del gene per i sensi e nelle reti continue) e lo resta tutta la vita;
+  la sua forza |w| va da 0 a `synapse_max`. Le attività contano come
+  frequenze (|attività|).
+- **Hebbiano di base, sempre attivo** (η_h gene del neurone che riceve,
+  velocità di partenza 1e-4, `hebb_initial_rate`: neutrale; l'evoluzione può
+  alzarla o spegnerla). Non serve un modulatore. Scrive una **traccia
+  provvisoria** (come l'early-LTP), che svanisce da sola con il tempo τ del
+  neurone (gene "persist", partenza 30 s, `early_initial_tau`; in natura 1–3
+  ore). Diventa stabile solo se, mentre c'è, arriva un modulatore
+  (*tagging and capture*, Frey e Morris 1997): una quota
+  1 − exp(−`capture_rate` · |M| · dt) a passo, con M buono o cattivo (si
+  ricorda sia ciò che premia sia ciò che spaventa). Così l'attività di tutti i
+  giorni non sovrascrive i circuiti: resta solo ciò che accade insieme a un
+  segnale importante.
+  - Sinapsi eccitatorie, regola BCM: Δ|w| = η_h · pre · post · (post − θ),
+    con la soglia mobile θ = ā² / a*. Sopra la soglia la sinapsi si rafforza,
+    sotto si indebolisce; se il neurone è troppo attivo la soglia sale. A
+    regime l'attività del neurone va verso a*.
+  - Sinapsi inibitorie, regola di Vogels: Δ|w| = η_h · pre · (post − a*).
+    L'inibizione cresce dove il neurone è più attivo del desiderato e cala
+    dove lo è meno: tiene in equilibrio eccitazione e inibizione.
+- **Scaling omeostatico, sempre attivo**: ogni neurone interno e ogni motore
+  tiene la media recente ā della propria attività (|attività|, tempo
+  caratteristico 5 s, `homeo_tau`) e moltiplica le sinapsi eccitatorie che
+  riceve per exp(h · dt · (a* − ā)) e quelle inibitorie per l'inverso (come
+  ha misurato Turrigiano). Con la stessa forza h il neurone sposta anche la
+  propria **eccitabilità** (la corrente di fondo) di h · dt · (a* − ā), nel
+  verso che avvicina l'attività ad a* (Desai 1999).
+- **Saturazione graduale** (van Rossum 2000): ogni rafforzamento è
+  moltiplicato per 1 − |w| / `synapse_max`: una sinapsi grande cresce sempre
+  meno, invece di sbattere contro un tetto. Due geni del neurone: l'attività desiderata
+  a* = sigmoide(gene) e la forza h = `homeo_initial_rate` · e^gene (partenza
+  1e-4 per secondo: neutrale). Chi è troppo attivo si indebolisce gli
+  ingressi, chi è troppo zitto se li rafforza. Si nasce in equilibrio
+  (ā = a*). Come le altre plasticità, ciò che cambia non si eredita.
 
 - Ogni neurone ha, tra i suoi geni, una **regola di plasticità** per le
   sinapsi che riceve: Δw = η · M · (A·pre·post + B·pre + C·post + D). η, A, B,
