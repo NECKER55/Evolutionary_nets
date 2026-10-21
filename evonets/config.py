@@ -128,6 +128,11 @@ class Config:
     # quando qualcuno ne usa più di pool_fill, tutti ricevono pool_step posti.
     net_hidden_slots: int = 8
     receptor_slots: int = 4
+    # Tipo di simulazione: "evoluzione" = evolvono sensi e cervello;
+    # "cervello" = sensi fissi decisi da noi (net/senses.py, set `sensor_set`),
+    # evolve solo il cervello.
+    sim_mode: str = "evoluzione"
+    sensor_set: str = "naturale"
     pool_fill: float = 0.8
     pool_step: int = 8
     # Il corpo primordiale: recettori accesi, a ventaglio davanti, generalisti

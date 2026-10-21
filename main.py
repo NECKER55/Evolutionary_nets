@@ -215,6 +215,9 @@ def main() -> None:
     ap.add_argument("--task", choices=("bersaglio", "cibo"), default="bersaglio",
                     help="compito: bersaglio = toccarlo una volta (il mondo di prima), "
                          "cibo = nutrirsi (docs/SPEC_MONDO.md; senza veleno)")
+    ap.add_argument("--mode", choices=("evoluzione", "cervello"), default="evoluzione",
+                    help="evoluzione = evolvono sensi e cervello; cervello = sensi fissi (net/senses.py), "
+                         "evolve solo il cervello")
     ap.add_argument("--ladder", action="store_true",
                     help="con --task cibo: la scala di difficoltà adattiva (evo/ladder.py)")
     ap.add_argument("--controls", action="store_true",
@@ -227,7 +230,7 @@ def main() -> None:
     ap.add_argument("--bench", action="store_true", help="misura il throughput senza grafica")
     ap.add_argument("--steps", type=int, default=5000, help="step per --bench")
     args = ap.parse_args()
-    cfg = Config(net_type=args.net, engine=args.engine, task=args.task)
+    cfg = Config(net_type=args.net, engine=args.engine, task=args.task, sim_mode=args.mode)
     if args.task == "cibo":
         cfg.n_hazards = 0  # il veleno resta spento in tutta la scala
     if args.ladder or args.controls:
@@ -250,7 +253,7 @@ def main() -> None:
         from evonets.viz.app import App
 
         App(dict(net=args.net, agents=args.agents, seed=args.seed, load=args.load, save=args.save, task=args.task,
-                 ladder=cfg.ladder)).run()
+                 ladder=cfg.ladder, sim=args.mode)).run()
 
 
 if __name__ == "__main__":

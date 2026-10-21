@@ -1,7 +1,7 @@
 import numpy as np
 import pygame
 
-from ..net import receptors
+from ..net import receptors, senses
 from ..sim.world import World
 
 BG = (14, 16, 22)
@@ -298,7 +298,11 @@ class Renderer:
             pygame.draw.circle(layer, self._signal(values[k]), p, 4)
             if k < brains.n_in:  # il bordo dice a cosa è sensibile il recettore
                 pygame.draw.circle(layer, receptor_color(genes, i, k), p, 5, 1)
-                name = receptors.label(genes, i, k).split(" ", 1)[1]
+                if brains.cfg.sim_mode == "cervello":  # sensi fissi: il loro nome
+                    name = (senses.senses(brains.cfg)[k].name.replace("occhio ", "")
+                            .replace("sinistro", "sx").replace("destro", "dx"))
+                else:
+                    name = receptors.label(genes, i, k).split(" ", 1)[1]
                 layer.blit(self.small.render(name[:11], True, DIM), (4, p[1] - 6))
             else:
                 # Con i tipi fissi il bordo dice se il neurone eccita o inibisce.

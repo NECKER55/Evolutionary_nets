@@ -6,6 +6,34 @@ Come funzionano il mondo, gli agenti, la riproduzione e le mutazioni. L'interfac
 Tutti i numeri qui sotto sono i valori di default. Tra parentesi c'è il nome
 della costante in `evonets/config.py` che li controlla.
 
+## 0. Due tipi di simulazione
+
+Si sceglie con `sim_mode` (riga "Simulazione" del menu, `--mode` nel terminale);
+è parte dello stato della corsa e si conserva riprendendola.
+
+- **evoluzione** (predefinita): evolvono sensi e cervello, come descritto in
+  tutto il resto di questo documento.
+- **cervello**: i **sensi sono fissi e decisi da noi**, uguali per tutti
+  (`net/senses.py`, set `sensor_set`): non mutano, non si duplicano, non si
+  rompono, e il nervo entra nel cervello sempre nello stesso punto. **Evolve
+  solo il cervello**, con tutte le altre regole (neuroni, collegamenti, pesi,
+  plasticità, duplicazioni, incrocio, sesso, fecondità, riserve). Lo scopo è
+  adattare un cervello ai sensi dati per sopravvivere nel mondo scelto. Il
+  cervello parte primordiale; i sensi costano energia come sempre (circa 0,64
+  energia/s in tutto).
+
+Il set "naturale" (10 sensi, ognuno specializzato su un solo fenomeno):
+
+| Senso | Sente | Sensibilità | Dove sta / dove guarda | Apertura | Adattamento (τ, sottr., div.) |
+|---|---|---|---|---|---|
+| naso sinistro / destro | odore del cibo (0,6; larghezza 0,1) | 15 | muso, ±30° | — | 0,3 s; 0,8; 0,75 (come il naso evoluto) |
+| occhio rosso sinistro / destro | colore del cibo (0,85) | 10 | ±15°, guarda a ±25° | 60° | 1 s; 0,2; 0,5 |
+| occhio blu sinistro / destro | colore dei predatori (0,05) | 6 | fianchi, ±90° | 120° | 1 s; 0,2; 0,5 |
+| vibrazioni | vibrazioni dei predatori (0,4) | 6 | centro | 360° | 1 s; 0,5; 0 |
+| contatto | pressione delle pareti | 2 | muso | 180° | nessuno |
+| energia | energia del corpo (rispetto alle riserve massime) | 4 | interno | — | nessuno |
+| velocità | velocità in avanti | 2 | interno | — | nessuno |
+
 ## 1. Il tempo
 
 - La simulazione avanza a passi di 1/60 di secondo (`dt`).

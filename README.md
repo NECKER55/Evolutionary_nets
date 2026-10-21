@@ -9,7 +9,8 @@ compito**, e l'energia decide chi muore prima di riuscirci.
 più arduo. La forma della rete non è fissata ma evolve, e così i sensi: ogni
 agente nasce con pochi **recettori universali** che possono diventare
 sensibili a luce, sostanze, vibrazioni, temperatura, campo magnetico o al
-proprio corpo. Non c'è un numero massimo di neuroni o di sensi: ogni cosa ha un
+proprio corpo. In alternativa, nella simulazione "solo cervello", i sensi sono
+fissi e decisi da noi ed evolve soltanto il cervello. Non c'è un numero massimo di neuroni o di sensi: ogni cosa ha un
 costo in energia, e la selezione decide cosa tenere. Anche i tassi di
 mutazione sono geni.
 
@@ -32,6 +33,7 @@ scarica circa 1 GB di librerie NVIDIA.
 ```
 uv run main.py                          # interfaccia grafica
 uv run main.py --task cibo              # interfaccia, già impostata sul mondo del cibo
+uv run main.py --task cibo --mode cervello --ladder --evolve 2000  # sensi fissi, evolve solo il cervello
 uv run main.py --evolve 300             # 300 generazioni nel terminale, poi salva
 uv run main.py --task cibo --ladder --evolve 2000                  # mondo del cibo con scala adattiva
 uv run main.py --task cibo --ladder --controls --seeds 4 --evolve 2000  # più i due controlli, 4 semi

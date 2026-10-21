@@ -1,11 +1,11 @@
 import numpy as np
+from nets import rich
 
 from evonets import Config
 from evonets.evo import crossover, mutate, reproduce
 from evonets.evo.genetics import duplicate_neuron, duplicate_receptor, grow
 from evonets.net import Brains
 from evonets.net.brain import META_INDEX, Genome
-from nets import rich
 
 R, N_OUT = 10, 2
 # Tutti i tassi a zero (al minimo fisico) e nessuna deriva dei tassi stessi.
@@ -302,3 +302,25 @@ def test_more_food_more_children():
               for p in range(3)]
     assert sum(counts) == 900 and counts[0] < counts[1] < counts[2]
     assert abs(counts[2] / 900 - 6 / 9) < 0.06
+
+
+def test_in_brain_mode_the_senses_never_change_and_only_the_brain_evolves():
+    from evonets.net import senses
+
+    cfg = Config(sim_mode="cervello", population=60)
+    b = Brains(cfg, 60, N_OUT, 0)
+    g = b.genome
+    fixed = senses.genes(cfg, 60)
+    assert g.n_rec == len(senses.SETS["naturale"]) and g.r_active.all()
+    for name, value in fixed.items():
+        assert np.allclose(getattr(g, name), value), name
+    rng = np.random.default_rng(0)
+    for _ in range(30):  # molte generazioni di nascite, con mutazioni forti
+        g.meta[:, META_INDEX["dup"]] = np.log(0.5)
+        g.meta[:, META_INDEX["toggle"]] = np.log(0.2)
+        g.meta[:, META_INDEX["weight_prob"]] = np.log(0.5)
+        g = grow(reproduce(g, 60, cfg, rng), cfg)
+    assert g.n_rec == len(senses.SETS["naturale"]) and g.r_active.all()
+    for name, value in fixed.items():
+        assert np.allclose(getattr(g, name), value), name  # sensi identici, in tutti
+    assert g.active.any()  # il cervello invece cambia

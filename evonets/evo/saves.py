@@ -42,7 +42,8 @@ ADDED_IN_4 = {"r_tau": 0.0, "r_sub": 0.0, "r_div": 0.0}
 # conservano; tutte le altre costanti sono regole e vengono sempre dal codice
 # attuale, così ogni corsa si può continuare con le regole più recenti (i
 # cambi finiscono nel registro).
-RUN_STATE = ("net_type", "population", "net_hidden_slots", "receptor_slots", "task", "n_hazards", "ladder",
+RUN_STATE = ("sim_mode", "sensor_set", "net_type", "population", "net_hidden_slots", "receptor_slots", "task",
+             "n_hazards", "ladder",
              *ladder.DIALS, "exam_every")
 # Cosa cambia aprendo un file di un formato vecchio: (fino al formato, nota).
 CONVERSIONS = (

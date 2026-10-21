@@ -1,9 +1,9 @@
 # Specifica: lo sviluppo del cervello (genoma indiretto)
 
-Stato: **bozza da approvare** (2026-10-14). Nulla di quanto descritto qui è
-ancora nel codice.
+Stato: **bozza da approvare**, rivista il 2026-10-21 (sezione 10). Nulla di
+quanto descritto qui è ancora nel codice.
 
-Scelte dell'utente:
+Scelte dell'utente (2026-10-14):
 
 - genoma indiretto **"identità + affinità"**: i pesi non sono più scritti
   sinapsi per sinapsi, ma nascono dai marcatori dei neuroni e da una tabella di
@@ -161,8 +161,88 @@ posizione, come i posti dei neuroni.
 
 - La forma delle formule (affinità come somma di prodotti, probabilità che
   satura) è una scelta nostra: è la "chimica" del simulatore.
+- Il cervello sviluppato e la sua plasticità costano calcolo: lo sviluppo si fa
+  a ogni nascita, l'attività spontanea aggiunge circa il 10% di una vita per
+  ogni nato.
 - Con pochi marcatori i pesi iniziali hanno pochi gradi di libertà (al massimo
   tanti quanti i marcatori). Li aumentano la duplicazione dei marcatori,
   l'attività spontanea e l'apprendimento.
 - Non c'è crescita da una cellula sola (divisione, migrazione, gradienti): il
   genoma contiene ancora l'elenco dei neuroni. È una base per farla in futuro.
+
+---
+
+## 10. Revisione del 2026-10-21
+
+### Perché ora
+
+Le prove del 2026-10-20/21 (docs/SPEC_MONDO.md, sezioni 10–13, e il controllo
+con lo XOR) hanno mostrato che con il genoma diretto un neurone utile richiede
+5–6 geni giusti insieme (acceso, collegato a entrambi i sensi e al motore, pesi
+e soglia precisi): con la selezione "tutto o niente" nessun neurone utile in
+900.000 nascite, con la selezione graduata neuroni che si accumulano ma nessuna
+soluzione in 900 generazioni. Il genoma che scrive ogni sinapsi è la parte meno
+naturale del simulatore, ed è proprio quella che blocca la crescita del
+cervello. Polyworld (Yaeger) genera cervelli funzionanti con un genoma che
+descrive regole (gruppi, densità, velocità di apprendimento) e lascia i pesi
+all'apprendimento.
+
+### Scelte dell'utente (2026-10-21)
+
+1. **Apprendimento hebbiano di base, sempre attivo** (in tutti i casi, anche con
+   il genoma diretto): oltre alla plasticità modulata (che resta, e dice quando
+   imparare), ogni sinapsi effettiva cambia come
+
+   ```
+   Δw = η_h · pre · post
+   ```
+
+   con η_h **gene del neurone che riceve** (partenza debole e diversa da
+   individuo a individuo, può scendere a zero). Lo tiene in un intervallo
+   stabile lo scaling omeostatico (sezione 4) e il tetto `synapse_max`; nelle
+   reti a impulsi vale la legge di Dale. Agisce anche nell'attività spontanea
+   prima della nascita: oggi la plasticità agisce solo se c'è un neurone
+   modulatore, e i modulatori in tutte le corse sono rimasti a zero.
+2. **Pesi = affinità × guadagno del neurone**: ogni neurone (interno o motore)
+   ha un gene "quanto pesano gli ingressi che ricevo" (come il numero di
+   recettori postsinaptici, in scala logaritmica). Il peso iniziale di s → t è
+   affinità(s, t) · guadagno_t, limitato a ±`synapse_max`. Più gradi di libertà
+   restando indiretto: il genoma descrive i neuroni, non le sinapsi.
+3. **Sensi fissi** (`sim_mode = "cervello"`): anche i marcatori dei sensi sono
+   fissi (uguali per tutti, mai mutati): il cervello deve adattarsi a sensi del
+   tutto dati. Si estraggono una volta, con un seme fisso del set di sensi.
+   Quando un marcatore si duplica, la copia nei sensi vale quanto l'originale e
+   poi non deriva. Nella simulazione completa i marcatori dei recettori
+   evolvono come quelli dei neuroni.
+4. Le altre parti della specifica valgono **in entrambi i tipi di simulazione**.
+
+### Aggiornamenti dovuti al codice di oggi
+
+- **Formato dei salvataggi**: 9 (non 6). I salvataggi di oggi si aprono con
+  `genome = "diretto"`.
+- **Incrocio tra omologhi**: anche i marcatori portano identità e famiglia (come
+  i geni dei neuroni). La tabella di affinità si incrocia riga per riga,
+  abbinando i marcatori per identità; un marcatore di un solo genitore passa con
+  probabilità 1/2. Vale lo scambio ineguale tra marcatori della stessa famiglia.
+- **Riproduzione, riserve, fecondità, sesso come gene**: invariati.
+- **Il controllo prima del mondo**: lo XOR con la scala (OR poi XOR), regola
+  graduata e regola a soglia, genoma diretto contro sviluppo. Costa minuti.
+  Domanda: con lo sviluppo nascono neuroni utili dove la codifica diretta
+  falliva? Poi la prova "un neurone in più" sulla popolazione di oggi.
+- **Il confronto nel mondo** (sostituisce la sezione 8): regole fisse e
+  dichiarate per tutta la durata, almeno 4 semi per condizione, prima in
+  modalità "solo cervello" (meno variabili), condizioni: genoma diretto,
+  diretto + hebbiano di base, sviluppo. Misure decise prima: esame a livelli,
+  neuroni interni usati (lesione "neuroni"), bravura vera su 20 arene ogni
+  500 generazioni.
+
+### Ordine di lavoro
+
+1. Hebbiano di base (anche nel genoma diretto) nei due motori, con i test.
+2. Sviluppo: marcatori, tabella, guadagno, crescita degli assoni, attività
+   spontanea, omeostasi; mutazioni, incrocio tra omologhi dei marcatori; formato
+   9. Prima nel motore NumPy (lo sviluppo si fa alla nascita, sulla CPU), poi la
+   vita sulla GPU (hebbiano e omeostasi nel passo).
+3. Controllo con lo XOR.
+4. Interfaccia: colore dell'identità dei neuroni, tabella di affinità.
+5. Confronto nel mondo.

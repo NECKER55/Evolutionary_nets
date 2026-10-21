@@ -192,8 +192,14 @@ def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Ge
     """La partenza primordiale (docs/SPEC_FASE_C.md, sezione 7): pochi
     recettori generalisti, nessun neurone interno acceso, collegamenti
     secondo la geometria. Gli individui differiscono un poco nei geni."""
-    R, H, std = cfg.receptor_slots, cfg.net_hidden_slots, cfg.net_weight_std
-    on = min(cfg.receptor_initial, R)
+    fixed = None
+    if cfg.sim_mode == "cervello":  # sensi fissi, decisi da noi
+        from .senses import genes
+
+        fixed = genes(cfg, n)
+    R = len(fixed["r_y"][0]) if fixed else cfg.receptor_slots
+    H, std = cfg.net_hidden_slots, cfg.net_weight_std
+    on = R if fixed else min(cfg.receptor_initial, R)
     # Recettori: i primi `on` accesi, distribuiti a ventaglio davanti; gli
     # altri posti hanno geni a caso ma spenti (pseudogeni).
     angle = rng.uniform(-np.pi, np.pi, (n, R))
@@ -214,6 +220,12 @@ def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Ge
     r_tau = np.log(cfg.receptor_initial_tau) + rng.normal(0.0, 0.3, (n, R))
     r_sub = rng.uniform(0.0, cfg.receptor_initial_adaptation, (n, R))
     r_div = rng.uniform(0.0, cfg.receptor_initial_adaptation, (n, R))
+    if fixed:
+        r_active, r_sens, r_mu, r_width = fixed["r_active"], fixed["r_sens"], fixed["r_mu"], fixed["r_width"]
+        r_aperture, r_y, r_tau, r_sub, r_div = (fixed[k] for k in ("r_aperture", "r_y", "r_tau", "r_sub", "r_div"))
+        body_unit, unit = fixed["r_body"], fixed["r_look"]
+    else:
+        body_unit = unit.copy()
 
     pos = rng.random((n, H, 2))
     meta = np.log(np.maximum(meta_start(cfg), cfg.mutation_floor))[None, :] + rng.normal(0.0, 0.1, (n, len(META)))
@@ -224,7 +236,7 @@ def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Ge
     return Genome(
         weights=rng.normal(0.0, std, (n, T, S)), traits=rng.normal(0.0, std, (n, T, n_traits)),
         conn=conn, active=np.zeros((n, H), dtype=bool), pos=pos,
-        r_active=r_active, r_sens=r_sens, r_mu=r_mu, r_width=r_width, r_body=unit.copy(), r_look=unit,
+        r_active=r_active, r_sens=r_sens, r_mu=r_mu, r_width=r_width, r_body=body_unit, r_look=unit,
         r_aperture=r_aperture, r_y=r_y, r_tau=r_tau, r_sub=r_sub, r_div=r_div, meta=meta,
     )
 

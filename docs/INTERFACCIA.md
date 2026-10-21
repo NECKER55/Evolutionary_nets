@@ -16,6 +16,7 @@ Si sceglie la corsa e la si lancia con Invio (o il pulsante).
 |---|---|
 | Modalità | **veloce**: si parte dalla pagina principale (statistiche e reti), l'arena si apre con `F`; **massima velocità**: solo statistiche, ridisegnate due volte al secondo, tutto il resto del tempo all'evoluzione; **dal vivo**: si parte con l'arena a schermo. Il risultato è lo stesso in tutte e tre |
 | Rete | continua o a impulsi con neuroni eccitatori/inibitori |
+| Simulazione | **completa** (evolvono sensi e cervello) o **solo cervello** (sensi fissi decisi da noi, vedi [REGOLE.md](REGOLE.md), punto 0) |
 | Individui | dimensione della popolazione |
 | Mondo | **bersaglio e veleno** (il mondo di prima) o **nutrirsi**: cibo, prede e predatori, si riproduce chi mangia almeno N cibi e il veleno è spento ([SPEC_MONDO.md](SPEC_MONDO.md)) |
 | Scala | solo nel mondo del cibo: **adattiva** (le manopole della difficoltà salgono se va bene e scendono se va male) oppure ferma al mondo **basico** o al **complesso**, come le popolazioni di controllo. Le tre insieme nello stesso lotto si lanciano dal terminale con `--controls` |

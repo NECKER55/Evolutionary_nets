@@ -2,7 +2,14 @@ import numpy as np
 import pytest
 
 from evonets import Config, World
-from evonets.net.receptors import Prepared, ReceptorGenes, respond, scales, spectral, stimuli
+from evonets.net.receptors import (
+    Prepared,
+    ReceptorGenes,
+    respond,
+    scales,
+    spectral,
+    stimuli,
+)
 from evonets.sim import signals
 from evonets.sim.signals import CHEMICAL, INTERNAL, LIGHT, MAGNETIC, MECHANICAL, THERMAL
 

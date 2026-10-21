@@ -1,9 +1,9 @@
 import numpy as np
+from nets import rich
 
 from evonets import Config
 from evonets.evo import Evolution, crossover, reproduce
 from evonets.net import Brains, NeuralController, SpikingBrains
-from nets import rich
 
 N_IN = 10
 

@@ -238,13 +238,15 @@ def duplicate_receptor(g: Genome, i: int, k: int, f: int, rng: np.random.Generat
     g.r_y[i, f] = np.clip(g.r_y[i, k] + rng.normal(0.0, std), 0.0, 1.0)
 
 
-def _duplicate(g: Genome, rng: np.random.Generator, p: np.ndarray, split: bool = False) -> None:
+def _duplicate(g: Genome, rng: np.random.Generator, p: np.ndarray, split: bool = False,
+               receptors: bool = True) -> None:
     """Ogni neurone interno e ogni recettore acceso si duplica con la
     probabilità `p` (N,) del suo individuo, nel primo posto libero. Senza posti
     liberi la duplicazione non avviene (i posti crescono alla generazione
     dopo, vedi `grow`). `split`: vedi `duplicate_receptor`."""
     receptor = lambda g_, i, k, f, r: duplicate_receptor(g_, i, k, f, r, split)
-    for active, copy in ((g.active, duplicate_neuron), (g.r_active, receptor)):
+    kinds = ((g.active, duplicate_neuron), (g.r_active, receptor)) if receptors else ((g.active, duplicate_neuron),)
+    for active, copy in kinds:
         events = np.argwhere(active & (rng.random(active.shape) < p[:, None]))
         for i, k in events:
             free = np.flatnonzero(~active[i])
@@ -307,27 +309,11 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     p_pos, std_pos = rate("pos_prob"), base("pos_std")
     g.pos += chance(g.pos.shape[:2], p_pos)[:, :, None] * noise(g.pos.shape, std_pos)
     np.clip(g.pos, 0.0, 1.0, out=g.pos)
-    g.r_y += chance(g.r_y.shape, p_pos) * noise(g.r_y.shape, std_pos)
-    np.clip(g.r_y, 0.0, 1.0, out=g.r_y)
-
-    # 3. Geni dei recettori: ognuno deriva nella sua scala.
-    drift = base("rec_drift")
-    for field in ("r_sens", "r_mu", "r_width", "r_aperture", "r_tau", "r_sub", "r_div"):
-        a = getattr(g, field)
-        a += chance(a.shape, p_w) * noise(a.shape, drift * DRIFT_SCALE[field])
-    np.clip(g.r_mu, 0.0, 1.0, out=g.r_mu)
-    # Una cellula non cattura più quanti di quanti ne arrivano: la sensibilità ha
-    # un massimo fisico (anche nei recettori spenti, che altrimenti derivano
-    # senza limiti e, riaccesi, costerebbero un'energia assurda).
-    np.clip(g.r_sens, None, np.log(MAX_SENSITIVITY), out=g.r_sens)
-    np.clip(g.r_width, np.log(0.005), np.log(10.0), out=g.r_width)
-    np.clip(g.r_sub, 0.0, 1.0, out=g.r_sub)
-    np.maximum(g.r_div, 0.0, out=g.r_div)
-    np.clip(g.r_tau, np.log(cfg.dt), np.log(1000.0), out=g.r_tau)
-    np.clip(g.r_aperture, np.log(MIN_APERTURE), np.log(MAX_APERTURE), out=g.r_aperture)
-    for field in ("r_body", "r_look"):
-        a = getattr(g, field)
-        a[:] = _turn(a, chance(a.shape[:2], p_w) * noise(a.shape[:2], drift * DRIFT_SCALE["turn"]))
+    fixed = cfg.sim_mode == "cervello"  # sensi fissi: i geni dei recettori non mutano mai
+    if not fixed:
+        g.r_y += chance(g.r_y.shape, p_pos) * noise(g.r_y.shape, std_pos)
+        np.clip(g.r_y, 0.0, 1.0, out=g.r_y)
+        _mutate_receptors(g, cfg, chance, noise, p_w, base("rec_drift"))
 
     # 4. Collegamenti: uno nuovo compare con una probabilità che cala con la
     # distanza, come alla nascita, con la portata λ dell'individuo.
@@ -345,9 +331,30 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     on, off = knockout(g, mu)
     g.active = np.where(g.active, rng.random(g.active.shape) >= off,
                         rng.random(g.active.shape) < np.minimum(1.0, mu)[:, None])
-    g.r_active = np.where(g.r_active, rng.random(g.r_active.shape) >= on,
-                          rng.random(g.r_active.shape) < np.minimum(1.0, mu)[:, None])
-    _duplicate(g, rng, np.minimum(1.0, rate("dup")), cfg.receptor_dup_split)
+    if not fixed:
+        g.r_active = np.where(g.r_active, rng.random(g.r_active.shape) >= on,
+                              rng.random(g.r_active.shape) < np.minimum(1.0, mu)[:, None])
+    _duplicate(g, rng, np.minimum(1.0, rate("dup")), cfg.receptor_dup_split, receptors=not fixed)
+
+
+def _mutate_receptors(g: Genome, cfg: Config, chance, noise, p_w, drift) -> None:
+    """Geni dei recettori: ognuno deriva nella sua scala."""
+    for field in ("r_sens", "r_mu", "r_width", "r_aperture", "r_tau", "r_sub", "r_div"):
+        a = getattr(g, field)
+        a += chance(a.shape, p_w) * noise(a.shape, drift * DRIFT_SCALE[field])
+    np.clip(g.r_mu, 0.0, 1.0, out=g.r_mu)
+    # Una cellula non cattura più quanti di quanti ne arrivano: la sensibilità ha
+    # un massimo fisico (anche nei recettori spenti, che altrimenti derivano
+    # senza limiti e, riaccesi, costerebbero un'energia assurda).
+    np.clip(g.r_sens, None, np.log(MAX_SENSITIVITY), out=g.r_sens)
+    np.clip(g.r_width, np.log(0.005), np.log(10.0), out=g.r_width)
+    np.clip(g.r_sub, 0.0, 1.0, out=g.r_sub)
+    np.maximum(g.r_div, 0.0, out=g.r_div)
+    np.clip(g.r_tau, np.log(cfg.dt), np.log(1000.0), out=g.r_tau)
+    np.clip(g.r_aperture, np.log(MIN_APERTURE), np.log(MAX_APERTURE), out=g.r_aperture)
+    for field in ("r_body", "r_look"):
+        a = getattr(g, field)
+        a[:] = _turn(a, chance(a.shape[:2], p_w) * noise(a.shape[:2], drift * DRIFT_SCALE["turn"]))
 
 
 def reproduce(parents: Genome, n_children: int, cfg: Config, rng: np.random.Generator,
@@ -391,7 +398,7 @@ def grow(genome: Genome, cfg: Config) -> Genome:
     neuroni interni, tutta la popolazione riceve `pool_step` posti nuovi,
     spenti. È solo memoria: per l'evoluzione non esiste un numero massimo."""
     r, h = genome.n_rec, genome.n_hidden
-    if genome.r_active.sum(axis=1).max(initial=0) > cfg.pool_fill * r:
+    if cfg.sim_mode != "cervello" and genome.r_active.sum(axis=1).max(initial=0) > cfg.pool_fill * r:
         r += cfg.pool_step
     if genome.active.sum(axis=1).max(initial=0) > cfg.pool_fill * h:
         h += cfg.pool_step

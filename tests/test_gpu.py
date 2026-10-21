@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from nets import rich
 
 from evonets import Config, World
 from evonets.gpu import engine
@@ -14,7 +15,6 @@ from evonets.gpu.sim import GpuWorlds, pack_params, pack_state
 from evonets.net import NeuralController
 from evonets.sim import signals
 from evonets.sim.tasks import Foraging, MovingTarget
-from nets import rich
 
 ALL_ON = dict(target_vibration=0.7, hazard_vibration=0.4, hazard_smell=0.3, target_smell=0.5, target_heat=0.4,
               hazard_heat=0.2, magnetic_field=0.8)

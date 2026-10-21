@@ -85,6 +85,11 @@ class Launcher(Screen):
                              help="Il seme usato viene comunque mostrato e salvato: ogni corsa si può rifare.")
         self.seed = Number("Seme", defaults.get("seed") or 0,
                            help="Stesso seme e stesse impostazioni = stessa corsa.")
+        self.sim = Choice("Simulazione", [("evoluzione", "completa: evolvono sensi e cervello"),
+                                          ("cervello", "solo cervello: sensi fissi (set naturale)")],
+                          help="Solo cervello: tutti hanno gli stessi 10 sensi (net/senses.py), che non "
+                               "cambiano; evolve solo il cervello. Ignorato se si riprende un salvataggio.")
+        self.sim.select(defaults.get("sim") or "evoluzione")
         self.task = Choice("Mondo", [("bersaglio", "bersaglio e veleno (il mondo di prima)"),
                                      ("cibo", "nutrirsi: cibo, prede e predatori")],
                            help="Il compito. Nel mondo del cibo si riproduce chi mangia almeno N cibi; il veleno "
@@ -112,8 +117,8 @@ class Launcher(Screen):
                            on_change=self._loaded)
         self.save = Text("Salva in", defaults.get("save") or self._fresh_name(),
                          help="Dove salvare: tasto S, fine delle generazioni, uscita dalla corsa.")
-        self.fields = [self.mode, self.net, self.agents, self.task, self.ladder, self.chance, self.seed, self.gens,
-                       self.exam_every, self.select, self.load, self.save]
+        self.fields = [self.mode, self.sim, self.net, self.agents, self.task, self.ladder, self.chance, self.seed,
+                       self.gens, self.exam_every, self.select, self.load, self.save]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
         self.inspect_btn = Button("Esplora reti e genomi del salvataggio", self.explore)
@@ -130,7 +135,7 @@ class Launcher(Screen):
         """Scelto un salvataggio (o nessuno). Le righe che vengono dal file si
         disattivano e mostrano i valori del file; tornando a "nessuno" riprendono
         quelli scelti a mano."""
-        fields = (self.net, self.agents, self.task, self.ladder, self.chance, self.seed)
+        fields = (self.sim, self.net, self.agents, self.task, self.ladder, self.chance, self.seed)
         if path is not None and getattr(self, "_mine", None) is None:
             self._mine = [f.value if isinstance(f, Number) else f.index for f in fields]
         if path is None and getattr(self, "_mine", None) is not None:
@@ -143,6 +148,7 @@ class Launcher(Screen):
         if path is not None:
             self._show_saved(path)
         self.net.enabled = self.agents.enabled = self.chance.enabled = self.task.enabled = path is None
+        self.sim.enabled = path is None
         if path is not None:
             self.save.value, self.save.edited = path, False
         elif not self.save.edited:
@@ -159,7 +165,7 @@ class Launcher(Screen):
         except Exception:  # file illeggibile: lo dirà save_info
             return
         for field, value in ((self.net, net), (self.task, saved.get("task") or "bersaglio"),
-                             (self.ladder, saved.get("ladder"))):
+                             (self.ladder, saved.get("ladder")), (self.sim, saved.get("sim_mode") or "evoluzione")):
             if value in [v for v, _ in field.options]:
                 field.select(value)
         self.agents.value = n
@@ -168,7 +174,7 @@ class Launcher(Screen):
             self.seed.value = seed
 
     def _config(self) -> Config:
-        cfg = Config(net_type=self.net.value, task=self.task.value)
+        cfg = Config(net_type=self.net.value, task=self.task.value, sim_mode=self.sim.value)
         cfg.population = self.agents.fixed()
         if cfg.task == "cibo":
             cfg.n_hazards = 0  # il veleno resta spento in tutta la scala
@@ -257,10 +263,10 @@ class Launcher(Screen):
         s.blit(app.big.render("Evolutionary nets", True, PLAYER), (60, 40))
         s.blit(app.font.render("nuova corsa, ripresa di un salvataggio o esplorazione delle sue reti", True, DIM),
                (60, 76))
-        y = 110
+        y = 100
         for k, f in enumerate(self.fields):
             f.draw(s, app.font, 60, y, 175, 540, k == self.focus)
-            y += ROW_H + 4
+            y += ROW_H + 2
         field = self.fields[self.focus]
         help = field.help if field.enabled or field is not self.select else \
             "La selezione finale parte quando le generazioni finiscono: imposta prima Generazioni."
