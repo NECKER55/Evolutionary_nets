@@ -409,6 +409,22 @@ pezzo di corteccia:
 - **Omeostasi dell'eccitabilità** (Desai 1999), un meccanismo distinto con
   un gene proprio ("intrinsic", stessa partenza): la corrente di fondo si
   sposta di h_i · dt · (a* − ā), cioè cresce se il neurone è troppo zitto.
+- **Periodo critico**: come in natura, l'hebbiano è fortissimo nello
+  sviluppo e si chiude con l'età. Per ogni neurone
+  η_h(età) = η_h · (1 + (B − 1) · e^(−età/τ_c)), dove η_h è la velocità
+  dell'adulto, B quante volte è più forte all'inizio (partenza 100,
+  `critical_initial_boost`) e τ_c in quanti secondi si chiude (partenza 2 s,
+  `critical_initial_tau`): B e τ_c sono geni del neurone ("boost",
+  "closure"), così neuroni diversi possono avere finestre diverse, come le
+  aree della corteccia. L'età si conta in secondi dall'inizio del grembo
+  (senza grembo, dalla nascita); un sopravvissuto ha già vissuto una vita
+  intera per ogni generazione superata, quindi non torna bambino in
+  un'arena nuova. Con i valori di partenza il periodo critico cade per lo
+  più nel grembo: lì il cablaggio si rifinisce (circa il 10% dei pesi),
+  alla nascita l'hebbiano è circa 9 volte quello dell'adulto e dopo 15 s è
+  quello dell'adulto. La plasticità modulata (la dopamina) resta aperta per
+  tutta la vita. Le popolazioni salvate prima (formato < 15) si aprono con
+  il periodo critico spento (B = 1): sono evolute senza.
 - **Saturazione graduale** (van Rossum 2000): ogni rafforzamento è
   moltiplicato per 1 − |w| / `synapse_max`: una sinapsi grande cresce sempre
   meno, invece di sbattere contro un tetto.

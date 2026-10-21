@@ -385,6 +385,17 @@ dove la plasticità hebbiana è massima prima della nascita.
 **Fase 3 — periodi critici (4).** η_h(età) = η_h · (r + (1 − r) · e^(−età/τ_c)),
 con τ_c e r geni del neurone; la plasticità modulata resta aperta.
 
+*Fase 3 fatta il 2026-10-21* (formato 15, 203 test). Il gene "hebb" resta
+la velocità dell'adulto (tarata neutrale); due geni nuovi in coda ai geni
+propri, dopo "gain": "boost" (B = 100 · e^gene) e "closure"
+(τ_c = 2 s · e^gene). Età in secondi dall'inizio del grembo (`clock`, sulla
+GPU nello stato), più una vita intera (`life_max`) per ogni generazione
+superata (`Brains.lived`). Misure: la popolazione convertita
+(corsa-20261020-200723, periodo critico spento) resta neutrale (76,0% contro
+76,8% senza plasticità, come prima); il grembo ora cambia i pesi dell'11,5%
+(rete a impulsi) e del 9,1% (continua) contro lo 0,5% senza periodo
+critico; velocità invariata (1,06 s/gen).
+
 **Fase 4 — valore innato (5).** Sensi del gusto (quando si mangia) e del dolore
 (danno); in modalità "cervello" due neuroni di valore fissi (gusto → M
 positivo, dolore → M negativo, come dopamina e noradrenalina). Scelta aperta:
