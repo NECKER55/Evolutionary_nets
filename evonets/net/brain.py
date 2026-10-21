@@ -56,16 +56,17 @@ PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist
 GENES = PLASTIC + ("gain", "boost", "closure")
 
 
-# Un gene sposta una velocità o una forza al più di e^12 volte (circa
-# 160.000) rispetto al suo valore di partenza: oltre non ha più significato
-# fisico, e i numeri a 32 bit della GPU traboccherebbero (l'ampiezza delle
-# mutazioni è un gene e può arrivare a 100).
+# Un gene alza una velocità o una forza al più di e^12 volte (circa 160.000)
+# rispetto al suo valore di partenza: oltre non ha più significato fisico, e i
+# numeri a 32 bit della GPU traboccherebbero (l'ampiezza delle mutazioni è un
+# gene e può arrivare a 100). Verso il basso nessun limite: un gene può
+# spegnersi del tutto, come un gene rotto.
 GENE_SPAN = 12.0
 
 
 def scale_gene(gene):
-    """e^gene, con il gene limitato a ±GENE_SPAN."""
-    return np.exp(np.clip(gene, -GENE_SPAN, GENE_SPAN))
+    """e^gene, con il gene limitato in alto a GENE_SPAN."""
+    return np.exp(np.minimum(gene, GENE_SPAN))
 
 
 def sigmoid(x):
