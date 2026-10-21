@@ -44,10 +44,16 @@ PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", 
 # un meccanismo distinto dallo scaling delle sinapsi (Desai 1999):
 # homeo_initial_rate · e^gene.
 PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist", "intrinsic")
-# Dopo la plasticità, i geni propri usati dallo sviluppo (development.py):
+# Dopo la plasticità, i geni propri dello sviluppo:
 # "gain", quanto pesano gli ingressi che il neurone riceve (come il numero di
-# recettori postsinaptici), in scala logaritmica: peso = affinità · e^gain.
-GENES = PLASTIC + ("gain",)
+# recettori postsinaptici), in scala logaritmica: peso = affinità · e^gain
+# (development.py);
+# "boost" e "closure", il periodo critico: l'hebbiano del neurone è
+# B = critical_initial_boost · e^boost volte più forte all'inizio dello
+# sviluppo e torna alla velocità dell'adulto con il tempo
+# τ_c = critical_initial_tau · e^closure (s di età, dal grembo):
+# η_h(età) = η_h · (1 + (B − 1) · e^(−età/τ_c)).
+GENES = PLASTIC + ("gain", "boost", "closure")
 
 
 def sigmoid(x):
@@ -98,7 +104,8 @@ def plasticity(cfg, xp, p, pre, post, m, n_in: int, centred: bool):
     theta = avg**2 / xp.maximum(want, 1e-3)
     bcm = (rate_post * (rate_post - theta))[:, :, None] * rate_pre[:, None, :]
     vogels = (rate_post - want)[:, :, None] * rate_pre[:, None, :]
-    early = early + saturate(p["hebb"][:, :, None] * xp.where(excit, bcm, vogels) * links)
+    critical = 1.0 + (p["boost"] - 1.0) * xp.exp(-p["clock"][:, None] / p["closure"])  # periodo critico
+    early = early + saturate((p["hebb"] * critical)[:, :, None] * xp.where(excit, bcm, vogels) * links)
     rule = p["rule"]
     drive = ((rule[..., 0] * post)[:, :, None] * pre[:, None, :] + rule[..., 1, None] * pre[:, None, :]
              + (rule[..., 2] * post + rule[..., 3])[:, :, None])
@@ -422,7 +429,9 @@ class Brains:
                  f"omeostasi: attività desiderata {float(sigmoid(target)):.2f}, forza h0 x {np.exp(homeo):.2g}",
                  f"traccia provvisoria: dura τ0 x {np.exp(persist):.2g}",
                  f"omeostasi della soglia: forza h0 x {np.exp(intrinsic):.2g}",
-                 f"guadagno degli ingressi (sviluppo): x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC)]):.2g}"]
+                 f"guadagno degli ingressi (sviluppo): x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC)]):.2g}",
+                 f"periodo critico: hebbiano x B0 x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC) + 1]):.2g}"
+                 f" all'inizio, si chiude in τ0 x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC) + 2]):.2g}"]
         if hidden:
             lines.append("modulatore: sì (non trasmette, rilascia M)" if mod > 0
                          else f"modulatore: no (gene {mod:+.2f})")
@@ -435,6 +444,8 @@ class Brains:
         self._init_genes(cfg, rng, genome)
         self._init_plasticity(cfg, rng, genome)
         genome.traits[:, :, self.GAIN] = 0.0  # guadagno 1: conta solo con lo sviluppo
+        # Periodo critico: forte e diverso da individuo a individuo.
+        genome.traits[:, :, self.GAIN + 1 : self.GAIN + 3] = rng.normal(0.0, 0.5, genome.traits.shape[:2] + (2,))
         if cfg.genome == "sviluppo":  # il primo cervello nasce dai marcatori
             from . import development
 
@@ -510,6 +521,10 @@ class Brains:
         p = self.traits[:, :, self.BASE_TRAITS :]
         self.eta, self.rule = cfg.plasticity_initial_rate * np.exp(p[..., 0]), p[..., 1:5]
         self.hebb = cfg.hebb_initial_rate * np.exp(p[..., 6])  # (N, T), del neurone che riceve
+        d = self.traits[:, :, self.GAIN + 1 :]
+        self.boost = cfg.critical_initial_boost * np.exp(d[..., 0])  # (N, T): B
+        self.closure = cfg.critical_initial_tau * np.exp(d[..., 1])  # (N, T): τ_c, s
+        self.lived = np.zeros(self.n)  # secondi già vissuti in vite precedenti (li dà l'evoluzione)
         self.target_act = sigmoid(p[..., 7])  # (N, T): a*
         self.homeo = cfg.homeo_initial_rate * np.exp(p[..., 8])  # (N, T): h, per secondo
         self.intrinsic = cfg.homeo_initial_rate * np.exp(p[..., 10])  # (N, T), per secondo
@@ -564,6 +579,9 @@ class Brains:
         (genoma diretto) ā = a* e la corrente del genoma. Senza tracce
         provvisorie."""
         g = self._genome
+        # Età all'inizio di questa vita (s, dal grembo): per il periodo critico.
+        born = np.isfinite(g.born_avg[:, -1]) if g.born_avg.shape[1] else np.zeros(self.n, dtype=bool)
+        self.clock = np.where(born, self.cfg.prenatal_time, 0.0) + self.lived
         self.avg = np.where(np.isfinite(g.born_avg), g.born_avg, self.target_act)
         self.early = np.zeros_like(self.w_eff)
         self.bias_now = np.where(np.isfinite(g.born_bias), g.born_bias, self.bias)
@@ -600,6 +618,7 @@ class Brains:
         before = self.state
         self.state, out = self._advance(obs, self.state, self)
         self._learn(np.arange(self.n), obs, before, self.state)
+        self.clock += self.cfg.dt  # l'età avanza
         return out
 
     def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
@@ -611,6 +630,7 @@ class Brains:
         state, out = self._advance(obs, before, sub)
         self.state[rows] = state
         self._learn(rows, obs, before, state, sub)
+        self.clock[rows] += self.cfg.dt  # l'età avanza
         return out
 
     def _pre(self, obs, before, after) -> np.ndarray:
@@ -640,7 +660,9 @@ class Brains:
         - plasticità modulata (docs/SPEC_FASE_E.md): Δ|w| = segno · η · M ·
           (A·pre·post + B·pre + C·post + D), sulla parte stabile;
         - saturazione graduale (van Rossum 2000): ogni rafforzamento è
-          moltiplicato per 1 − |w| / synapse_max."""
+          moltiplicato per 1 − |w| / synapse_max;
+        - periodo critico: l'hebbiano vale η_h · (1 + (B − 1) · e^(−età/τ_c)),
+          con l'età in secondi dal grembo (`clock`)."""
         if not self.cfg.plasticity:
             return
         local = np.flatnonzero(self.learns[rows])
@@ -652,7 +674,8 @@ class Brains:
         post = after[local]  # (n, T)
         m = np.einsum("nth,nh->nt", self.kmod[who], after[local, :H] * self._mod_sign[who])
         p = {k: getattr(self, k)[who] for k in ("w_eff", "early", "bias_now", "avg", "sign", "links", "target_act",
-                                                "homeo", "intrinsic", "hebb", "eta", "rule", "early_keep")}
+                                                "homeo", "intrinsic", "hebb", "eta", "rule", "early_keep", "boost",
+                                                "closure", "clock")}
         consts = {k: getattr(self.cfg, k) for k in PLASTICITY_CONSTANTS}
         w, early, bias, avg = plasticity(consts, np, p, pre, post, m, self.n_in, self.CENTRED)
         self.w_eff[who], self.early[who], self.bias_now[who], self.avg[who] = w, early, bias, avg
@@ -766,6 +789,7 @@ class SpikingBrains(Brains):
         (self.charge, self.spikes, self.state), out = self._advance(
             obs, (self.charge, self.spikes, self.state), self)
         self._learn(np.arange(self.n), obs, before, self.state)
+        self.clock += self.cfg.dt  # l'età avanza
         return out
 
     def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
@@ -775,6 +799,7 @@ class SpikingBrains(Brains):
             obs, (self.charge[rows], self.spikes[rows], before.copy()), sub)
         self.charge[rows], self.spikes[rows], self.state[rows] = charge, spikes, state
         self._learn(rows, obs, before, state, sub)
+        self.clock[rows] += self.cfg.dt  # l'età avanza
         return out
 
     def _advance(self, obs, states, g):

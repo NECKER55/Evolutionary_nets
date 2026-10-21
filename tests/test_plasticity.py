@@ -14,6 +14,7 @@ def circuit(kind=Brains, mod_sign=+1.0, **kw):
     Regola di n0: solo A (Hebb puro modulato)."""
     kw.setdefault("hebb_initial_rate", 0.0)  # qui si prova la plasticità modulata: hebbiano di base spento
     kw.setdefault("homeo_initial_rate", 0.0)  # e omeostasi spenta
+    kw.setdefault("critical_initial_boost", 1.0)  # e nessun periodo critico
     cfg = Config(net_hidden_slots=2, receptor_slots=R, receptor_initial=R, plasticity_initial_rate=0.05, **kw)
     b = kind(cfg, 1, 2 if kind is Brains else 4, 0)
     g = b.genome
@@ -264,3 +265,24 @@ def test_strengthening_slows_down_near_the_maximum():
     b.set_genome(g)
     w = run(b, steps=3000)
     assert 0.5 < w < b.cfg.synapse_max
+
+
+def test_critical_period_makes_hebb_strong_early_and_closes_with_age():
+    """Con B = 100 e τ_c = 1 s l'hebbiano dei primi secondi è molto più forte;
+    un individuo che ha già vissuto (sopravvissuto) non torna bambino."""
+    def learned(boost, lived=0.0):
+        b, g = plain(hebb_initial_rate=0.002, critical_initial_boost=boost, critical_initial_tau=1.0,
+                     homeo_tau=0.1)
+        g.traits[0, :, TARGET] = 2.0  # BCM rafforza
+        b.set_genome(g)
+        b.lived[:] = lived
+        b.reset_state()
+        return run(b, steps=300) - 0.5
+
+    adult, young, old = learned(1.0), learned(100.0), learned(100.0, lived=240.0)
+    assert young > 5 * adult > 0
+    assert np.isclose(old, adult, rtol=1e-3)
+    b, _ = plain(critical_initial_boost=100.0, critical_initial_tau=1.0)
+    for _ in range(60):
+        b.step(np.ones((1, R)))
+    assert np.isclose(b.clock[0], 1.0)  # l'età avanza di dt a ogni passo

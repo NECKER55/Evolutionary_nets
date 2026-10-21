@@ -65,6 +65,7 @@ def run_numpy(brains, rows: np.ndarray, obs: np.ndarray) -> tuple[np.ndarray, ..
     tau, eta = cfg.homeo_tau, b.eta
     b.eta = np.zeros_like(eta)  # niente ricompensa: la plasticità modulata tace
     b.avg[rows] = 0.0
+    b.clock[rows] = 0.0  # il grembo è l'età 0
     try:
         for k in range(len(obs)):
             cfg.homeo_tau = min(tau, (k + 1) * cfg.dt)  # ā = media di tutto ciò che è successo finora

@@ -134,6 +134,12 @@ class Evolution:
             prenatal(self.ctrl.brains, rows, self.rng, self.cfg.engine)
             self.ctrl.reset(self.world.seed)
 
+    def _lived(self) -> None:
+        """Quanto ha già vissuto ogni individuo (una vita intera per ogni
+        generazione superata): l'età conta per il periodo critico, e un
+        sopravvissuto non torna bambino in un'arena nuova."""
+        self.ctrl.brains.lived = self.age * float(self.cfg.life_max)
+
     def note_changes(self) -> dict:
         """Registra i cambi della configurazione dall'ultima volta (per esempio
         le costanti ritoccate a mano durante la corsa). Restituisce i cambi."""
@@ -313,6 +319,7 @@ class Evolution:
         world.n = n  # dopo una selezione finale la popolazione torna piena
         world.seed += 1
         world.reset()
+        self._lived()
         self.ctrl.reset(world.seed)
         self._sim = None
         self.generation += 1
@@ -333,6 +340,7 @@ class Evolution:
         self.world.n = len(keep)
         self.world.seed += 1
         self.world.reset()
+        self._lived()
         self.ctrl.reset(self.world.seed)
         self._sim = None
 

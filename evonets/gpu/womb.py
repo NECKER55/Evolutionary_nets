@@ -12,7 +12,7 @@ from . import engine
 _compiled: dict = {}
 
 KEYS = ("links", "target_on", "rule", "kmod", "mod_sign", "learns", "hebb", "sign", "intrinsic", "early_keep",
-        "homeo", "target_act")
+        "homeo", "target_act", "boost", "closure")
 
 
 def _fn(kind: str, n_hidden: int, substeps: int):
@@ -48,7 +48,7 @@ def run(b, rows: np.ndarray, obs: np.ndarray) -> tuple[np.ndarray, ...]:
     racing = np.zeros(n, dtype=np.float32)
     racing[rows] = 1.0
     s = dict(state=jnp.zeros((n, T)), w=f32(b.w_eff), early=jnp.zeros(b.w_eff.shape), bias_now=f32(b.bias_now),
-             avg=jnp.zeros((n, T)))
+             avg=jnp.zeros((n, T)), clock=jnp.zeros(n))  # il grembo è l'età 0
     if b.KIND == "spike-ei":
         s.update(charge=jnp.zeros((n, T)), spikes=jnp.zeros((n, b.n_hidden)))
     ph = {k: jnp.float32(v) for k, v in engine.phys_of(b.cfg).items()}

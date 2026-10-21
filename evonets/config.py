@@ -156,6 +156,14 @@ class Config:
     wave_width: float = 0.1
     wave_interval: float = 1.5
     prenatal_noise: float = 0.05
+    # Periodo critico (geni "boost" e "closure" di ogni neurone): quante volte
+    # l'hebbiano è più forte all'inizio dello sviluppo e in quanti secondi
+    # torna alla velocità dell'adulto (`hebb_initial_rate`), alla partenza.
+    # Con 2 s il periodo critico cade per lo più nel grembo (5 s): alla
+    # nascita l'hebbiano è circa 9 volte quello dell'adulto, dopo 15 s
+    # quello dell'adulto.
+    critical_initial_boost: float = 100.0
+    critical_initial_tau: float = 2.0
     pool_fill: float = 0.8
     pool_step: int = 8
     # Il corpo primordiale: recettori accesi, a ventaglio davanti, generalisti

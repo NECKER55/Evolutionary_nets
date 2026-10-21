@@ -40,8 +40,10 @@ from . import ladder
 # 13 = sviluppo: marcatori, gradienti, tabella di affinità, gene del guadagno
 #     (i file precedenti si aprono con il genoma diretto, guadagno 1);
 # 14 = fenotipo alla nascita dopo il grembo: ā e corrente di fondo (i file
-#     precedenti: non ancora nati, valgono i geni).
-FORMAT = 14
+#     precedenti: non ancora nati, valgono i geni);
+# 15 = periodo critico, due geni per neurone (i file precedenti: spento,
+#     B = 1, perché le loro popolazioni sono evolute senza).
+FORMAT = 15
 # Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
 # nullo, regola a zero, nessun modulatore.
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
@@ -73,6 +75,7 @@ CONVERSIONS = (
     (11, "omeostasi della soglia con un gene proprio (forza di partenza)"),
     (12, "gene del guadagno aggiunto; genoma diretto (lo sviluppo non c'era)"),
     (13, "stato alla nascita dal grembo: assente, valgono i geni"),
+    (14, "periodo critico spento (la popolazione è evoluta senza)"),
 )
 
 
@@ -203,6 +206,8 @@ def load(cls, cfg: Config, path):
             missing = base + len(GENES) - g.traits.shape[2]  # geni nati dopo (hebbiano, omeostasi, ...): 0
             if missing > 0:
                 g.traits = np.concatenate([g.traits, np.zeros(g.traits.shape[:2] + (missing,))], axis=2)
+            if fmt < 15:  # periodo critico spento: B = 1
+                g.traits[:, :, base + len(PLASTIC) + 1] = -np.log(cfg.critical_initial_boost)
             return g
 
         # Dopo una selezione finale gli individui sono meno della popolazione:
@@ -216,8 +221,9 @@ def load(cls, cfg: Config, path):
         if tune:
             calibrate(evo, population)
         evo.ctrl.brains.set_genome(population)
-        evo.ctrl.reset(evo.world.seed)
         evo.age = d["age"]
+        evo._lived()
+        evo.ctrl.reset(evo.world.seed)
         evo.ids, evo.next_id, evo.born = d["ids"], int(d["next_id"]), d["born"]
         if n != cfg.population:
             evo.world.n = n
