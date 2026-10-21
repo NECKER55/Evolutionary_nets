@@ -45,7 +45,7 @@ PHYS = (
     "toxin_molecule", "hazard_smell", "target_molecule", "target_smell", "smell_range", "vibration_range",
     "target_vibration", "target_vibration_freq", "hazard_vibration", "hazard_vibration_freq",
     "ambient_temperature", "heat_range", "target_heat", "hazard_heat", "receptor_dark", "receptor_saturation",
-    "sensor_noise", "synapse_max", "homeo_tau", "capture_rate", "spike_gain", "life_max",
+    "sensor_noise", "synapse_max", "homeo_tau", "capture_rate", "taste_tau", "spike_gain", "life_max",
     # Il mondo del cibo.
     "prey_flee_range", "predator_range", "predator_radius", "predator_damage", "food_energy", "food_min_dist",
     "predator_vibration", "predator_vibration_freq",
@@ -212,7 +212,7 @@ def quanta(ph, P, s):
 
 
 def body(ph, s):
-    """Come `signals.body`: (N, 7) grandezze del corpo in [0, 1]."""
+    """Come `signals.body`: (N, 9) grandezze del corpo in [0, 1]."""
     c, sn = jnp.cos(s["heading"]), jnp.sin(s["heading"])
     vx, vy = s["vel"][:, 0], s["vel"][:, 1]
     v_max = ph["thrust_accel"] / ph["lin_drag"]
@@ -222,7 +222,7 @@ def body(ph, s):
     def pos(x):
         return jnp.clip(x, 0.0, 1.0)
 
-    return jnp.stack([jnp.clip(s["energy"] / ph["energy_max"], 0.0, 1.0),
+    return jnp.stack([jnp.clip(s["energy"] / ph["energy_max"], 0.0, 1.0), s["taste"], s["pain"],
                       pos(fwd), pos(-fwd), pos(lat), pos(-lat), pos(rot), pos(-rot)], 1)
 
 
@@ -249,7 +249,8 @@ def learn(ph, P, s, pre, post, after_hidden, racing, centred):
     """Come `Brains._learn` (la stessa `brain.plasticity`), solo per chi
     impara ed è in gara. Restituisce lo stato della plasticità aggiornato."""
     M = jnp.einsum("nth,nh->nt", P["kmod"], after_hidden * P["mod_sign"])
-    p = {**P, "w_eff": s["w"], "early": s["early"], "bias_now": s["bias_now"], "avg": s["avg"], "clock": s["clock"]}
+    p = {**P, "w_eff": s["w"], "early": s["early"], "bias_now": s["bias_now"], "avg": s["avg"], "clock": s["clock"],
+         "signal": jnp.stack([s["taste"], s["pain"]], 1)}
     w, early, bias, avg = plasticity(ph, jnp, p, pre, post, M, P["active"].shape[1], centred)
     on = (P["learns"] * racing)[:, None] > 0
     return dict(w=jnp.where(on[:, :, None], w, s["w"]), early=jnp.where(on[:, :, None], early, s["early"]),
@@ -343,9 +344,12 @@ def physics(ph, P, s, actions, upkeep):
     effort = (ph["metabolism_basal"] + mass * ph["metabolism_move"] * jnp.abs(act[:, 0]) ** ph["metabolism_exponent"]
               + mass * ph["metabolism_turn"] * jnp.abs(turn) ** ph["metabolism_exponent"] + upkeep) * active
     energy = jnp.maximum(s["energy"] - (effort + ph["hazard_drain"] * toxicity) * dt, 0.0)
-    forage = {}
+    forage, pain = {}, jnp.minimum(toxicity, 1.0)
+    taste = s["taste"] * jnp.exp(-dt / ph["taste_tau"])
     if "food" in s:
-        energy, forage = foraging(ph, P, s, pos, energy, active)
+        energy, forage, bitten = foraging(ph, P, s, pos, energy, active)
+        pain = jnp.minimum(pain + bitten * active, 1.0)  # un morso fa male
+        taste = jnp.minimum(taste + (forage["eaten"] - s["eaten"]), 1.0)  # il gusto del cibo
     alive = (s["alive"] > 0) & (energy > 0.0)
     # Il bersaglio (se si muove) e chi lo raggiunge.
     target, tvel = s["target"] + s["target_vel"] * dt, s["target_vel"]
@@ -361,7 +365,7 @@ def physics(ph, P, s, actions, upkeep):
     t = s["t"] + dt
     done_t = jnp.where(done & (s["done"] <= 0), t, s["done_t"])  # quando ha completato
     return dict(pos=pos, vel=vel, heading=heading, ang_vel=ang_vel, energy=energy, alive=alive.astype(F),
-                done=done.astype(F), bump=bump.astype(F), pain=jnp.minimum(toxicity, 1.0), phase=phase,
+                done=done.astype(F), bump=bump.astype(F), pain=pain, taste=taste, phase=phase,
                 pulse_phase=pulse, target=target, target_vel=tvel, t=t, done_t=done_t, **forage)
 
 
@@ -418,7 +422,7 @@ def foraging(ph, P, s, pos, energy, active):
     age = jnp.where(eat, 0.0, s["age"] + dt)
     ghost_t = jnp.where(eat, 0.0, s["ghost_t"] + dt)
     return energy, dict(food=food, pred=pred, ptr=s["ptr"] + 2 * n_eat, eaten=s["eaten"] + n_eat, age=age,
-                        ghost=ghost, ghost_t=ghost_t)
+                        ghost=ghost, ghost_t=ghost_t), bitten
 
 
 def make_step(net_type: str, n_hidden: int, substeps: int):

@@ -164,6 +164,15 @@ class Config:
     # quello dell'adulto.
     critical_initial_boost: float = 100.0
     critical_initial_tau: float = 2.0
+    # Il gusto (grandezza del corpo): impulso a ogni cibo mangiato, che svanisce
+    # in questo tempo (s).
+    taste_tau: float = 0.5
+    # Sistema di valore innato: due nuclei, come l'area tegmentale ventrale
+    # (dopamina) e il locus coeruleus (noradrenalina), con proiezioni a tutto il
+    # cervello. Il gusto dà M positivo, il dolore M negativo, con forza
+    # value_initial · e^gene (geni `Genome.value` dell'individuo; fissi nella
+    # simulazione "solo cervello").
+    value_initial: float = 1.0
     pool_fill: float = 0.8
     pool_step: int = 8
     # Il corpo primordiale: recettori accesi, a ventaglio davanti, generalisti

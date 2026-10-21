@@ -58,6 +58,8 @@ SETS = {
         Sense("contatto", MECHANICAL, 0.0, 0.1, 2.0, aperture=180, nerve=0.5),
         Sense("energia", INTERNAL, QUALITY["energia"], 0.04, 4.0, nerve=0.95),
         Sense("velocità", INTERNAL, QUALITY["avanti"], 0.04, 2.0, nerve=0.05),
+        Sense("gusto", INTERNAL, QUALITY["gusto"], 0.03, 4.0, nerve=0.85),
+        Sense("dolore", INTERNAL, QUALITY["dolore"], 0.03, 4.0, nerve=0.15),
     ),
 }
 OFF = -30.0  # sensibilità e^-30 sugli altri fenomeni: nulla

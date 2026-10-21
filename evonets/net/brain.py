@@ -81,6 +81,9 @@ def plasticity(cfg, xp, p, pre, post, m, n_in: int, centred: bool):
     plasticità modulata, che è una regola scritta dai geni, i valori come
     sono. Restituisce (pesi, traccia provvisoria, corrente di fondo, ā)."""
     dt, top = cfg["dt"], cfg["synapse_max"]
+    # I nuclei di valore proiettano su tutto il cervello: il gusto aggiunge M
+    # positivo, il dolore M negativo (p["signal"]: gusto e dolore, (n, 2)).
+    m = m + (p["value"][:, 0] * p["signal"][:, 0] - p["value"][:, 1] * p["signal"][:, 1])[:, None]
     senses = xp.maximum(pre[:, :n_in], 0.0)  # risposte dei recettori: già frequenze
     rate_pre = xp.concatenate([senses, frequencies(xp, pre[:, n_in:], centred)], axis=1)
     rate_post = frequencies(xp, post, centred)
@@ -175,6 +178,10 @@ class Genome:
     sviluppo): `born_avg` (N, T) la frequenza media di ogni neurone e
     `born_bias` (N, T) la sua corrente di fondo. NaN = non sviluppato: valgono
     i geni (a* e la soglia del genoma).
+
+    Sistema di valore innato: `value` (N, 2) la forza dei due nuclei (gusto ->
+    M positivo, dolore -> M negativo), in scala logaritmica: forza =
+    value_initial · e^gene.
     """
 
     weights: np.ndarray
@@ -207,16 +214,17 @@ class Genome:
     m_fam: np.ndarray | None = None
     born_avg: np.ndarray | None = None
     born_bias: np.ndarray | None = None
+    value: np.ndarray | None = None
 
     FIELDS = ("weights", "traits", "conn", "active", "pos", "r_active", "r_sens", "r_mu", "r_width",
               "r_body", "r_look", "r_aperture", "r_y", "r_tau", "r_sub", "r_div", "meta",
               "r_id", "h_id", "r_fam", "h_fam",
               "r_mark", "n_mark", "m_grad", "m_table", "m_active", "m_id", "m_fam",
-              "born_avg", "born_bias")
+              "born_avg", "born_bias", "value")
     RECEPTOR_FIELDS = FIELDS[5:16]
     LINEAGE = FIELDS[17:21]
     MARKERS = FIELDS[21:28]
-    BORN = FIELDS[28:]
+    BORN = FIELDS[28:30]
 
     def __post_init__(self):
         n = len(self.weights)
@@ -238,6 +246,8 @@ class Genome:
         for name in self.BORN:
             if getattr(self, name) is None:
                 setattr(self, name, np.full(self.weights.shape[:2], np.nan))
+        if self.value is None:  # i nuclei di valore alla loro forza di partenza
+            self.value = np.zeros((n, 2))
 
     def unborn(self) -> None:
         """Sul posto: nessun fenotipo alla nascita (un figlio prima del grembo)."""
@@ -321,6 +331,7 @@ def pad(g: Genome, n_rec: int, n_hidden: int, n_markers: int | None = None) -> G
         h_fam=np.concatenate([g.h_fam, np.broadcast_to(np.arange(h, h + dh), (n, dh))], axis=1),
         **_pad_markers(g, grow, r, dr, h, dh, dm),
         **{name: np.insert(getattr(g, name), [h] * dh, np.nan, axis=1) for name in Genome.BORN},
+        value=g.value,
     )
 
 
@@ -525,6 +536,7 @@ class Brains:
         self.boost = cfg.critical_initial_boost * np.exp(d[..., 0])  # (N, T): B
         self.closure = cfg.critical_initial_tau * np.exp(d[..., 1])  # (N, T): τ_c, s
         self.lived = np.zeros(self.n)  # secondi già vissuti in vite precedenti (li dà l'evoluzione)
+        self.value = cfg.value_initial * np.exp(g.value)  # (N, 2): forza dei nuclei di gusto e dolore
         self.target_act = sigmoid(p[..., 7])  # (N, T): a*
         self.homeo = cfg.homeo_initial_rate * np.exp(p[..., 8])  # (N, T): h, per secondo
         self.intrinsic = cfg.homeo_initial_rate * np.exp(p[..., 10])  # (N, T), per secondo
@@ -532,7 +544,7 @@ class Brains:
         self.kmod = np.exp(-self.dist[:, :, R : R + H] / cfg.modulation_range) * mod[:, None, :]
         # Chi impara: con l'hebbiano di base e l'omeostasi, tutti (salvo plasticità spenta).
         self.learns = np.full(self.n, cfg.plasticity) & (
-            (self.hebb > 0).any(axis=1) | (self.homeo > 0).any(axis=1) | mod.any(axis=1))
+            (self.hebb > 0).any(axis=1) | (self.homeo > 0).any(axis=1) | mod.any(axis=1) | (self.value > 0).any(axis=1))
         self._mod_sign = mod.astype(float)
         # Lunghezza totale dei collegamenti effettivi di ogni rete: il suo cablaggio.
         self.wire_length = (self.dist * self.links).sum(axis=(1, 2))
@@ -613,23 +625,24 @@ class Brains:
             self._prepared = Prepared(self.cfg, self._genome.receptors)
         return self._prepared
 
-    def step(self, obs: np.ndarray) -> np.ndarray:
-        """obs (N, R) -> uscite (N, n_out) in [-1, 1]."""
+    def step(self, obs: np.ndarray, signal: np.ndarray | None = None) -> np.ndarray:
+        """obs (N, R) -> uscite (N, n_out) in [-1, 1]. `signal` (N, 2): gusto e
+        dolore, per il sistema di valore (None = zero)."""
         before = self.state
         self.state, out = self._advance(obs, self.state, self)
-        self._learn(np.arange(self.n), obs, before, self.state)
+        self._learn(np.arange(self.n), obs, before, self.state, signal=signal)
         self.clock += self.cfg.dt  # l'età avanza
         return out
 
-    def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
-        """Come `step`, ma solo per gli individui `rows` (obs ha una riga per
-        ciascuno): gli altri restano fermi. Ogni rete calcola per conto suo,
-        quindi il risultato per `rows` è identico a quello di `step`."""
+    def step_some(self, obs: np.ndarray, rows: np.ndarray, signal: np.ndarray | None = None) -> np.ndarray:
+        """Come `step`, ma solo per gli individui `rows` (obs e `signal` hanno
+        una riga per ciascuno): gli altri restano fermi. Ogni rete calcola per
+        conto suo, quindi il risultato per `rows` è identico a quello di `step`."""
         sub = self._rows(rows)
         before = self.state[rows]
         state, out = self._advance(obs, before, sub)
         self.state[rows] = state
-        self._learn(rows, obs, before, state, sub)
+        self._learn(rows, obs, before, state, sub, signal)
         self.clock[rows] += self.cfg.dt  # l'età avanza
         return out
 
@@ -637,7 +650,7 @@ class Brains:
         """Attività di ogni sorgente che ha appena agito sui destinatari."""
         return np.concatenate([obs, before], axis=1)
 
-    def _learn(self, rows, obs, before, after, sub=None) -> None:
+    def _learn(self, rows, obs, before, after, sub=None, signal=None) -> None:
         """Plasticità durante la vita (docs/REGOLE.md, "Imparare durante la
         vita"). Ogni sinapsi ha un tipo fisso (eccitatoria o inibitoria) e una
         forza |w| in [0, synapse_max], somma di una parte stabile e di una
@@ -662,7 +675,10 @@ class Brains:
         - saturazione graduale (van Rossum 2000): ogni rafforzamento è
           moltiplicato per 1 − |w| / synapse_max;
         - periodo critico: l'hebbiano vale η_h · (1 + (B − 1) · e^(−età/τ_c)),
-          con l'età in secondi dal grembo (`clock`)."""
+          con l'età in secondi dal grembo (`clock`);
+        - valore innato: a M si aggiunge forza_gusto · gusto − forza_dolore ·
+          dolore, uguale per tutti i neuroni (`signal`: (len(rows), 2), gusto
+          e dolore di ogni individuo; None = zero)."""
         if not self.cfg.plasticity:
             return
         local = np.flatnonzero(self.learns[rows])
@@ -675,7 +691,8 @@ class Brains:
         m = np.einsum("nth,nh->nt", self.kmod[who], after[local, :H] * self._mod_sign[who])
         p = {k: getattr(self, k)[who] for k in ("w_eff", "early", "bias_now", "avg", "sign", "links", "target_act",
                                                 "homeo", "intrinsic", "hebb", "eta", "rule", "early_keep", "boost",
-                                                "closure", "clock")}
+                                                "closure", "clock", "value")}
+        p["signal"] = np.zeros((len(who), 2)) if signal is None else signal[local]
         consts = {k: getattr(self.cfg, k) for k in PLASTICITY_CONSTANTS}
         w, early, bias, avg = plasticity(consts, np, p, pre, post, m, self.n_in, self.CENTRED)
         self.w_eff[who], self.early[who], self.bias_now[who], self.avg[who] = w, early, bias, avg
@@ -783,22 +800,22 @@ class SpikingBrains(Brains):
         self.state = np.zeros((self.n, h + self.n_out))
         self._reset_activity()
 
-    def step(self, obs: np.ndarray) -> np.ndarray:
+    def step(self, obs: np.ndarray, signal: np.ndarray | None = None) -> np.ndarray:
         """obs (N, R) -> comandi (N, 2) in (-1, 1): spinta e sterzata."""
         before = self.state.copy()
         (self.charge, self.spikes, self.state), out = self._advance(
             obs, (self.charge, self.spikes, self.state), self)
-        self._learn(np.arange(self.n), obs, before, self.state)
+        self._learn(np.arange(self.n), obs, before, self.state, signal=signal)
         self.clock += self.cfg.dt  # l'età avanza
         return out
 
-    def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
+    def step_some(self, obs: np.ndarray, rows: np.ndarray, signal: np.ndarray | None = None) -> np.ndarray:
         sub = self._rows(rows)
         before = self.state[rows]
         (charge, spikes, state), out = self._advance(
             obs, (self.charge[rows], self.spikes[rows], before.copy()), sub)
         self.charge[rows], self.spikes[rows], self.state[rows] = charge, spikes, state
-        self._learn(rows, obs, before, state, sub)
+        self._learn(rows, obs, before, state, sub, signal)
         self.clock[rows] += self.cfg.dt  # l'età avanza
         return out
 

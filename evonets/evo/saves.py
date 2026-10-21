@@ -42,8 +42,10 @@ from . import ladder
 # 14 = fenotipo alla nascita dopo il grembo: ā e corrente di fondo (i file
 #     precedenti: non ancora nati, valgono i geni);
 # 15 = periodo critico, due geni per neurone (i file precedenti: spento,
-#     B = 1, perché le loro popolazioni sono evolute senza).
-FORMAT = 15
+#     B = 1, perché le loro popolazioni sono evolute senza);
+# 16 = gusto e dolore tra le grandezze del corpo, sistema di valore innato
+#     (i file precedenti: nuclei spenti, le popolazioni sono evolute senza).
+FORMAT = 16
 # Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
 # nullo, regola a zero, nessun modulatore.
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
@@ -76,6 +78,7 @@ CONVERSIONS = (
     (12, "gene del guadagno aggiunto; genoma diretto (lo sviluppo non c'era)"),
     (13, "stato alla nascita dal grembo: assente, valgono i geni"),
     (14, "periodo critico spento (la popolazione è evoluta senza)"),
+    (15, "sistema di valore spento (la popolazione è evoluta senza)"),
 )
 
 
@@ -193,7 +196,7 @@ def load(cls, cfg: Config, path):
         def genome(prefix=""):
             shape = d[prefix + "r_active"].shape
             g = Genome(*(d[prefix + f] if prefix + f in d
-                         else None if f in Genome.LINEAGE + Genome.MARKERS + Genome.BORN else np.full(shape, ADDED_IN_4[f])
+                         else None if f in Genome.LINEAGE + Genome.MARKERS + Genome.BORN + ("value",) else np.full(shape, ADDED_IN_4[f])
                          for f in Genome.FIELDS))
             if g.meta.shape[1] < len(META):  # geni nati dopo (il sesso): il valore di partenza
                 start = np.log(np.maximum(meta_start(cfg), cfg.mutation_floor))[g.meta.shape[1]:]
@@ -208,6 +211,8 @@ def load(cls, cfg: Config, path):
                 g.traits = np.concatenate([g.traits, np.zeros(g.traits.shape[:2] + (missing,))], axis=2)
             if fmt < 15:  # periodo critico spento: B = 1
                 g.traits[:, :, base + len(PLASTIC) + 1] = -np.log(cfg.critical_initial_boost)
+            if fmt < 16:  # nuclei di valore spenti
+                g.value[:] = -30.0
             return g
 
         # Dopo una selezione finale gli individui sono meno della popolazione:

@@ -43,7 +43,7 @@ def pack_params(world, ctrl) -> dict:
         c_press=p.c_press, mu_m=p.mu_m, sg_m=p.sg_m, g_m=p.g_m, mu_t=p.mu_t, sg_t=p.sg_t, g_t=p.g_t,
         g_mag=p.g_mag, c_body=p.c_body, keep=p.keep, sub=p.sub, div=p.div,
         links=b.links, target_on=b.target_on, eta=b.eta, rule=b.rule, kmod=b.kmod,
-        mod_sign=b._mod_sign, learns=b.learns, upkeep=b.upkeep, hebb=b.hebb, sign=b.sign, intrinsic=b.intrinsic, boost=b.boost, closure=b.closure, early_keep=b.early_keep,
+        mod_sign=b._mod_sign, learns=b.learns, upkeep=b.upkeep, hebb=b.hebb, sign=b.sign, intrinsic=b.intrinsic, boost=b.boost, closure=b.closure, value=b.value, early_keep=b.early_keep,
         homeo=b.homeo, target_act=b.target_act,
         anchor=hz.anchor.reshape(-1, 2), amp=hz.amp.reshape(-1, 2), omega=hz.omega.reshape(-1, 2),
         pulse_omega=hz.pulse_omega, base_radius=hz.base_radius,
@@ -69,7 +69,7 @@ def pack_state(world, ctrl, key) -> dict:
     tvel = getattr(task, "vel", np.zeros(2))
     state = dict(
         pos=world.pos, vel=world.vel, heading=world.heading, ang_vel=world.ang_vel, energy=world.energy,
-        alive=world.alive, done=world.done, bump=world.bump, pain=world.pain,
+        alive=world.alive, done=world.done, bump=world.bump, pain=world.pain, taste=world.taste,
         phase=hz.phase.reshape(-1, 2), pulse_phase=hz.pulse_phase, target=target, target_vel=tvel,
         t=world.t, state=b.state, w=b.w_eff, avg=b.avg, early=b.early, bias_now=b.bias_now, clock=b.clock, done_t=np.where(world.done, world.t, np.inf),
         obs=ctrl.obs if ctrl.obs.shape == (b.n, b.n_in) else np.zeros((b.n, b.n_in)),
@@ -90,7 +90,7 @@ def unpack(world, ctrl, s: dict) -> None:
     b = ctrl.brains
     g = {k: np.asarray(v, dtype=float) for k, v in s.items() if k != "key"}
     world.pos, world.vel, world.heading, world.ang_vel = g["pos"], g["vel"], g["heading"], g["ang_vel"]
-    world.energy, world.pain, world.t = g["energy"], g["pain"], float(g["t"])
+    world.energy, world.pain, world.taste, world.t = g["energy"], g["pain"], g["taste"], float(g["t"])
     world.alive, world.done, world.bump = g["alive"] > 0, g["done"] > 0, g["bump"] > 0
     world.done_t = g["done_t"]
     hz = world.hazards

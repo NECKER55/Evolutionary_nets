@@ -85,15 +85,16 @@ class NeuralController:
         racing = world.racing
         if self.obs.shape != (world.n, self.brains.n_in):
             self.obs = np.zeros((world.n, self.brains.n_in))
+        signal = np.stack([world.taste, world.pain], axis=1)  # gusto e dolore: per il sistema di valore
         if racing.all():
             self.obs = self.sense(world)
-            return self.brains.step(self.obs)
+            return self.brains.step(self.obs, signal)
         actions = np.zeros((world.n, 2))
         rows = np.flatnonzero(racing)
         if len(rows):
             obs = self.sense(world, rows)
             self.obs[rows] = obs
-            actions[rows] = self.brains.step_some(obs, rows)
+            actions[rows] = self.brains.step_some(obs, rows, signal[rows])
         return actions
 
     def _noisy(self, obs: np.ndarray) -> np.ndarray:

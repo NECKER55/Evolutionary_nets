@@ -123,6 +123,8 @@ def _recombine(g: Genome, c: int, p: Genome, mo: int, f: int, rng: np.random.Gen
         g.conn[c][np.ix_(mother_rows, fresh)] = False
     if rng.random() < 0.5:
         g.meta[c] = p.meta[f]
+    if rng.random() < 0.5:  # i nuclei di valore: un blocco intero da un genitore
+        g.value[c] = p.value[f]
     if g.n_markers:
         cells = ({j: ("f", kf) for j, kf in rec_f.items()}, {t: ("f", tf) for t, tf in rows.items()})
         _recombine_markers(g, c, p, mo, f, cells, rng)
@@ -387,6 +389,8 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     genes = [g.traits, g.meta] + ([g.n_mark, g.m_grad, g.m_table] if developed else [g.weights])
     if developed and not fixed:
         genes.append(g.r_mark)
+    if not fixed:  # nella simulazione "solo cervello" il sistema di valore è dato, come i sensi
+        genes.append(g.value)
     for values in genes:
         values += chance(values.shape, p_w) * noise(values.shape, std_w)
     clamp_meta(g.meta, cfg)

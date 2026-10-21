@@ -286,3 +286,43 @@ def test_critical_period_makes_hebb_strong_early_and_closes_with_age():
     for _ in range(60):
         b.step(np.ones((1, R)))
     assert np.isclose(b.clock[0], 1.0)  # l'età avanza di dt a ogni passo
+
+
+def test_innate_value_consolidates_what_was_learned_while_eating():
+    """Senza neuroni modulatori, il gusto (attraverso il nucleo di valore)
+    rende stabile la traccia hebbiana; senza gusto la traccia svanisce. Con il
+    nucleo spento il gusto non fa nulla."""
+    def lesson(taste, value_gene=0.0):
+        b = circuit(hebb_initial_rate=0.5, early_initial_tau=1.0, capture_rate=5.0, homeo_tau=0.1)
+        g = b.genome
+        g.traits[0, :, Brains.BASE_TRAITS + MOD] = -1.0  # nessun modulatore nella rete
+        g.traits[0, :, Brains.BASE_TRAITS] = -30.0  # niente plasticità modulata: il valore solo consolida
+        g.traits[0, :, TARGET] = 2.0
+        g.value[0] = value_gene
+        b.set_genome(g)
+        signal = np.array([[taste, 0.0]])
+        for _ in range(300):
+            b.step(np.ones((1, R)), signal)
+        learned = b.w_eff[0, 0, 0]
+        rest = run(b, steps=900, value=0.0)
+        return learned - 0.5, rest - 0.5
+
+    learned, rest = lesson(0.0)
+    assert learned > 0 and rest < 0.2 * learned  # svanisce
+    learned, rest = lesson(1.0)
+    assert learned > 0 and rest > 0.8 * learned  # consolidata dal gusto
+    learned, rest = lesson(1.0, value_gene=-30.0)
+    assert rest < 0.2 * learned  # nucleo spento
+
+
+def test_brain_mode_has_taste_and_pain_and_a_fixed_value_system():
+    from evonets.evo import reproduce
+    from evonets.net.senses import senses
+
+    cfg = Config(sim_mode="cervello")
+    assert {"gusto", "dolore"} <= {s.name for s in senses(cfg)}
+    g = Brains(cfg, 30, 2, 0).genome
+    kids = reproduce(g, 30, cfg, np.random.default_rng(0))
+    assert np.array_equal(kids.value, np.zeros((30, 2)))  # dato, come i sensi
+    free = reproduce(Brains(Config(), 30, 2, 0).genome, 30, Config(), np.random.default_rng(0))
+    assert (free.value != 0).any()  # nella simulazione completa evolve
