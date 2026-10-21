@@ -5,6 +5,7 @@ import numpy as np
 from ..config import Config
 from ..net.brain import META, Genome, pad
 from ..net.controllers import NeuralController
+from ..net.womb import prenatal
 from ..sim.world import World
 from . import ladder, saves
 from .exam import Exam, candidates
@@ -110,6 +111,7 @@ class Evolution:
         self.rng = np.random.default_rng(seed)
         self.world = World(cfg, cfg.population, seed, task)
         self.ctrl = NeuralController(cfg, cfg.population, seed)
+        self._birth(np.arange(cfg.population))
         self.age = np.zeros(cfg.population, dtype=int)  # generazioni già vissute
         self.generation = 0
         self.last_parents: Genome | None = None
@@ -124,6 +126,13 @@ class Evolution:
         self._sim = None  # la generazione in corso sulla GPU, se il motore è "gpu"
         self.exam: Exam | None = None  # esame in corso
         self._seen = dataclasses.asdict(cfg)  # configurazione già registrata
+
+    def _birth(self, rows: np.ndarray) -> None:
+        """I neonati `rows` passano dal grembo (solo con lo sviluppo: il genoma
+        diretto non ha un fenotipo da rifinire). Vedi net/womb.py."""
+        if self.cfg.genome == "sviluppo":
+            prenatal(self.ctrl.brains, rows, self.rng, self.cfg.engine)
+            self.ctrl.reset(self.world.seed)
 
     def note_changes(self) -> dict:
         """Registra i cambi della configurazione dall'ultima volta (per esempio
@@ -297,6 +306,7 @@ class Evolution:
             self.last_parents = pad(self.last_parents, new.n_rec, new.n_hidden)
 
         brains.set_genome(new)
+        self._birth(np.arange(len(survivors), n))
         self.age = np.concatenate([survivor_age, np.zeros(n - len(survivors), dtype=int)])
         self.ids = np.concatenate([survivor_ids, self._new_ids(n - len(survivors))])
         self.born = np.concatenate([survivor_born, np.full(n - len(survivors), self.generation + 1)])

@@ -38,8 +38,10 @@ from . import ladder
 #     i file precedenti: gene 0, la durata di partenza);
 # 12 = omeostasi della soglia con un gene proprio (i file precedenti: gene 0);
 # 13 = sviluppo: marcatori, gradienti, tabella di affinità, gene del guadagno
-#     (i file precedenti si aprono con il genoma diretto, guadagno 1).
-FORMAT = 13
+#     (i file precedenti si aprono con il genoma diretto, guadagno 1);
+# 14 = fenotipo alla nascita dopo il grembo: ā e corrente di fondo (i file
+#     precedenti: non ancora nati, valgono i geni).
+FORMAT = 14
 # Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
 # nullo, regola a zero, nessun modulatore.
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
@@ -70,6 +72,7 @@ CONVERSIONS = (
     (10, "traccia provvisoria dell'hebbiano aggiunta (durata di partenza)"),
     (11, "omeostasi della soglia con un gene proprio (forza di partenza)"),
     (12, "gene del guadagno aggiunto; genoma diretto (lo sviluppo non c'era)"),
+    (13, "stato alla nascita dal grembo: assente, valgono i geni"),
 )
 
 
@@ -187,7 +190,7 @@ def load(cls, cfg: Config, path):
         def genome(prefix=""):
             shape = d[prefix + "r_active"].shape
             g = Genome(*(d[prefix + f] if prefix + f in d
-                         else None if f in Genome.LINEAGE + Genome.MARKERS else np.full(shape, ADDED_IN_4[f])
+                         else None if f in Genome.LINEAGE + Genome.MARKERS + Genome.BORN else np.full(shape, ADDED_IN_4[f])
                          for f in Genome.FIELDS))
             if g.meta.shape[1] < len(META):  # geni nati dopo (il sesso): il valore di partenza
                 start = np.log(np.maximum(meta_start(cfg), cfg.mutation_floor))[g.meta.shape[1]:]

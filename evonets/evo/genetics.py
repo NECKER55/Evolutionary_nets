@@ -483,6 +483,7 @@ def reproduce(parents: Genome, n_children: int, cfg: Config, rng: np.random.Gene
                     fathers[c] = rng.choice(n_parents, p=w / w.sum())
     children = crossover(parents, mothers, fathers, rng, cfg.receptor_dup_split)
     mutate(children, cfg, rng)
+    children.unborn()  # il fenotipo alla nascita è del genitore: il figlio farà il suo
     if children.n_markers:  # ogni figlio sviluppa il suo cervello; i genitori tengono il loro
         development.develop(children, cfg, rng, children.traits.shape[2] - len(GENES) + len(PLASTIC))
     return children

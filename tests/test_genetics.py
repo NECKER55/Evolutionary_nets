@@ -20,7 +20,8 @@ def population(n=40, seed=0, **kw):
 
 
 def same(a, b, fields=FIELDS) -> bool:
-    return all(np.array_equal(getattr(a, f), getattr(b, f)) for f in fields)
+    return all(np.array_equal(getattr(a, f), getattr(b, f), equal_nan=getattr(a, f).dtype.kind == "f")
+               for f in fields)
 
 
 def test_copy_without_mutation_is_identical_and_independent():

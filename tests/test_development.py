@@ -141,7 +141,7 @@ def test_development_runs_save_and_resume(tmp_path):
     assert back.cfg.genome == "sviluppo"
     g, h = e.ctrl.brains.genome, back.ctrl.brains.genome
     for f in Genome.FIELDS:
-        assert np.array_equal(getattr(g, f), getattr(h, f)), f
+        assert np.array_equal(getattr(g, f), getattr(h, f), equal_nan=getattr(g, f).dtype.kind == "f"), f
     back.run_generation()
 
 
@@ -161,3 +161,59 @@ def test_saves_from_before_development_open_with_the_direct_genome(tmp_path):
     np.savez(tmp_path / "old.npz", **data)
     back = Evolution.load(Config(genome="sviluppo"), tmp_path / "old.npz")
     assert back.cfg.genome == "diretto" and back.ctrl.brains.genome.n_markers == 0
+
+
+# --- Il grembo (net/womb.py) ---------------------------------------------------
+
+from evonets.net import womb  # noqa: E402
+
+
+def test_womb_waves_make_neighbouring_senses_fire_together():
+    cfg = Config()
+    r_y = np.array([[0.1, 0.15, 0.8, 0.5]])
+    on = np.array([[True, True, True, False]])
+    obs = womb.waves(cfg, np.repeat(r_y, 50, 0), np.repeat(on, 50, 0), np.random.default_rng(0))
+    assert obs.shape == (int(round(cfg.prenatal_time / cfg.dt)), 50, 4)
+    assert ((obs >= 0) & (obs <= 1)).all() and not obs[:, :, 3].any()  # i sensi spenti tacciono
+    x = obs.reshape(-1, 4)
+    near, far = np.corrcoef(x[:, 0], x[:, 1])[0, 1], np.corrcoef(x[:, 0], x[:, 2])[0, 1]
+    assert near > 0.5 and far < 0.2
+
+
+def test_newborns_come_out_of_the_womb_with_their_own_activity():
+    for net in ("rate", "spike-ei"):
+        e = Evolution(Config(population=20, genome="sviluppo", net_type=net, engine="numpy"), 0)
+        b, g = e.ctrl.brains, e.ctrl.brains.genome
+        on = b.target_on
+        assert np.isfinite(g.born_avg[on]).all() and np.isfinite(g.born_bias).all()
+        assert not np.allclose(g.born_avg[on], b.target_act[on])  # non più "si nasce con ā = a*"
+        assert np.allclose(b.avg, np.where(np.isfinite(g.born_avg), g.born_avg, b.target_act))  # ogni vita parte da lì
+
+
+def test_the_womb_gives_the_same_result_on_the_gpu():
+    for net in ("rate", "spike-ei"):
+        cfg = Config(population=16, genome="sviluppo", net_type=net, hebb_initial_rate=0.05, homeo_initial_rate=0.5)
+        b = (Brains if net == "rate" else SpikingBrains)(cfg, 16, 2 if net == "rate" else 4, 0)
+        obs = womb.waves(cfg, b.genome.r_y, b.genome.r_active, np.random.default_rng(1))
+        rows = np.arange(4, 16)
+        gpu = womb.run(b, rows, obs, "gpu")
+        b.set_genome(b.genome)
+        cpu = womb.run_numpy(b, rows, obs)
+        for x, y in zip(gpu, cpu):
+            assert np.allclose(x, y, atol=1e-3)
+        assert not np.allclose(gpu[0], b._born_weights()[rows])  # con Hebb forte il grembo rifinisce i pesi
+
+
+def test_only_newborns_go_through_the_womb_and_the_direct_genome_never_does():
+    e = Evolution(Config(population=30, genome="sviluppo", engine="numpy"), 0)
+    before = dict(zip(e.ids.tolist(), e.ctrl.brains.genome.born_avg.copy()))
+    e.world.done[:10] = True  # dieci vincitori: sopravvivono
+    e.next_generation()
+    g = e.ctrl.brains.genome
+    assert np.isfinite(g.born_avg[:, -1]).all()  # tutti sono nati: i motori hanno ā
+    kept = [k for k, i in enumerate(e.ids.tolist()) if i in before]
+    assert kept  # qualcuno è sopravvissuto
+    for k in kept:  # i sopravvissuti tengono il loro stato alla nascita: non rinascono
+        assert np.array_equal(g.born_avg[k], before[int(e.ids[k])], equal_nan=True)
+    d = Evolution(Config(population=12, engine="numpy"), 0)
+    assert np.isnan(d.ctrl.brains.genome.born_avg).all()

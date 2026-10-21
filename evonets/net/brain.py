@@ -163,6 +163,11 @@ class Genome:
     esistenza e discendenza dei marcatori. Con il genoma diretto M = 0. In
     questo caso `weights` e `conn` sono il cervello sviluppato (il fenotipo),
     non geni: nascono dallo sviluppo e non mutano.
+
+    Fenotipo alla nascita, dopo il grembo (net/womb.py, solo con lo
+    sviluppo): `born_avg` (N, T) la frequenza media di ogni neurone e
+    `born_bias` (N, T) la sua corrente di fondo. NaN = non sviluppato: valgono
+    i geni (a* e la soglia del genoma).
     """
 
     weights: np.ndarray
@@ -193,14 +198,18 @@ class Genome:
     m_active: np.ndarray | None = None
     m_id: np.ndarray | None = None
     m_fam: np.ndarray | None = None
+    born_avg: np.ndarray | None = None
+    born_bias: np.ndarray | None = None
 
     FIELDS = ("weights", "traits", "conn", "active", "pos", "r_active", "r_sens", "r_mu", "r_width",
               "r_body", "r_look", "r_aperture", "r_y", "r_tau", "r_sub", "r_div", "meta",
               "r_id", "h_id", "r_fam", "h_fam",
-              "r_mark", "n_mark", "m_grad", "m_table", "m_active", "m_id", "m_fam")
+              "r_mark", "n_mark", "m_grad", "m_table", "m_active", "m_id", "m_fam",
+              "born_avg", "born_bias")
     RECEPTOR_FIELDS = FIELDS[5:16]
     LINEAGE = FIELDS[17:21]
-    MARKERS = FIELDS[21:]
+    MARKERS = FIELDS[21:28]
+    BORN = FIELDS[28:]
 
     def __post_init__(self):
         n = len(self.weights)
@@ -219,6 +228,14 @@ class Genome:
         for name in ("m_id", "m_fam"):
             if getattr(self, name) is None:
                 setattr(self, name, np.broadcast_to(np.arange(m, dtype=np.int64), (n, m)).copy())
+        for name in self.BORN:
+            if getattr(self, name) is None:
+                setattr(self, name, np.full(self.weights.shape[:2], np.nan))
+
+    def unborn(self) -> None:
+        """Sul posto: nessun fenotipo alla nascita (un figlio prima del grembo)."""
+        for name in self.BORN:
+            getattr(self, name)[:] = np.nan
     def __len__(self) -> int:
         return len(self.weights)
 
@@ -296,6 +313,7 @@ def pad(g: Genome, n_rec: int, n_hidden: int, n_markers: int | None = None) -> G
         h_id=np.concatenate([g.h_id, np.broadcast_to(np.arange(h, h + dh), (n, dh))], axis=1),
         h_fam=np.concatenate([g.h_fam, np.broadcast_to(np.arange(h, h + dh), (n, dh))], axis=1),
         **_pad_markers(g, grow, r, dr, h, dh, dm),
+        **{name: np.insert(getattr(g, name), [h] * dh, np.nan, axis=1) for name in Genome.BORN},
     )
 
 
@@ -541,12 +559,14 @@ class Brains:
         self._reset_activity()
 
     def _reset_activity(self) -> None:
-        """Media recente dell'attività per l'omeostasi: si nasce in equilibrio
-        (ā = a*), in attesa dell'attività spontanea prima della nascita. Si
-        nasce senza tracce provvisorie e con l'eccitabilità del genoma."""
-        self.avg = self.target_act.copy()
+        """Ogni vita comincia dallo stato alla nascita: ā e corrente di fondo
+        come li ha lasciati il grembo (net/womb.py); per chi non ci è passato
+        (genoma diretto) ā = a* e la corrente del genoma. Senza tracce
+        provvisorie."""
+        g = self._genome
+        self.avg = np.where(np.isfinite(g.born_avg), g.born_avg, self.target_act)
         self.early = np.zeros_like(self.w_eff)
-        self.bias_now = self.bias.copy()
+        self.bias_now = np.where(np.isfinite(g.born_bias), g.born_bias, self.bias)
         self._subset = None
 
     def _forget(self) -> None:

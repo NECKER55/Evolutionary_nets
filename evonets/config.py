@@ -146,6 +146,16 @@ class Config:
     marker_initial_std: float = 1.5
     marker_gradient_std: float = 2.0
     marker_table_std: float = 2.0
+    # Il grembo (net/womb.py, solo con lo sviluppo): secondi di attività
+    # spontanea prima della nascita. I sensi ricevono onde che scorrono lungo
+    # l'ordine dei nervi (come le onde della retina): velocità (lati del
+    # cervello al secondo), larghezza, intervallo medio tra due onde (s) e
+    # rumore di fondo.
+    prenatal_time: float = 5.0
+    wave_speed: float = 0.5
+    wave_width: float = 0.1
+    wave_interval: float = 1.5
+    prenatal_noise: float = 0.05
     pool_fill: float = 0.8
     pool_step: int = 8
     # Il corpo primordiale: recettori accesi, a ventaglio davanti, generalisti
