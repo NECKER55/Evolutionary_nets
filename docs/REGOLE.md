@@ -22,7 +22,8 @@ Si sceglie con `sim_mode` (riga "Simulazione" del menu, `--mode` nel terminale);
   cervello parte primordiale; i sensi costano energia come sempre (circa 0,64
   energia/s in tutto).
 
-Il set "naturale" (10 sensi, ognuno specializzato su un solo fenomeno):
+Il set "naturale" (12 sensi, ognuno specializzato su un solo fenomeno; le
+corse "solo cervello" salvate prima del 2026-10-21 restano con i loro 10):
 
 | Senso | Sente | Sensibilità | Dove sta / dove guarda | Apertura | Adattamento (τ, sottr., div.) |
 |---|---|---|---|---|---|
@@ -33,6 +34,11 @@ Il set "naturale" (10 sensi, ognuno specializzato su un solo fenomeno):
 | contatto | pressione delle pareti | 2 | muso | 180° | nessuno |
 | energia | energia del corpo (rispetto alle riserve massime) | 4 | interno | — | nessuno |
 | velocità | velocità in avanti | 2 | interno | — | nessuno |
+| gusto | il cibo appena mangiato | 4 | interno | — | nessuno |
+| dolore | veleno e morsi | 4 | interno | — | nessuno |
+
+Nella simulazione "solo cervello" anche il **sistema di valore** è dato
+(forza di partenza, mai mutata): vedi "Imparare durante la vita".
 
 ## 1. Il tempo
 
@@ -216,7 +222,7 @@ asse della "qualità" da 0 a 1:
 | meccanica | pressione da contatto, vibrazioni a distanza | frequenza | la pressione di una parete toccata (frequenza 0); nessuna sorgente di vibrazioni |
 | temperatura | campo nel punto del corpo | la temperatura | uniforme (0,5), nessuna sorgente di calore |
 | magnetismo | campo uniforme, come quello di un pianeta | — | nessun campo |
-| interno | grandezze del corpo | quale grandezza | energia, velocità avanti e indietro, derapata e rotazione a destra e a sinistra |
+| interno | grandezze del corpo | quale grandezza | energia, gusto, dolore, velocità avanti e indietro, derapata e rotazione a destra e a sinistra |
 
 Cosa emette ogni oggetto è una costante della configurazione: dare un suono al
 bersaglio (`target_vibration`), un odore al veleno (`hazard_smell`) o un campo
@@ -409,6 +415,21 @@ pezzo di corteccia:
 - **Omeostasi dell'eccitabilità** (Desai 1999), un meccanismo distinto con
   un gene proprio ("intrinsic", stessa partenza): la corrente di fondo si
   sposta di h_i · dt · (a* − ā), cioè cresce se il neurone è troppo zitto.
+- **Sistema di valore innato**: come in tutti gli animali, si nasce già
+  sapendo cosa è buono e cosa fa male. Due nuclei, come l'area tegmentale
+  ventrale (dopamina) e il locus coeruleus (noradrenalina), ricevono il
+  **gusto** (un impulso a ogni cibo mangiato, che svanisce in 0,5 s,
+  `taste_tau`) e il **dolore** (veleno e morsi) e proiettano su tutto il
+  cervello: a M di ogni neurone si aggiunge forza_gusto · gusto −
+  forza_dolore · dolore. Così ciò che il cervello ha appena fatto (la
+  traccia provvisoria) diventa stabile quando si mangia o ci si fa male, e
+  la plasticità modulata prende il verso giusto. Le due forze sono geni
+  dell'individuo (`Genome.value`, partenza `value_initial` = 1, in scala
+  logaritmica): passano interi da un genitore e mutano come gli altri geni,
+  quindi l'evoluzione può rafforzarli o spegnerli; nella simulazione "solo
+  cervello" sono fissi. Gusto e dolore sono anche grandezze del corpo
+  (fenomeno "interno"): la rete può evolvere recettori che li sentono. Le
+  popolazioni salvate prima (formato < 16) si aprono con i nuclei spenti.
 - **Periodo critico**: come in natura, l'hebbiano è fortissimo nello
   sviluppo e si chiude con l'età. Per ogni neurone
   η_h(età) = η_h · (1 + (B − 1) · e^(−età/τ_c)), dove η_h è la velocità

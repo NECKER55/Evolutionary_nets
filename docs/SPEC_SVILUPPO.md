@@ -401,6 +401,22 @@ critico; velocità invariata (1,06 s/gen).
 positivo, dolore → M negativo, come dopamina e noradrenalina). Scelta aperta:
 se nella simulazione completa partono presenti o evolvono da zero.
 
+*Fase 4 fatta il 2026-10-21* (formato 16, 208 test). Scelte "come in
+natura": gusto e dolore sono grandezze del corpo nuove (0,17 e 0,25
+sull'asse dell'interno; il gusto è un impulso a ogni cibo mangiato che
+svanisce in 0,5 s, il dolore è il veleno più i morsi), sentiti anche dal
+set di sensi "naturale" (ora 12); il sistema di valore non sono neuroni nei
+posti della rete ma due nuclei con proiezioni a tutto il cervello (come VTA
+e locus coeruleus, i cui assoni coprono quasi tutto il cervello), con
+cablaggio innato dal gusto e dal dolore e forza gene dell'individuo
+(`Genome.value`, presenti alla partenza, evolvibili; fissi in modalità
+"cervello"). Il loro M si somma a quello dei neuroni modulatori: consolida la
+traccia provvisoria e guida la plasticità modulata. Misure: popolazione
+convertita neutrale (76,3%, nuclei spenti); su popolazioni nuove (solo
+cervello, sviluppo, 300 individui, 2 semi, 30 generazioni) maturi 29–47% con
+il sistema di valore e 34–37% senza: nessuna destabilizzazione visibile, ma
+la prova è troppo breve per dire se aiuta.
+
 **Fase 5 — vedere tipi e regioni (2, 6, 13).** Colore dell'identità dei
 neuroni, tabella di affinità nell'esploratore, statistiche (marcatori, tipi,
 uso dei modulatori). L'architettura non si impone.
