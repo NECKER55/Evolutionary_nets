@@ -530,6 +530,47 @@ sta, i geni propri e tutti i collegamenti *in ingresso*), uno per recettore,
 uno per il meccanismo di mutazione. Nell'incrocio ogni blocco arriva intero da
 un genitore.
 
+### Genoma diretto o sviluppo (`genome`)
+
+Con il genoma **diretto** (predefinito, e quello di tutte le corse di prima)
+il genoma scrive ogni collegamento e ogni peso, come descritto sopra. Con lo
+**sviluppo** (`genome = "sviluppo"`, riga "Genoma" del menu; dettagli in
+[SPEC_SVILUPPO.md](SPEC_SVILUPPO.md)) scrive invece le regole per costruire il
+cervello, come in natura (chemoaffinità di Sperry):
+
+- **Marcatori**: molecole di superficie. Ogni recettore, neurone interno e
+  motore esprime ciascun marcatore in una quantità tra 0 e 1, che dipende da
+  un gene della cellula e, per i marcatori a **gradiente**, dalla sua
+  posizione nel cervello (come Eph ed efrine, che costruiscono le mappe
+  topografiche: due geni per marcatore, lungo x e lungo y). Si parte con 2
+  marcatori; i posti crescono come quelli dei neuroni.
+- **Tabella di affinità** (gene dell'individuo): quanto un marcatore
+  sull'assone si lega a un marcatore sul bersaglio, con il segno.
+- **Alla nascita**: affinità(s → t) = Σ espressione_s[a] · tabella[a, b] ·
+  espressione_t[b]; il collegamento nasce con probabilità
+  p_geometria(d) · (1 − e^(−|affinità|)) (senza affinità non nasce nulla); il
+  peso è affinità · e^guadagno, con il **guadagno** gene del neurone che
+  riceve (quanti recettori postsinaptici ha), al più ±`synapse_max`. Nelle
+  reti a impulsi il segno viene dal tipo di chi trasmette.
+- Lo sviluppo è in parte **casuale**: fratelli con lo stesso genoma hanno
+  cervelli simili ma non uguali. Il cervello sviluppato appartiene
+  all'individuo: un genitore che sopravvive tiene il suo, ogni figlio sviluppa
+  il proprio.
+- **Mutazioni**: i pesi e i collegamenti non sono geni e non mutano; mutano le
+  espressioni, i gradienti, la tabella e il guadagno (come gli altri geni). Un
+  marcatore si **duplica** (la copia è espressa uguale ovunque e riga e
+  colonna della tabella si dividono a metà: nessun cambiamento finché non
+  diverge), si rompe (più facilmente se lega molti marcatori) o si ripara;
+  tra copie della stessa famiglia vale lo scambio ineguale. Un neurone
+  duplicato porta con sé i suoi marcatori: i suoi collegamenti nascono dallo
+  sviluppo.
+- **Incrocio**: ogni marcatore (esistenza, gradiente, riga della tabella)
+  passa intero da un genitore, abbinato per identità; quello di un solo
+  genitore passa con probabilità 1/2. Una cellula esprime ogni marcatore come
+  nel genitore da cui viene (o, se lui non lo ha, come nell'altro).
+- **Solo cervello**: anche i marcatori dei sensi sono fissi, uguali per tutti,
+  senza gradiente, mai mutati.
+
 ## 12. La generazione
 
 - La popolazione è di **1.000 individui** (`population`): abbastanza perché la

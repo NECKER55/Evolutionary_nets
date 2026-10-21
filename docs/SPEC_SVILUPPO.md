@@ -344,6 +344,24 @@ marcatori, incrocio tra omologhi dei marcatori, `genome = "diretto" |
 fenotipo. Scelta aperta: marcatori legati alla posizione (gradienti come
 Eph/efrine, che in natura fanno le mappe).
 
+*Fase 1 fatta il 2026-10-21* (net/development.py, formato 13, 198 test).
+Scelte "come in natura": marcatori a gradiente inclusi (due geni per
+marcatore, lungo x e y; i recettori stanno al bordo sinistro all'altezza del
+nervo, quindi i gradienti in y danno mappe topografiche, salvo in modalità
+"cervello", dove i sensi non li seguono); la duplicazione di un marcatore
+divide a metà riga e colonna della tabella (affinità invariata, come la
+duplicazione dei neuroni); un marcatore si rompe con lunghezza 3 + 2 ×
+marcatori accesi; il guadagno è un gene proprio del neurone, dopo la
+plasticità; nell'incrocio l'espressione di un marcatore in una cellula segue
+la cellula, cercata per identità nell'altro genitore se quello della cellula
+non ha il marcatore. Partenza: 4 posti, 2 accesi, espressioni N(0; 1,5) in
+scala logistica, gradienti N(0; 2), tabella N(0; 2): alla nascita circa la
+metà dei collegamenti del genoma diretto, con pesi un poco più forti. Il
+genoma predefinito resta "diretto" finché la Fase 6 non dice se lo sviluppo
+funziona; lo si sceglie dal menu (riga "Genoma"). Velocità uguale al diretto
+(1,0 s/gen contro 1,2 con 300 individui a impulsi). Restano per le fasi dopo:
+l'attività spontanea (Fase 2), i colori dell'identità (Fase 5).
+
 **Fase 2 — grembo (3, 8).** Pochi secondi di attività spontanea prima della
 nascita (rumore nei sensi, scelta: indipendente o a onde correlate tra sensi
 vicini), con Hebb, omeostasi e soglia; la traccia si consolida da sola (lo
