@@ -24,6 +24,17 @@ def meta_start(cfg: Config) -> np.ndarray:
 
 
 PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", "toggle", "dup", "pos_prob", "sex")]
+# Come in natura gli effetti delle mutazioni sono per lo più piccoli (la
+# varianza che le mutazioni aggiungono in una generazione è circa un
+# millesimo di quella dovuta all'ambiente; Lynch e Walsh) e i mutatori
+# cambiano i tassi di un fattore, non di miliardi di volte. Le ampiezze hanno
+# quindi un tetto: un ritocco sposta un gene al più di circa quanto
+# differiscono due individui alla partenza (1), una posizione di 0,3 lati del
+# cervello, un gene di recettore di 0,2 volte la sua scala. Senza tetto
+# l'ampiezza, che muta con se stessa, si autoalimentava: in 60 generazioni
+# senza selezione arrivava a 100 e i geni a ±170. La portata dei collegamenti
+# al più 3 lati del cervello (oltre è già uniforme).
+CEILING = {"weight_std": 1.0, "pos_std": 0.3, "rec_drift": 0.2, "conn_range": 3.0}
 
 
 # Geni della plasticità, in coda ai geni propri di ogni neurone interno o
@@ -132,10 +143,12 @@ def plasticity(cfg, xp, p, pre, post, m, n_in: int, centred: bool):
 
 def clamp_meta(meta: np.ndarray, cfg: Config) -> None:
     """Sul posto: nessun tasso sotto l'errore minimo di copiatura, nessuna
-    probabilità sopra 1 e nessuna ampiezza sopra 100 (oltre non ha più
-    significato: il cervello ha lato 1, i pesi stanno per lo più entro ±3)."""
-    np.clip(meta, np.log(cfg.mutation_floor), np.log(100.0), out=meta)
+    probabilità sopra 1 e nessuna ampiezza sopra il suo tetto (`CEILING`)."""
+    np.maximum(meta, np.log(cfg.mutation_floor), out=meta)
     meta[:, PROBABILITIES] = np.minimum(meta[:, PROBABILITIES], 0.0)
+    for name, top in CEILING.items():
+        k = META_INDEX[name]
+        meta[:, k] = np.minimum(meta[:, k], np.log(top))
 
 
 def live_links(conn: np.ndarray, active: np.ndarray, r_active: np.ndarray) -> np.ndarray:
@@ -585,8 +598,10 @@ class Brains:
         """Per i tipi di rete con geni compilati propri (prima dei pesi)."""
 
     def _born_weights(self) -> np.ndarray:
-        """I pesi effettivi alla nascita, dal genoma."""
-        return self.weights * self.links
+        """I pesi effettivi alla nascita, dal genoma: nessuna sinapsi oltre il
+        suo massimo fisico (`synapse_max`)."""
+        top = self.cfg.synapse_max
+        return np.clip(self.weights, -top, top) * self.links
 
     # Segno obbligato dei pesi (legge di Dale): None = libero.
     dale = None
@@ -794,7 +809,9 @@ class SpikingBrains(Brains):
         self._mod_sign = np.where(self.inhibitory, -1.0, 1.0) * self.modulatory
 
     def _born_weights(self) -> np.ndarray:
-        w = np.where(self.dale[:, None, :] == 0.0, self.weights, np.abs(self.weights) * self.dale[:, None, :])
+        top = self.cfg.synapse_max
+        strength = np.clip(self.weights, -top, top)
+        w = np.where(self.dale[:, None, :] == 0.0, strength, np.abs(strength) * self.dale[:, None, :])
         return w * self.links
 
     def _pre(self, obs, before, after) -> np.ndarray:

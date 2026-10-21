@@ -394,6 +394,7 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     for values in genes:
         values += chance(values.shape, p_w) * noise(values.shape, std_w)
     clamp_meta(g.meta, cfg)
+    np.clip(g.weights, -cfg.synapse_max, cfg.synapse_max, out=g.weights)  # una sinapsi ha un massimo fisico
 
     # 2. Posizioni nel cervello: interni e ingressi dei recettori.
     p_pos, std_pos = rate("pos_prob"), base("pos_std")
