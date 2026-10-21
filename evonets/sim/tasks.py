@@ -207,6 +207,7 @@ class Foraging:
             d = np.linalg.norm(world.pos[:, None, :] - self.pred, axis=2)
             bitten = ((d <= cfg.predator_radius + cfg.agent_radius) & self.pred_on).sum(axis=1)
             world.energy = np.maximum(world.energy - cfg.predator_damage * dt * bitten * active, 0.0)
+            world.pain = np.minimum(world.pain + bitten * active, 1.0)  # un morso fa male
             active &= world.energy > 0.0  # chi è appena morto per un morso non mangia
         # Mangiare: il cibo toccato sparisce e ricompare altrove (dalla coda).
         d = np.linalg.norm(world.pos[:, None, :] - self.food, axis=2)
@@ -220,6 +221,7 @@ class Foraging:
                 self.ptr[i] += 2
             n_eat = eat.sum(axis=1)
             self.eaten += n_eat
+            world.taste = np.minimum(world.taste + n_eat, 1.0)  # il gusto del cibo
             world.energy = np.minimum(world.energy + cfg.food_energy * n_eat, cfg.energy_max)
 
     def completed(self, world) -> np.ndarray:

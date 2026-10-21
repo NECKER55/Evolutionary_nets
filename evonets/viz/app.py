@@ -593,7 +593,8 @@ class RunScreen(Screen):
         s.blit(app.big.render(title, True, PLAYER), (16, 12))
         state = "IN PAUSA" if self.paused else ("MASSIMA VELOCITÀ, " if self.full else "") + f"{self._rate():.1f} gen/min"
         seed = "" if evo.seed is None else f"   seme {evo.seed}"
-        head = (f"{state}   rete {KIND_NAMES[cfg.net_type]}, {cfg.population} individui{seed}"
+        senses = ", sensi fissi" if cfg.sim_mode == "cervello" else ""
+        head = (f"{state}   rete {KIND_NAMES[cfg.net_type]}{senses}, {cfg.population} individui{seed}"
                 + (f"   si ferma alla gen. {self.goal}" if self.goal else "")
                 + (f", poi {self.select} prove di selezione" if self.goal and self.select else ""))
         s.blit(app.small.render(head, True, TEXT), (250, 10))

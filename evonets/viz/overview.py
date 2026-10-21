@@ -354,6 +354,13 @@ class Overview:
         ]
         if "inhibitory" in last:
             lines.append(f"Neuroni inibitori: {pct(last['inhibitory'])}; modulatori: {num(last.get('modulators', 0.0))}.")
+        if "markers" in last:
+            lines.append(f"Sviluppo: {num(last['markers'])} marcatori in media, {num(last['types'])} tipi di neuroni "
+                         f"interni per individuo (alla gen. {first['generation']}: {num(first.get('types', 0.0))}).")
+        value = last.get("value")
+        if value is not None:
+            lines.append(f"Sistema di valore innato: gusto x{value[0]:.2g}, dolore x{value[1]:.2g} "
+                         "(forza media dei due nuclei).")
         sex = last.get("mutation", {}).get("sex")
         if sex is not None:
             first_sex = first.get("mutation", {}).get("sex", sex)

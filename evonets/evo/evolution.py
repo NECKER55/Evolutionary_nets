@@ -5,6 +5,8 @@ import numpy as np
 from ..config import Config
 from ..net.brain import META, Genome, pad
 from ..net.controllers import NeuralController
+from ..net.development import population_stats
+from ..net.womb import prenatal
 from ..sim.world import World
 from . import ladder, saves
 from .exam import Exam, candidates
@@ -110,6 +112,7 @@ class Evolution:
         self.rng = np.random.default_rng(seed)
         self.world = World(cfg, cfg.population, seed, task)
         self.ctrl = NeuralController(cfg, cfg.population, seed)
+        self._birth(np.arange(cfg.population))
         self.age = np.zeros(cfg.population, dtype=int)  # generazioni già vissute
         self.generation = 0
         self.last_parents: Genome | None = None
@@ -124,6 +127,19 @@ class Evolution:
         self._sim = None  # la generazione in corso sulla GPU, se il motore è "gpu"
         self.exam: Exam | None = None  # esame in corso
         self._seen = dataclasses.asdict(cfg)  # configurazione già registrata
+
+    def _birth(self, rows: np.ndarray) -> None:
+        """I neonati `rows` passano dal grembo (solo con lo sviluppo: il genoma
+        diretto non ha un fenotipo da rifinire). Vedi net/womb.py."""
+        if self.cfg.genome == "sviluppo":
+            prenatal(self.ctrl.brains, rows, self.rng, self.cfg.engine)
+            self.ctrl.reset(self.world.seed)
+
+    def _lived(self) -> None:
+        """Quanto ha già vissuto ogni individuo (una vita intera per ogni
+        generazione superata): l'età conta per il periodo critico, e un
+        sopravvissuto non torna bambino in un'arena nuova."""
+        self.ctrl.brains.lived = self.age * float(self.cfg.life_max)
 
     def note_changes(self) -> dict:
         """Registra i cambi della configurazione dall'ultima volta (per esempio
@@ -243,6 +259,10 @@ class Evolution:
             # Plasticità: modulatori per individuo, quota di chi può imparare.
             "modulators": float(brains.modulatory.sum(axis=1).mean()),
             "learners": float(brains.learns.mean()),
+            # Sistema di valore innato: forza media dei nuclei di gusto e dolore.
+            "value": [float(v) for v in brains.value.mean(axis=0)],
+            # Sviluppo: marcatori accesi e tipi di neuroni interni.
+            **population_stats(brains.genome),
             "mutation": {k: float(np.exp(np.median(brains.genome.meta[:, i]))) for i, k in enumerate(META)},
             "oldest": int(self.age.max()),
             "oldest_id": int(self.ids[np.argmax(self.age)]),
@@ -297,12 +317,14 @@ class Evolution:
             self.last_parents = pad(self.last_parents, new.n_rec, new.n_hidden)
 
         brains.set_genome(new)
+        self._birth(np.arange(len(survivors), n))
         self.age = np.concatenate([survivor_age, np.zeros(n - len(survivors), dtype=int)])
         self.ids = np.concatenate([survivor_ids, self._new_ids(n - len(survivors))])
         self.born = np.concatenate([survivor_born, np.full(n - len(survivors), self.generation + 1)])
         world.n = n  # dopo una selezione finale la popolazione torna piena
         world.seed += 1
         world.reset()
+        self._lived()
         self.ctrl.reset(world.seed)
         self._sim = None
         self.generation += 1
@@ -323,6 +345,7 @@ class Evolution:
         self.world.n = len(keep)
         self.world.seed += 1
         self.world.reset()
+        self._lived()
         self.ctrl.reset(self.world.seed)
         self._sim = None
 

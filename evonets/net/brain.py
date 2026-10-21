@@ -31,7 +31,90 @@ PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", 
 # RICEVE: Δw = η · M · (A·pre·post + B·pre + C·post + D), con
 # η = plasticity_initial_rate · e^gene (gene 0 = plasticità debole di partenza).
 # "mod" > 0 rende un neurone interno modulatore: non trasmette, rilascia M.
-PLASTIC = ("eta", "A", "B", "C", "D", "mod")
+# "hebb": apprendimento hebbiano di base, sempre attivo, senza modulatori
+# (docs/SPEC_SVILUPPO.md, sezione 10): Δw = η_h · pre · post, con
+# η_h = hebb_initial_rate · e^gene.
+# "target" e "homeo": scaling omeostatico (docs/SPEC_SVILUPPO.md, sezione 4).
+# Il neurone tiene la media recente ā della propria attività e moltiplica le
+# sinapsi che riceve per exp(h · dt · (a* − ā)), con a* = sigmoide(target)
+# l'attività desiderata e h = homeo_initial_rate · e^homeo la forza.
+# "persist": quanto dura la traccia provvisoria (early-LTP) che l'hebbiano
+# lascia sulle sinapsi che il neurone riceve, τ = early_initial_tau · e^gene.
+# "intrinsic": forza dell'omeostasi dell'eccitabilità (la corrente di fondo),
+# un meccanismo distinto dallo scaling delle sinapsi (Desai 1999):
+# homeo_initial_rate · e^gene.
+PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist", "intrinsic")
+# Dopo la plasticità, i geni propri dello sviluppo:
+# "gain", quanto pesano gli ingressi che il neurone riceve (come il numero di
+# recettori postsinaptici), in scala logaritmica: peso = affinità · e^gain
+# (development.py);
+# "boost" e "closure", il periodo critico: l'hebbiano del neurone è
+# B = critical_initial_boost · e^boost volte più forte all'inizio dello
+# sviluppo e torna alla velocità dell'adulto con il tempo
+# τ_c = critical_initial_tau · e^closure (s di età, dal grembo):
+# η_h(età) = η_h · (1 + (B − 1) · e^(−età/τ_c)).
+GENES = PLASTIC + ("gain", "boost", "closure")
+
+
+def sigmoid(x):
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+# Le costanti della configurazione che usa `plasticity`.
+PLASTICITY_CONSTANTS = ("dt", "synapse_max", "homeo_tau", "capture_rate")
+
+
+def frequencies(xp, x, centred: bool):
+    """Le frequenze (≥ 0) che corrispondono alle attività `x` dei neuroni.
+    Nelle reti continue (`centred`) x = tanh(...) è lo scarto dalla frequenza
+    spontanea, a metà tra zitto (-1) e massimo (+1): la frequenza è (1 + x)/2.
+    Nelle reti a impulsi le attività sono già frequenze."""
+    return (1.0 + x) / 2.0 if centred else xp.maximum(x, 0.0)
+
+
+def plasticity(cfg, xp, p, pre, post, m, n_in: int, centred: bool):
+    """Un passo di plasticità (vedi `Brains._learn`), uguale per NumPy e JAX
+    (`xp` è il modulo). `p`: i geni compilati e lo stato di chi impara; pre
+    (n, S) con i primi `n_in` i sensi, post (n, T), m (n, T) il modulatore che
+    arriva a ogni neurone; `centred` per le reti continue (vedi
+    `frequencies`). Le regole di Hebb e l'omeostasi usano le frequenze; la
+    plasticità modulata, che è una regola scritta dai geni, i valori come
+    sono. Restituisce (pesi, traccia provvisoria, corrente di fondo, ā)."""
+    dt, top = cfg["dt"], cfg["synapse_max"]
+    # I nuclei di valore proiettano su tutto il cervello: il gusto aggiunge M
+    # positivo, il dolore M negativo (p["signal"]: gusto e dolore, (n, 2)).
+    m = m + (p["value"][:, 0] * p["signal"][:, 0] - p["value"][:, 1] * p["signal"][:, 1])[:, None]
+    senses = xp.maximum(pre[:, :n_in], 0.0)  # risposte dei recettori: già frequenze
+    rate_pre = xp.concatenate([senses, frequencies(xp, pre[:, n_in:], centred)], axis=1)
+    rate_post = frequencies(xp, post, centred)
+    avg = p["avg"] + (dt / cfg["homeo_tau"]) * (rate_post - p["avg"])
+    want, sign, links = p["target_act"], p["sign"], p["links"]
+    excit = sign > 0.0
+    gap = p["homeo"] * dt * (want - avg)  # (n, T): > 0 se il neurone è troppo zitto
+    # Omeostasi: scala tutta la sinapsi (parte stabile e traccia).
+    early = p["early"] * xp.exp(xp.where(excit, gap[:, :, None], -gap[:, :, None]))
+    stable = xp.abs(p["w_eff"]) * xp.exp(xp.where(excit, gap[:, :, None], -gap[:, :, None])) - early
+    bias = p["bias_now"] + p["intrinsic"] * dt * (want - avg)  # più corrente, più frequenza
+    # Consolidamento della traccia dove arriva un modulatore, poi decadimento.
+    caught = early * (1.0 - xp.exp(-cfg["capture_rate"] * xp.abs(m) * dt))[:, :, None]
+    stable = stable + caught
+    early = (early - caught) * p["early_keep"][:, :, None]
+    strength = stable + early
+
+    def saturate(d):  # i rafforzamenti rallentano vicino al massimo
+        return xp.where(d > 0.0, d * xp.maximum(1.0 - strength / top, 0.0), d)
+
+    theta = avg**2 / xp.maximum(want, 1e-3)
+    bcm = (rate_post * (rate_post - theta))[:, :, None] * rate_pre[:, None, :]
+    vogels = (rate_post - want)[:, :, None] * rate_pre[:, None, :]
+    critical = 1.0 + (p["boost"] - 1.0) * xp.exp(-p["clock"][:, None] / p["closure"])  # periodo critico
+    early = early + saturate((p["hebb"] * critical)[:, :, None] * xp.where(excit, bcm, vogels) * links)
+    rule = p["rule"]
+    drive = ((rule[..., 0] * post)[:, :, None] * pre[:, None, :] + rule[..., 1, None] * pre[:, None, :]
+             + (rule[..., 2] * post + rule[..., 3])[:, :, None])
+    stable = xp.clip(stable + saturate(sign * (p["eta"] * m)[:, :, None] * drive * links), 0.0, top)
+    strength = xp.clip(stable + early, 0.0, top)
+    return sign * strength, strength - stable, bias, avg
 
 
 def clamp_meta(meta: np.ndarray, cfg: Config) -> None:
@@ -79,6 +162,26 @@ class Genome:
     sue copie). Un gene che non viene da una duplicazione ha l'identità del suo
     posto: tutti discendono dagli stessi antenati. Una copia riceve
     un'identità nuova e la famiglia dell'originale.
+
+    Sviluppo (`Config.genome = "sviluppo"`, vedi development.py), M posti per
+    i geni dei marcatori: `r_mark` (N, R, M) e `n_mark` (N, T, M) quanto ogni
+    recettore e ogni neurone interno o motore esprime ogni marcatore (in scala
+    logistica), `m_grad` (N, M, 2) quanto l'espressione di ogni marcatore
+    segue la posizione nel cervello (gradienti, come Eph ed efrine),
+    `m_table` (N, M, M) la tabella di affinità (marcatore sull'assone ->
+    marcatore sul bersaglio, con segno), `m_active`, `m_id`, `m_fam` (N, M)
+    esistenza e discendenza dei marcatori. Con il genoma diretto M = 0. In
+    questo caso `weights` e `conn` sono il cervello sviluppato (il fenotipo),
+    non geni: nascono dallo sviluppo e non mutano.
+
+    Fenotipo alla nascita, dopo il grembo (net/womb.py, solo con lo
+    sviluppo): `born_avg` (N, T) la frequenza media di ogni neurone e
+    `born_bias` (N, T) la sua corrente di fondo. NaN = non sviluppato: valgono
+    i geni (a* e la soglia del genoma).
+
+    Sistema di valore innato: `value` (N, 2) la forza dei due nuclei (gusto ->
+    M positivo, dolore -> M negativo), in scala logaritmica: forza =
+    value_initial · e^gene.
     """
 
     weights: np.ndarray
@@ -102,12 +205,26 @@ class Genome:
     h_id: np.ndarray | None = None
     r_fam: np.ndarray | None = None
     h_fam: np.ndarray | None = None
+    r_mark: np.ndarray | None = None
+    n_mark: np.ndarray | None = None
+    m_grad: np.ndarray | None = None
+    m_table: np.ndarray | None = None
+    m_active: np.ndarray | None = None
+    m_id: np.ndarray | None = None
+    m_fam: np.ndarray | None = None
+    born_avg: np.ndarray | None = None
+    born_bias: np.ndarray | None = None
+    value: np.ndarray | None = None
 
     FIELDS = ("weights", "traits", "conn", "active", "pos", "r_active", "r_sens", "r_mu", "r_width",
               "r_body", "r_look", "r_aperture", "r_y", "r_tau", "r_sub", "r_div", "meta",
-              "r_id", "h_id", "r_fam", "h_fam")
+              "r_id", "h_id", "r_fam", "h_fam",
+              "r_mark", "n_mark", "m_grad", "m_table", "m_active", "m_id", "m_fam",
+              "born_avg", "born_bias", "value")
     RECEPTOR_FIELDS = FIELDS[5:16]
-    LINEAGE = FIELDS[17:]
+    LINEAGE = FIELDS[17:21]
+    MARKERS = FIELDS[21:28]
+    BORN = FIELDS[28:30]
 
     def __post_init__(self):
         n = len(self.weights)
@@ -115,7 +232,27 @@ class Genome:
                             ("h_id", self.active.shape[1]), ("h_fam", self.active.shape[1])):
             if getattr(self, name) is None:  # i geni del posto: discendenza comune
                 setattr(self, name, np.broadcast_to(np.arange(slots, dtype=np.int64), (n, slots)).copy())
+        if self.m_active is None:  # senza marcatori (genoma diretto)
+            self.m_active = np.zeros((n, 0), dtype=bool)
+        m = self.m_active.shape[1]
+        empty = {"r_mark": (n, self.r_active.shape[1], m), "n_mark": (n, self.weights.shape[1], m),
+                 "m_grad": (n, m, 2), "m_table": (n, m, m)}
+        for name, shape in empty.items():
+            if getattr(self, name) is None:
+                setattr(self, name, np.zeros(shape))
+        for name in ("m_id", "m_fam"):
+            if getattr(self, name) is None:
+                setattr(self, name, np.broadcast_to(np.arange(m, dtype=np.int64), (n, m)).copy())
+        for name in self.BORN:
+            if getattr(self, name) is None:
+                setattr(self, name, np.full(self.weights.shape[:2], np.nan))
+        if self.value is None:  # i nuclei di valore alla loro forza di partenza
+            self.value = np.zeros((n, 2))
 
+    def unborn(self) -> None:
+        """Sul posto: nessun fenotipo alla nascita (un figlio prima del grembo)."""
+        for name in self.BORN:
+            getattr(self, name)[:] = np.nan
     def __len__(self) -> int:
         return len(self.weights)
 
@@ -130,6 +267,11 @@ class Genome:
     @property
     def n_out(self) -> int:
         return self.weights.shape[1] - self.n_hidden
+
+    @property
+    def n_markers(self) -> int:
+        """Posti per i marcatori (0 con il genoma diretto)."""
+        return self.m_active.shape[1]
 
     @property
     def receptors(self) -> ReceptorGenes:
@@ -149,19 +291,21 @@ class Genome:
         """Uno sotto l'altro; i posti vengono pareggiati al più grande."""
         r = max(p.n_rec for p in parts)
         h = max(p.n_hidden for p in parts)
-        parts = [pad(p, r, h) for p in parts]
+        m = max(p.n_markers for p in parts)
+        parts = [pad(p, r, h, m) for p in parts]
         return Genome(*(np.concatenate([getattr(p, f) for p in parts]) for f in Genome.FIELDS))
 
 
-def pad(g: Genome, n_rec: int, n_hidden: int) -> Genome:
-    """Lo stesso genoma con più posti (spenti, geni a zero) per recettori e
-    neuroni interni. Non cambia nulla per l'individuo: i posti nuovi non
-    esistono finché una mutazione non li accende o una duplicazione non li
-    riempie."""
-    dr, dh = n_rec - g.n_rec, n_hidden - g.n_hidden
-    if dr == 0 and dh == 0:
+def pad(g: Genome, n_rec: int, n_hidden: int, n_markers: int | None = None) -> Genome:
+    """Lo stesso genoma con più posti (spenti, geni a zero) per recettori,
+    neuroni interni e marcatori. Non cambia nulla per l'individuo: i posti
+    nuovi non esistono finché una mutazione non li accende o una duplicazione
+    non li riempie."""
+    m = g.n_markers if n_markers is None else n_markers
+    dr, dh, dm = n_rec - g.n_rec, n_hidden - g.n_hidden, m - g.n_markers
+    if dr == 0 and dh == 0 and dm == 0:
         return g
-    if dr < 0 or dh < 0:
+    if dr < 0 or dh < 0 or dm < 0:
         raise ValueError("pad: i posti possono solo crescere")
     n, r, h = len(g), g.n_rec, g.n_hidden
 
@@ -185,15 +329,37 @@ def pad(g: Genome, n_rec: int, n_hidden: int) -> Genome:
         r_fam=np.concatenate([g.r_fam, np.broadcast_to(np.arange(r, r + dr), (n, dr))], axis=1),
         h_id=np.concatenate([g.h_id, np.broadcast_to(np.arange(h, h + dh), (n, dh))], axis=1),
         h_fam=np.concatenate([g.h_fam, np.broadcast_to(np.arange(h, h + dh), (n, dh))], axis=1),
+        **_pad_markers(g, grow, r, dr, h, dh, dm),
+        **{name: np.insert(getattr(g, name), [h] * dh, np.nan, axis=1) for name in Genome.BORN},
+        value=g.value,
     )
+
+
+def _pad_markers(g: Genome, grow, r: int, dr: int, h: int, dh: int, dm: int) -> dict:
+    """I campi dei marcatori con i posti nuovi: recettori dopo R, interni dopo
+    H, marcatori in fondo (spenti, con l'identità del loro posto)."""
+    n, m = len(g), g.n_markers
+    r_mark = grow(grow(g.r_mark, 1, r, dr), 2, m, dm)
+    n_mark = grow(grow(g.n_mark, 1, h, dh), 2, m, dm)
+    table = grow(grow(g.m_table, 1, m, dm), 2, m, dm)
+    new_ids = np.broadcast_to(np.arange(m, m + dm), (n, dm))
+    return dict(r_mark=r_mark, n_mark=n_mark, m_grad=grow(g.m_grad, 1, m, dm), m_table=table,
+                m_active=grow(g.m_active, 1, m, dm), m_id=np.concatenate([g.m_id, new_ids], axis=1),
+                m_fam=np.concatenate([g.m_fam, new_ids], axis=1))
 
 
 def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Generator) -> Genome:
     """La partenza primordiale (docs/SPEC_FASE_C.md, sezione 7): pochi
     recettori generalisti, nessun neurone interno acceso, collegamenti
     secondo la geometria. Gli individui differiscono un poco nei geni."""
-    R, H, std = cfg.receptor_slots, cfg.net_hidden_slots, cfg.net_weight_std
-    on = min(cfg.receptor_initial, R)
+    fixed = None
+    if cfg.sim_mode == "cervello":  # sensi fissi, decisi da noi
+        from .senses import genes
+
+        fixed = genes(cfg, n)
+    R = len(fixed["r_y"][0]) if fixed else cfg.receptor_slots
+    H, std = cfg.net_hidden_slots, cfg.net_weight_std
+    on = R if fixed else min(cfg.receptor_initial, R)
     # Recettori: i primi `on` accesi, distribuiti a ventaglio davanti; gli
     # altri posti hanno geni a caso ma spenti (pseudogeni).
     angle = rng.uniform(-np.pi, np.pi, (n, R))
@@ -214,6 +380,12 @@ def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Ge
     r_tau = np.log(cfg.receptor_initial_tau) + rng.normal(0.0, 0.3, (n, R))
     r_sub = rng.uniform(0.0, cfg.receptor_initial_adaptation, (n, R))
     r_div = rng.uniform(0.0, cfg.receptor_initial_adaptation, (n, R))
+    if fixed:
+        r_active, r_sens, r_mu, r_width = fixed["r_active"], fixed["r_sens"], fixed["r_mu"], fixed["r_width"]
+        r_aperture, r_y, r_tau, r_sub, r_div = (fixed[k] for k in ("r_aperture", "r_y", "r_tau", "r_sub", "r_div"))
+        body_unit, unit = fixed["r_body"], fixed["r_look"]
+    else:
+        body_unit = unit.copy()
 
     pos = rng.random((n, H, 2))
     meta = np.log(np.maximum(meta_start(cfg), cfg.mutation_floor))[None, :] + rng.normal(0.0, 0.1, (n, len(META)))
@@ -224,7 +396,7 @@ def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Ge
     return Genome(
         weights=rng.normal(0.0, std, (n, T, S)), traits=rng.normal(0.0, std, (n, T, n_traits)),
         conn=conn, active=np.zeros((n, H), dtype=bool), pos=pos,
-        r_active=r_active, r_sens=r_sens, r_mu=r_mu, r_width=r_width, r_body=unit.copy(), r_look=unit,
+        r_active=r_active, r_sens=r_sens, r_mu=r_mu, r_width=r_width, r_body=body_unit, r_look=unit,
         r_aperture=r_aperture, r_y=r_y, r_tau=r_tau, r_sub=r_sub, r_div=r_div, meta=meta,
     )
 
@@ -247,8 +419,10 @@ class Brains:
     """
 
     KIND = "rate"
+    CENTRED = True  # attività = scarto dalla frequenza spontanea (vedi `frequencies`)
     BASE_TRAITS = 1  # soglia; poi i geni della plasticità
-    N_TRAITS = BASE_TRAITS + len(PLASTIC)
+    N_TRAITS = BASE_TRAITS + len(GENES)
+    GAIN = BASE_TRAITS + len(PLASTIC)  # il gene del guadagno
     OUT_LABELS = ("spinta", "sterzo")
 
     @classmethod
@@ -258,10 +432,17 @@ class Brains:
 
     @classmethod
     def plastic_text(cls, traits: np.ndarray, hidden: bool) -> list[str]:
-        eta, a, b, c, d, mod = traits[cls.BASE_TRAITS:]
+        eta, a, b, c, d, mod, hebb, target, homeo, persist, intrinsic = traits[cls.BASE_TRAITS:][:len(PLASTIC)]
         lines = [f"plasticità in entrata: η0 x {np.exp(eta):.2g}",
                  f"  A {a:+.2f} pre·post   B {b:+.2f} pre",
-                 f"  C {c:+.2f} post       D {d:+.2f}"]
+                 f"  C {c:+.2f} post       D {d:+.2f}",
+                 f"hebbiano di base: η_h0 x {np.exp(hebb):.2g}",
+                 f"omeostasi: attività desiderata {float(sigmoid(target)):.2f}, forza h0 x {np.exp(homeo):.2g}",
+                 f"traccia provvisoria: dura τ0 x {np.exp(persist):.2g}",
+                 f"omeostasi della soglia: forza h0 x {np.exp(intrinsic):.2g}",
+                 f"guadagno degli ingressi (sviluppo): x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC)]):.2g}",
+                 f"periodo critico: hebbiano x B0 x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC) + 1]):.2g}"
+                 f" all'inizio, si chiude in τ0 x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC) + 2]):.2g}"]
         if hidden:
             lines.append("modulatore: sì (non trasmette, rilascia M)" if mod > 0
                          else f"modulatore: no (gene {mod:+.2f})")
@@ -273,6 +454,20 @@ class Brains:
         genome = primordial(cfg, n, n_out, self.N_TRAITS, rng)
         self._init_genes(cfg, rng, genome)
         self._init_plasticity(cfg, rng, genome)
+        genome.traits[:, :, self.GAIN] = 0.0  # guadagno 1: conta solo con lo sviluppo
+        # Periodo critico: forte e diverso da individuo a individuo.
+        genome.traits[:, :, self.GAIN + 1 : self.GAIN + 3] = rng.normal(0.0, 0.5, genome.traits.shape[:2] + (2,))
+        if cfg.genome == "sviluppo":  # il primo cervello nasce dai marcatori
+            from . import development
+
+            genome.traits[:, :, self.GAIN] = rng.normal(0.0, 0.2, genome.traits.shape[:2])
+
+            for name, value in development.initial_markers(cfg, n, genome.n_rec, genome.weights.shape[1],
+                                                           rng).items():
+                setattr(genome, name, value)
+            genome.m_id = np.broadcast_to(np.arange(cfg.marker_slots, dtype=np.int64), (n, cfg.marker_slots)).copy()
+            genome.m_fam = genome.m_id.copy()
+            development.develop(genome, cfg, rng, self.GAIN)
         self.set_genome(genome)
 
     def _init_plasticity(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
@@ -283,6 +478,11 @@ class Brains:
         t[..., 1:5] = rng.normal(0.0, cfg.plasticity_initial_rule, t.shape[:2] + (4,))
         offset = NormalDist().inv_cdf(1.0 - cfg.modulatory_initial_share)
         t[..., 5] = rng.normal(0.0, 1.0, t.shape[:2]) - offset
+        t[..., 6] = rng.normal(0.0, 0.5, t.shape[:2])  # hebbiano di base: debole e diverso da individuo a individuo
+        t[..., 7] = rng.normal(0.0, 1.0, t.shape[:2])  # omeostasi: attività desiderata a caso,
+        t[..., 8] = rng.normal(0.0, 0.5, t.shape[:2])  # forza debole e casuale
+        t[..., 9] = rng.normal(0.0, 0.5, t.shape[:2])  # durata della traccia provvisoria
+        t[..., 10] = rng.normal(0.0, 0.5, t.shape[:2])  # omeostasi della soglia: debole e casuale
 
     def _init_genes(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
         """Per i tipi di rete che hanno geni con una distribuzione iniziale propria."""
@@ -331,8 +531,20 @@ class Brains:
         # calando con la distanza (trasmissione di volume).
         p = self.traits[:, :, self.BASE_TRAITS :]
         self.eta, self.rule = cfg.plasticity_initial_rate * np.exp(p[..., 0]), p[..., 1:5]
+        self.hebb = cfg.hebb_initial_rate * np.exp(p[..., 6])  # (N, T), del neurone che riceve
+        d = self.traits[:, :, self.GAIN + 1 :]
+        self.boost = cfg.critical_initial_boost * np.exp(d[..., 0])  # (N, T): B
+        self.closure = cfg.critical_initial_tau * np.exp(d[..., 1])  # (N, T): τ_c, s
+        self.lived = np.zeros(self.n)  # secondi già vissuti in vite precedenti (li dà l'evoluzione)
+        self.value = cfg.value_initial * np.exp(g.value)  # (N, 2): forza dei nuclei di gusto e dolore
+        self.target_act = sigmoid(p[..., 7])  # (N, T): a*
+        self.homeo = cfg.homeo_initial_rate * np.exp(p[..., 8])  # (N, T): h, per secondo
+        self.intrinsic = cfg.homeo_initial_rate * np.exp(p[..., 10])  # (N, T), per secondo
+        self.early_keep = np.exp(-cfg.dt / (cfg.early_initial_tau * np.exp(p[..., 9])))  # (N, T), per passo
         self.kmod = np.exp(-self.dist[:, :, R : R + H] / cfg.modulation_range) * mod[:, None, :]
-        self.learns = mod.any(axis=1) & cfg.plasticity  # chi ha almeno un modulatore
+        # Chi impara: con l'hebbiano di base e l'omeostasi, tutti (salvo plasticità spenta).
+        self.learns = np.full(self.n, cfg.plasticity) & (
+            (self.hebb > 0).any(axis=1) | (self.homeo > 0).any(axis=1) | mod.any(axis=1) | (self.value > 0).any(axis=1))
         self._mod_sign = mod.astype(float)
         # Lunghezza totale dei collegamenti effettivi di ogni rete: il suo cablaggio.
         self.wire_length = (self.dist * self.links).sum(axis=(1, 2))
@@ -345,7 +557,16 @@ class Brains:
         self._prepared = None  # recettori pronti per il calcolo, da rifare
         self._compile_extra()
         self.w_eff = self._born_weights()
+        # Il tipo di ogni sinapsi, fissato alla nascita: +1 eccitatoria, -1
+        # inibitoria (legge di Dale per i neuroni, segno del gene per i sensi e
+        # per le reti continue). La plasticità cambia la forza, mai il tipo.
+        self.sign = np.where(self.w_eff < 0.0, -1.0, 1.0)
         self.learned = False
+        self._reset_activity()
+
+    def frequencies(self) -> np.ndarray:
+        """(N, H + n_out): la frequenza attuale di ogni neurone interno e motore."""
+        return frequencies(np, self.state, self.CENTRED)
 
     def _compile_extra(self) -> None:
         """Per i tipi di rete con geni compilati propri (prima dei pesi)."""
@@ -362,6 +583,21 @@ class Brains:
         si è imparato non si eredita e non passa da un'arena all'altra)."""
         self.state = np.zeros((self.n, self.n_hidden + self.n_out))
         self._forget()
+        self._reset_activity()
+
+    def _reset_activity(self) -> None:
+        """Ogni vita comincia dallo stato alla nascita: ā e corrente di fondo
+        come li ha lasciati il grembo (net/womb.py); per chi non ci è passato
+        (genoma diretto) ā = a* e la corrente del genoma. Senza tracce
+        provvisorie."""
+        g = self._genome
+        # Età all'inizio di questa vita (s, dal grembo): per il periodo critico.
+        born = np.isfinite(g.born_avg[:, -1]) if g.born_avg.shape[1] else np.zeros(self.n, dtype=bool)
+        self.clock = np.where(born, self.cfg.prenatal_time, 0.0) + self.lived
+        self.avg = np.where(np.isfinite(g.born_avg), g.born_avg, self.target_act)
+        self.early = np.zeros_like(self.w_eff)
+        self.bias_now = np.where(np.isfinite(g.born_bias), g.born_bias, self.bias)
+        self._subset = None
 
     def _forget(self) -> None:
         if self.learned:
@@ -370,7 +606,7 @@ class Brains:
             self.learned = False
 
     # Geni compilati di cui `step_some` usa una copia ridotta.
-    SUBSET = ("w_eff", "bias", "target_on")
+    SUBSET = ("w_eff", "bias_now", "target_on")
 
     def _rows(self, rows: np.ndarray) -> dict:
         """Copie dei geni compilati per i soli individui `rows`. Si rifanno
@@ -389,33 +625,60 @@ class Brains:
             self._prepared = Prepared(self.cfg, self._genome.receptors)
         return self._prepared
 
-    def step(self, obs: np.ndarray) -> np.ndarray:
-        """obs (N, R) -> uscite (N, n_out) in [-1, 1]."""
+    def step(self, obs: np.ndarray, signal: np.ndarray | None = None) -> np.ndarray:
+        """obs (N, R) -> uscite (N, n_out) in [-1, 1]. `signal` (N, 2): gusto e
+        dolore, per il sistema di valore (None = zero)."""
         before = self.state
         self.state, out = self._advance(obs, self.state, self)
-        self._learn(np.arange(self.n), obs, before, self.state)
+        self._learn(np.arange(self.n), obs, before, self.state, signal=signal)
+        self.clock += self.cfg.dt  # l'età avanza
         return out
 
-    def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
-        """Come `step`, ma solo per gli individui `rows` (obs ha una riga per
-        ciascuno): gli altri restano fermi. Ogni rete calcola per conto suo,
-        quindi il risultato per `rows` è identico a quello di `step`."""
+    def step_some(self, obs: np.ndarray, rows: np.ndarray, signal: np.ndarray | None = None) -> np.ndarray:
+        """Come `step`, ma solo per gli individui `rows` (obs e `signal` hanno
+        una riga per ciascuno): gli altri restano fermi. Ogni rete calcola per
+        conto suo, quindi il risultato per `rows` è identico a quello di `step`."""
         sub = self._rows(rows)
         before = self.state[rows]
         state, out = self._advance(obs, before, sub)
         self.state[rows] = state
-        self._learn(rows, obs, before, state, sub)
+        self._learn(rows, obs, before, state, sub, signal)
+        self.clock[rows] += self.cfg.dt  # l'età avanza
         return out
 
     def _pre(self, obs, before, after) -> np.ndarray:
         """Attività di ogni sorgente che ha appena agito sui destinatari."""
         return np.concatenate([obs, before], axis=1)
 
-    def _learn(self, rows, obs, before, after, sub=None) -> None:
-        """Plasticità modulata (docs/SPEC_FASE_E.md): per ogni collegamento
-        effettivo Δw = η · M · (A·pre·post + B·pre + C·post + D), con η, A, B,
-        C, D del neurone che riceve e M che arriva per diffusione dai
-        modulatori. Solo chi ha almeno un modulatore impara."""
+    def _learn(self, rows, obs, before, after, sub=None, signal=None) -> None:
+        """Plasticità durante la vita (docs/REGOLE.md, "Imparare durante la
+        vita"). Ogni sinapsi ha un tipo fisso (eccitatoria o inibitoria) e una
+        forza |w| in [0, synapse_max], somma di una parte stabile e di una
+        traccia provvisoria. Le attività contano come frequenze (|attività|).
+        A ogni passo, per ogni neurone che riceve:
+        - scaling omeostatico (Turrigiano): le sinapsi eccitatorie per
+          exp(h · dt · (a* − ā)), le inibitorie per l'inverso; ā è la media
+          recente dell'attività (tempo caratteristico `homeo_tau`);
+        - omeostasi dell'eccitabilità (Desai 1999): la corrente di fondo si
+          sposta di h · dt · (a* − ā) nel verso che avvicina l'attività ad a*;
+        - hebbiano di base, sempre attivo, con η_h del neurone: sulle
+          eccitatorie la regola BCM, Δ|w| = η_h · pre · post · (post − θ) con
+          la soglia mobile θ = ā² / a*; sulle inibitorie la regola di Vogels,
+          Δ|w| = η_h · pre · (post − a*). Scrive la traccia provvisoria
+          (early-LTP), che svanisce con il tempo τ del neurone (gene
+          "persist");
+        - consolidamento (tagging and capture, Frey e Morris 1997): dove c'è
+          un modulatore la traccia diventa stabile, una quota
+          1 − exp(−capture_rate · |M| · dt) a passo;
+        - plasticità modulata (docs/SPEC_FASE_E.md): Δ|w| = segno · η · M ·
+          (A·pre·post + B·pre + C·post + D), sulla parte stabile;
+        - saturazione graduale (van Rossum 2000): ogni rafforzamento è
+          moltiplicato per 1 − |w| / synapse_max;
+        - periodo critico: l'hebbiano vale η_h · (1 + (B − 1) · e^(−età/τ_c)),
+          con l'età in secondi dal grembo (`clock`);
+        - valore innato: a M si aggiunge forza_gusto · gusto − forza_dolore ·
+          dolore, uguale per tutti i neuroni (`signal`: (len(rows), 2), gusto
+          e dolore di ogni individuo; None = zero)."""
         if not self.cfg.plasticity:
             return
         local = np.flatnonzero(self.learns[rows])
@@ -426,18 +689,15 @@ class Brains:
         pre = self._pre(obs[local], before[local], after[local])  # (n, S)
         post = after[local]  # (n, T)
         m = np.einsum("nth,nh->nt", self.kmod[who], after[local, :H] * self._mod_sign[who])
-        rule = self.rule[who]
-        drive = ((rule[..., 0] * post)[:, :, None] * pre[:, None, :] + rule[..., 1, None] * pre[:, None, :]
-                 + (rule[..., 2] * post + rule[..., 3])[:, :, None])
-        w = self.w_eff[who] + (self.eta[who] * m)[:, :, None] * drive * self.links[who]
-        limit = self.cfg.synapse_max
-        np.clip(w, -limit, limit, out=w)
-        if self.dale is not None:  # un neurone eccitatorio non diventa inibitorio, e viceversa
-            sign = self.dale[who][:, None, :]
-            w = np.where(sign > 0, np.maximum(w, 0.0), np.where(sign < 0, np.minimum(w, 0.0), w))
-        self.w_eff[who] = w
+        p = {k: getattr(self, k)[who] for k in ("w_eff", "early", "bias_now", "avg", "sign", "links", "target_act",
+                                                "homeo", "intrinsic", "hebb", "eta", "rule", "early_keep", "boost",
+                                                "closure", "clock", "value")}
+        p["signal"] = np.zeros((len(who), 2)) if signal is None else signal[local]
+        consts = {k: getattr(self.cfg, k) for k in PLASTICITY_CONSTANTS}
+        w, early, bias, avg = plasticity(consts, np, p, pre, post, m, self.n_in, self.CENTRED)
+        self.w_eff[who], self.early[who], self.bias_now[who], self.avg[who] = w, early, bias, avg
         if sub is not None:
-            sub["w_eff"][local] = w
+            sub["w_eff"][local], sub["bias_now"][local] = w, bias
         elif self._subset is not None:
             self._subset = None
         self.learned = True
@@ -447,7 +707,7 @@ class Brains:
         copia ridotta). Restituisce (nuovo stato, uscite)."""
         get = g.get if isinstance(g, dict) else lambda k: getattr(g, k)
         x = np.concatenate([obs, state], axis=1)
-        z = (get("w_eff") @ x[:, :, None])[:, :, 0] + get("bias")
+        z = (get("w_eff") @ x[:, :, None])[:, :, 0] + get("bias_now")
         state = np.tanh(z) * get("target_on")
         return state, state[:, self.n_hidden :]
 
@@ -478,8 +738,10 @@ class SpikingBrains(Brains):
     """
 
     KIND = "spike-ei"
+    CENTRED = False
     BASE_TRAITS = 3  # corrente di fondo, perdita, tipo; poi la plasticità
-    N_TRAITS = BASE_TRAITS + len(PLASTIC)
+    N_TRAITS = BASE_TRAITS + len(GENES)
+    GAIN = BASE_TRAITS + len(PLASTIC)  # il gene del guadagno
     OUT_LABELS = ("avanti", "indietro", "destra", "sinistra")
 
     @classmethod
@@ -526,7 +788,7 @@ class SpikingBrains(Brains):
         """Tracce recenti degli impulsi (e livelli dei motori) dopo il passo."""
         return np.concatenate([obs, after], axis=1)
 
-    SUBSET = ("w_eff", "bias", "keep", "active")
+    SUBSET = ("w_eff", "bias_now", "keep", "active")
 
     def reset_state(self) -> None:
         h = self.n_hidden
@@ -536,27 +798,30 @@ class SpikingBrains(Brains):
         # Per il viewer e per i collegamenti in uscita dai motori: attività
         # recente dei neuroni interni (media mobile degli impulsi) e livello dei motori.
         self.state = np.zeros((self.n, h + self.n_out))
+        self._reset_activity()
 
-    def step(self, obs: np.ndarray) -> np.ndarray:
+    def step(self, obs: np.ndarray, signal: np.ndarray | None = None) -> np.ndarray:
         """obs (N, R) -> comandi (N, 2) in (-1, 1): spinta e sterzata."""
         before = self.state.copy()
         (self.charge, self.spikes, self.state), out = self._advance(
             obs, (self.charge, self.spikes, self.state), self)
-        self._learn(np.arange(self.n), obs, before, self.state)
+        self._learn(np.arange(self.n), obs, before, self.state, signal=signal)
+        self.clock += self.cfg.dt  # l'età avanza
         return out
 
-    def step_some(self, obs: np.ndarray, rows: np.ndarray) -> np.ndarray:
+    def step_some(self, obs: np.ndarray, rows: np.ndarray, signal: np.ndarray | None = None) -> np.ndarray:
         sub = self._rows(rows)
         before = self.state[rows]
         (charge, spikes, state), out = self._advance(
             obs, (self.charge[rows], self.spikes[rows], before.copy()), sub)
         self.charge[rows], self.spikes[rows], self.state[rows] = charge, spikes, state
-        self._learn(rows, obs, before, state, sub)
+        self._learn(rows, obs, before, state, sub, signal)
+        self.clock[rows] += self.cfg.dt  # l'età avanza
         return out
 
     def _advance(self, obs, states, g):
         get = g.get if isinstance(g, dict) else lambda k: getattr(g, k)
-        w_eff, bias, keep, active = get("w_eff"), get("bias"), get("keep"), get("active")
+        w_eff, bias, keep, active = get("w_eff"), get("bias_now"), get("keep"), get("active")
         charge, spikes, state = states
         h = self.n_hidden
         drive = 1.0 - keep

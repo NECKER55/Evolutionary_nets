@@ -45,7 +45,8 @@ class World:
         self.energy = np.full(self.n, cfg.energy_init)
         self.alive = np.ones(self.n, dtype=bool)
         self.done = np.zeros(self.n, dtype=bool)
-        self.pain = np.zeros(self.n)  # tossicità subita all'ultimo passo, in [0, 1]
+        self.pain = np.zeros(self.n)  # dolore: veleno e morsi dell'ultimo passo, in [0, 1]
+        self.taste = np.zeros(self.n)  # gusto: impulso quando si mangia, che svanisce
         self.bump = np.zeros(self.n, dtype=bool)  # a contatto con una parete
 
     def _spawn_positions(self) -> np.ndarray:
@@ -109,6 +110,7 @@ class World:
         self.hazards.step(dt)
         toxicity = self.hazards.intensity(self.pos) * active
         self.pain = np.minimum(toxicity, 1.0)
+        self.taste *= np.exp(-dt / cfg.taste_tau)
         # Metabolismo: si paga lo sforzo comandato, non la velocità raggiunta;
         # le riserve oltre l'energia di partenza pesano e rendono il movimento più caro.
         mass = 1.0 + cfg.reserve_mass * np.maximum(self.energy - cfg.energy_init, 0.0) / cfg.energy_init

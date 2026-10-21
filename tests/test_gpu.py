@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from nets import rich
 
 from evonets import Config, World
 from evonets.gpu import engine
@@ -14,7 +15,6 @@ from evonets.gpu.sim import GpuWorlds, pack_params, pack_state
 from evonets.net import NeuralController
 from evonets.sim import signals
 from evonets.sim.tasks import Foraging, MovingTarget
-from nets import rich
 
 ALL_ON = dict(target_vibration=0.7, hazard_vibration=0.4, hazard_smell=0.3, target_smell=0.5, target_heat=0.4,
               hazard_heat=0.2, magnetic_field=0.8)
@@ -51,7 +51,8 @@ def test_quanta_match_the_numpy_receptors():
 
 @pytest.mark.parametrize("net", ["rate", "spike-ei"])
 def test_brain_and_plasticity_match(net):
-    cfg, w, ctrl = setup(net)
+    cfg, w, ctrl = setup(net, homeo_initial_rate=2.0, homeo_tau=0.2, hebb_initial_rate=0.005,
+                            critical_initial_boost=10.0, critical_initial_tau=0.3)  # forti: si vedono
     b = ctrl.brains
     assert b.learns.any()
     ph, P, s = device(cfg, w, ctrl)
@@ -68,6 +69,28 @@ def test_brain_and_plasticity_match(net):
         s = {**s, **new}
         assert np.allclose(np.asarray(out), ref, atol=2e-4)
     assert np.allclose(np.asarray(s["w"]), b.w_eff, atol=2e-4)
+
+
+@pytest.mark.parametrize("net", ["rate", "spike-ei"])
+def test_the_innate_value_system_matches(net):
+    """Gusto e dolore arrivano ai nuclei di valore e da lì, come M, a tutta la
+    plasticità: stessi pesi nei due motori."""
+    cfg, w, ctrl = setup(net, value_initial=2.0)
+    b = ctrl.brains
+    rng = np.random.default_rng(3)
+    w.taste[:] = rng.uniform(0, 1, w.n)
+    w.pain[:] = rng.uniform(0, 1, w.n)
+    ph, P, s = device(cfg, w, ctrl)
+    racing = jnp.ones(w.n, jnp.float32)
+    signal = np.stack([w.taste, w.pain], 1)
+    for _ in range(30):
+        obs = rng.uniform(0, 1, (w.n, b.n_in))
+        b.step(obs, signal)
+        o = jnp.asarray(obs, jnp.float32)
+        new, _ = (engine.rate_brain(ph, P, s, o, racing, b.n_hidden) if net == "rate"
+                  else engine.spike_brain(ph, P, s, o, racing, b.n_hidden, cfg.spike_substeps))
+        s = {**s, **new}
+    assert np.allclose(np.asarray(s["w"]), b.w_eff, atol=5e-4)
 
 
 def test_physics_matches_the_world():
@@ -168,7 +191,7 @@ def test_foraging_physics_matches_the_world():
     t = w.task
     assert t.eaten.sum() > 0 and (w.energy < cfg.energy_init).any() and (w.energy > cfg.energy_init).any()
     for k, ref in (("pos", w.pos), ("energy", w.energy), ("food", t.food), ("pred", t.pred), ("age", t.age),
-                   ("ghost", t.ghost), ("ghost_t", t.ghost_t)):
+                   ("ghost", t.ghost), ("ghost_t", t.ghost_t), ("taste", w.taste), ("pain", w.pain)):
         assert np.allclose(np.asarray(s[k]), ref, atol=2e-3), k
     assert np.array_equal(np.asarray(s["eaten"]), t.eaten) and np.array_equal(np.asarray(s["ptr"]), t.ptr)
     assert np.array_equal(np.asarray(s["alive"]) > 0, w.alive) and np.array_equal(np.asarray(s["done"]) > 0, w.done)
@@ -207,3 +230,18 @@ def test_a_foraging_generation_runs_to_the_end_on_the_gpu():
     for w, _ in pairs:
         assert not (w.alive & ~w.done).any() or w.t >= cfg.life_max
         assert np.array_equal(w.done, w.task.eaten >= w.task.need)
+
+
+def test_eating_tastes_and_a_bite_hurts():
+    cfg, w, ctrl = forage_setup(n=24)
+    rng = np.random.default_rng(2)
+    tasted = bitten = False
+    for _ in range(600):
+        before, energy = w.task.eaten.copy(), w.energy.copy()
+        old = w.taste.copy()
+        w.step(rng.uniform(-1, 1, (w.n, 2)), ctrl.upkeep)
+        ate = w.task.eaten > before
+        assert np.allclose(w.taste[~ate], old[~ate] * np.exp(-cfg.dt / cfg.taste_tau))  # svanisce
+        tasted |= bool(ate.any() and (w.taste[ate] == 1.0).all())
+        bitten |= bool((w.pain > 0).any())
+    assert tasted and bitten

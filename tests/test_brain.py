@@ -1,9 +1,9 @@
 import numpy as np
+from nets import rich
 
 from evonets import Config, World
 from evonets.net import Brains, NeuralController
 from evonets.net.brain import pad
-from nets import rich
 
 R, N_OUT = 10, 2
 

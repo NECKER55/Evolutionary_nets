@@ -19,8 +19,13 @@ def individual(genome, i):
     return [getattr(genome, f)[i].copy() for f in FIELDS]
 
 
+def eq(x, y) -> bool:
+    """Uguali, contando uguali due NaN (stato alla nascita non ancora formato)."""
+    return np.array_equal(x, y, equal_nan=np.asarray(x).dtype.kind == "f")
+
+
 def equal(a, b) -> bool:
-    return all(np.array_equal(x, y) for x, y in zip(a, b))
+    return all(eq(x, y) for x, y in zip(a, b))
 
 
 def finish(e, winners):
@@ -177,7 +182,7 @@ def test_load_restores_the_saved_slots_and_genomes(tmp_path):
     cfg = Config(net_hidden_slots=9)
     b = Evolution.load(cfg, tmp_path / "pop.npz")
     assert cfg.net_hidden_slots == 6 and b.ctrl.brains.n_hidden == a.ctrl.brains.n_hidden
-    assert all(np.array_equal(getattr(a.ctrl.brains.genome, f), getattr(b.ctrl.brains.genome, f)) for f in FIELDS)
+    assert all(eq(getattr(a.ctrl.brains.genome, f), getattr(b.ctrl.brains.genome, f)) for f in FIELDS)
 
 
 def test_manual_override_replaces_only_that_agents_commands():

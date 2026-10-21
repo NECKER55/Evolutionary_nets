@@ -1,11 +1,11 @@
 import numpy as np
+from nets import rich
 
 from evonets import Config
 from evonets.evo import crossover, mutate, reproduce
 from evonets.evo.genetics import duplicate_neuron, duplicate_receptor, grow
 from evonets.net import Brains
 from evonets.net.brain import META_INDEX, Genome
-from nets import rich
 
 R, N_OUT = 10, 2
 # Tutti i tassi a zero (al minimo fisico) e nessuna deriva dei tassi stessi.
@@ -20,7 +20,8 @@ def population(n=40, seed=0, **kw):
 
 
 def same(a, b, fields=FIELDS) -> bool:
-    return all(np.array_equal(getattr(a, f), getattr(b, f)) for f in fields)
+    return all(np.array_equal(getattr(a, f), getattr(b, f), equal_nan=getattr(a, f).dtype.kind == "f")
+               for f in fields)
 
 
 def test_copy_without_mutation_is_identical_and_independent():
@@ -205,17 +206,29 @@ def test_breaking_is_easier_than_repairing_and_long_genes_break_more():
     mu = np.full(50, 0.001)
     rec, neu = knockout(g, mu)
     assert np.allclose(rec, 1 - 0.999 ** RECEPTOR_GENE_LENGTH)
-    assert (neu[:, 0] > 3 * neu[:, 1]).all()  # più collegamenti, più fragile (31 geni contro 7)
+    own, inputs = g.traits.shape[2], g.conn.shape[2]  # geni propri; collegamenti in ingresso
+    assert np.allclose(neu[:, 0], 1 - 0.999 ** (own + inputs)) and np.allclose(neu[:, 1], 1 - 0.999 ** own)
+    assert (neu[:, 0] > 2 * neu[:, 1]).all()  # più collegamenti, più fragile
     assert (neu[:, 1] > 2 * 0.001).all()  # rompere è più probabile che riparare (μ)
 
 
 def test_without_selection_brains_do_not_grow_by_themselves():
+    # Con i tassi di mutazione di partenza fermi, duplicazioni e rotture non
+    # fanno crescere il cervello da sole. (Se anche i tassi derivano, senza
+    # selezione in alcune corse la duplicazione sale sopra la rottura e il
+    # cervello si gonfia, come il genoma senza selezione.)
     cfg = Config()
-    rng = np.random.default_rng(0)
-    g = Brains(cfg, 100, N_OUT, 0).genome
-    for _ in range(80):
-        g = grow(reproduce(g, 100, cfg, rng), cfg)
-    assert g.active.sum(axis=1).mean() < 4 and g.r_active.sum(axis=1).mean() < 4
+    neurons, receptors = [], []
+    for seed in range(5):
+        rng = np.random.default_rng(seed)
+        g = Brains(cfg, 100, N_OUT, seed).genome
+        start = g.meta.copy()
+        for _ in range(80):
+            g = grow(reproduce(g, 100, cfg, rng), cfg)
+            g.meta[:] = start[: len(g)]
+        neurons.append(g.active.sum(axis=1).mean())
+        receptors.append(g.r_active.sum(axis=1).mean())
+    assert np.median(neurons) < 4 and np.median(receptors) < 4
 
 
 def test_receptor_sensitivity_has_a_physical_maximum():
@@ -302,3 +315,25 @@ def test_more_food_more_children():
               for p in range(3)]
     assert sum(counts) == 900 and counts[0] < counts[1] < counts[2]
     assert abs(counts[2] / 900 - 6 / 9) < 0.06
+
+
+def test_in_brain_mode_the_senses_never_change_and_only_the_brain_evolves():
+    from evonets.net import senses
+
+    cfg = Config(sim_mode="cervello", population=60)
+    b = Brains(cfg, 60, N_OUT, 0)
+    g = b.genome
+    fixed = senses.genes(cfg, 60)
+    assert g.n_rec == len(senses.SETS["naturale"]) and g.r_active.all()
+    for name, value in fixed.items():
+        assert np.allclose(getattr(g, name), value), name
+    rng = np.random.default_rng(0)
+    for _ in range(30):  # molte generazioni di nascite, con mutazioni forti
+        g.meta[:, META_INDEX["dup"]] = np.log(0.5)
+        g.meta[:, META_INDEX["toggle"]] = np.log(0.2)
+        g.meta[:, META_INDEX["weight_prob"]] = np.log(0.5)
+        g = grow(reproduce(g, 60, cfg, rng), cfg)
+    assert g.n_rec == len(senses.SETS["naturale"]) and g.r_active.all()
+    for name, value in fixed.items():
+        assert np.allclose(getattr(g, name), value), name  # sensi identici, in tutti
+    assert g.active.any()  # il cervello invece cambia

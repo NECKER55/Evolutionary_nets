@@ -128,6 +128,51 @@ class Config:
     # quando qualcuno ne usa più di pool_fill, tutti ricevono pool_step posti.
     net_hidden_slots: int = 8
     receptor_slots: int = 4
+    # Tipo di simulazione: "evoluzione" = evolvono sensi e cervello;
+    # "cervello" = sensi fissi decisi da noi (net/senses.py, set `sensor_set`),
+    # evolve solo il cervello.
+    sim_mode: str = "evoluzione"
+    sensor_set: str = "naturale"
+    # Genoma del cervello: "diretto" = scrive ogni sinapsi (peso e
+    # collegamento); "sviluppo" = scrive le regole per costruirle (marcatori,
+    # gradienti, tabella di affinità, guadagno: net/development.py), come in
+    # natura. I salvataggi di prima dello sviluppo si aprono con "diretto".
+    genome: str = "diretto"
+    # Sviluppo: posti e marcatori accesi alla partenza (i posti crescono come
+    # quelli dei neuroni), dispersione delle espressioni (scala logistica), dei
+    # gradienti e della tabella di affinità alla partenza.
+    marker_slots: int = 4
+    marker_initial: int = 2
+    marker_initial_std: float = 1.5
+    marker_gradient_std: float = 2.0
+    marker_table_std: float = 2.0
+    # Il grembo (net/womb.py, solo con lo sviluppo): secondi di attività
+    # spontanea prima della nascita. I sensi ricevono onde che scorrono lungo
+    # l'ordine dei nervi (come le onde della retina): velocità (lati del
+    # cervello al secondo), larghezza, intervallo medio tra due onde (s) e
+    # rumore di fondo.
+    prenatal_time: float = 5.0
+    wave_speed: float = 0.5
+    wave_width: float = 0.1
+    wave_interval: float = 1.5
+    prenatal_noise: float = 0.05
+    # Periodo critico (geni "boost" e "closure" di ogni neurone): quante volte
+    # l'hebbiano è più forte all'inizio dello sviluppo e in quanti secondi
+    # torna alla velocità dell'adulto (`hebb_initial_rate`), alla partenza.
+    # Con 2 s il periodo critico cade per lo più nel grembo (5 s): alla
+    # nascita l'hebbiano è circa 9 volte quello dell'adulto, dopo 15 s
+    # quello dell'adulto.
+    critical_initial_boost: float = 100.0
+    critical_initial_tau: float = 2.0
+    # Il gusto (grandezza del corpo): impulso a ogni cibo mangiato, che svanisce
+    # in questo tempo (s).
+    taste_tau: float = 0.5
+    # Sistema di valore innato: due nuclei, come l'area tegmentale ventrale
+    # (dopamina) e il locus coeruleus (noradrenalina), con proiezioni a tutto il
+    # cervello. Il gusto dà M positivo, il dolore M negativo, con forza
+    # value_initial · e^gene (geni `Genome.value` dell'individuo; fissi nella
+    # simulazione "solo cervello").
+    value_initial: float = 1.0
     pool_fill: float = 0.8
     pool_step: int = 8
     # Il corpo primordiale: recettori accesi, a ventaglio davanti, generalisti
@@ -161,6 +206,30 @@ class Config:
     plasticity: bool = True
     plasticity_initial_rate: float = 0.001  # η0: velocità di partenza (il gene la moltiplica)
     plasticity_initial_rule: float = 0.5  # deviazione dei coefficienti A, B, C, D alla partenza
+    # Apprendimento hebbiano di base, sempre attivo (BCM sulle sinapsi
+    # eccitatorie, Vogels sulle inibitorie, traccia provvisoria che si
+    # consolida solo con un modulatore: vedi Brains._learn): velocità di
+    # partenza, che il gene di ogni neurone moltiplica. Misurato su una
+    # popolazione evoluta senza (corsa-20261020-200723, rete a impulsi, maturi
+    # 76,8% senza plasticità): 1e-4 neutrale (77,3%), 1e-3 un poco dannoso
+    # (71%; con la traccia resa permanente 5,6%), 1e-2 distruttivo. Con la
+    # prima regola (pre·post permanente, senza depressione e con l'inibizione
+    # che si spegneva) già 1e-4 dava lo 0,3%.
+    hebb_initial_rate: float = 1e-4
+    # Omeostasi (delle sinapsi e, con un gene proprio, della soglia): forza di
+    # partenza h0 (per secondo, il gene la moltiplica) e tempo della media
+    # della frequenza ā (s): molto più lungo dei comportamenti, che durano
+    # pochi secondi (in natura ore). Misurato sulla stessa popolazione, con a*
+    # tarato alla conversione: 1e-4 neutrale; 1e-2 maturi 38% con τ = 5 s, 48%
+    # con τ = 120 s (senza taratura, a* = 0,5 per tutti: 5%).
+    homeo_initial_rate: float = 1e-4
+    homeo_tau: float = 120.0
+    # Traccia provvisoria dell'hebbiano (early-LTP): in natura dura 1-3 ore in
+    # vite di anni; qui la durata di partenza (s), che il gene "persist" di
+    # ogni neurone moltiplica. Consolidamento: dove arriva un modulatore, la
+    # traccia diventa stabile a questa velocità (per secondo e per unità di |M|).
+    early_initial_tau: float = 30.0
+    capture_rate: float = 1.0
     modulatory_initial_share: float = 0.1  # quota di neuroni che nasce modulatrice
     modulation_range: float = 0.2  # quanto lontano arriva il modulatore, in lati del cervello
     synapse_max: float = 4.0  # forza massima di una sinapsi: le sinapsi vere saturano

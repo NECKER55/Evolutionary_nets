@@ -7,7 +7,7 @@ import pytest
 from evonets import Config
 from evonets.evo import Evolution, ladder
 from evonets.evo.evolution import run_together
-from evonets.evo.exam import LESIONS, LEVELS, LEVELS_VERSION, Exam, battery, lesioned
+from evonets.evo.exam import LESIONS, LEVELS, LEVELS_VERSION, battery, lesioned
 
 
 def forage(**kw):

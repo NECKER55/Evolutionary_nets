@@ -1,12 +1,18 @@
 import numpy as np
 import pytest
+from nets import rich
 
 from evonets import Config, World
 from evonets.evo import Evolution
 from evonets.evo.genetics import crossover, mutate
 from evonets.net import NeuralController
-from evonets.net.geometry import brain_side, connect_prob, distances, motor_anchors, receptor_anchors
-from nets import rich
+from evonets.net.geometry import (
+    brain_side,
+    connect_prob,
+    distances,
+    motor_anchors,
+    receptor_anchors,
+)
 
 R = 10
 

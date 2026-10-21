@@ -29,6 +29,8 @@ PHENOMENA = ("luce", "sostanze", "meccanica", "temperatura", "magnetismo", "inte
 # valori positivi. Il movimento sta vicino, l'energia lontano.
 BODY_QUANTITIES = (
     (0.05, "energia"),
+    (0.17, "gusto"),  # impulso quando si mangia, svanisce in `taste_tau`
+    (0.25, "dolore"),  # danno: veleno e morsi
     (0.35, "avanti"),
     (0.45, "indietro"),
     (0.60, "derapata destra"),
@@ -234,7 +236,7 @@ def magnetic(cfg) -> np.ndarray:
 
 
 def body(cfg, world, rows: np.ndarray) -> np.ndarray:
-    """Le grandezze del corpo (n, 7) in [0, 1], nell'ordine di BODY_QUANTITIES."""
+    """Le grandezze del corpo (n, 9) in [0, 1], nell'ordine di BODY_QUANTITIES."""
     heading = world.heading[rows]
     cos, sin = np.cos(heading), np.sin(heading)
     vel = world.vel[rows]
@@ -247,5 +249,5 @@ def body(cfg, world, rows: np.ndarray) -> np.ndarray:
     def pos(x):
         return np.clip(x, 0.0, 1.0)
 
-    return np.stack([np.clip(world.energy[rows] / cfg.energy_max, 0.0, 1.0),
+    return np.stack([np.clip(world.energy[rows] / cfg.energy_max, 0.0, 1.0), world.taste[rows], world.pain[rows],
                      pos(fwd), pos(-fwd), pos(lat), pos(-lat), pos(rot), pos(-rot)], axis=1)

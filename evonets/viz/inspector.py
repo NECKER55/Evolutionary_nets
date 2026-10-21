@@ -184,6 +184,8 @@ class NetView:
         sm = a.summary()
         head = (f"rete {KIND_NAMES[a.kind]}: {sm['neurons']} interni ({sm['useful_neurons']} utili), "
                 f"{sm['links']} coll. ({sm['useful_links']} utili)")
+        if "markers" in sm:
+            head += f"; {sm['markers']} marcatori, {sm['types']} tipi"
         s.blit(font.render(head, True, TEXT), (G.x + 8, G.y + 4))
         sub = (f"recettori {sm['receptors']} ({sm['senses_used']} usati), anelli {sm['loops']}, "
                f"cablaggio {sm['wire_length']:.0f}, costo {sm['upkeep']:.2f} en./s")
@@ -251,14 +253,17 @@ class NetView:
             last = label_y[v] = max(self.pos[v][1] - 7, last + 14)
         for v, p in self.pos.items():
             dead = not a.useful[v]
+            ident = tuple(int(c) for c in a.color[v]) if a.markers else None
             if v < a.n_in:
                 rim = PHENOMENON_COLOR[a.phenomenon[v]] if a.specialized[v] else GENERALIST
-                pygame.draw.circle(s, IDLE, p, 5)
+                pygame.draw.circle(s, ident or IDLE, p, 5)
                 pygame.draw.circle(s, DEAD if dead else rim, p, 5, 1)
                 img = font.render(a.labels[v], True, DEAD if dead else DIM)
                 s.blit(img, (p[0] - img.get_width() - 9, label_y[v]))
             elif a.is_motor(v):
                 pygame.draw.circle(s, MOCK, p, 11)
+                if ident:
+                    pygame.draw.circle(s, ident, p, 6)
                 s.blit(font.render(a.labels[v], True, TEXT), (p[0] + 15, p[1] - 7))
             else:
                 rim = TEXT
@@ -266,7 +271,8 @@ class NetView:
                     rim = INHIBIT if a.inhibitory[v - a.n_in] else EXCITE
                 if a.is_modulator(v):
                     rim = MODULATOR
-                pygame.draw.circle(s, (34, 38, 50), p, 10)
+                fill = (34, 38, 50) if ident is None else tuple(int(0.55 * c) for c in ident)
+                pygame.draw.circle(s, fill, p, 10)
                 pygame.draw.circle(s, DEAD if dead else rim, p, 10, 2)
                 img = font.render(str(v - a.n_in), True, DEAD if dead else TEXT)
                 s.blit(img, img.get_rect(center=p))
@@ -279,6 +285,8 @@ class NetView:
         if a.inhibitory is not None:
             legend[2:2] = [("bordo = tipo", TEXT)]
         legend.insert(2, ("viola = modulatore", MODULATOR))
+        if a.markers:
+            legend.insert(2, ("colore interno = identità (marcatori)", DIM))
         x = G.x + 8
         for text, color in legend:
             img = font.render(text, True, color)
@@ -598,3 +606,35 @@ class Inspector:
         else:
             text = "colore: segno e forza | grigio: latente | scuro: spento"
         s.blit(app.small.render(text, True, TEXT if cell else DIM), (x0, r.bottom + 8))
+        if a.markers:
+            self._draw_affinity(s, x0, r.bottom + 30)
+
+    def _draw_affinity(self, s, x0: int, y: int) -> None:
+        """La tabella di affinità (sviluppo): quanto ogni marcatore sull'assone
+        (righe) si lega a ogni marcatore sul bersaglio (colonne), con il colore
+        di ciascun marcatore ai bordi e i suoi gradienti."""
+        a, app = self.explorer.net.anat, self.app
+        g = a.genome
+        on = np.flatnonzero(g.m_active[0])
+        if not len(on):
+            return
+        s.blit(app.small.render("affinità: assone (righe) -> bersaglio (colonne)", True, TEXT), (x0, y))
+        cell = max(10, min(22, 160 // len(on)))
+        top, left = y + 36, x0 + 34
+        table = g.m_table[0][np.ix_(on, on)]
+        for r_, k in enumerate(on):
+            color = tuple(int(c) for c in a.marker_color[k])
+            pygame.draw.rect(s, color, (x0 + 20, top + r_ * cell + 2, 8, cell - 4))
+            pygame.draw.rect(s, color, (left + r_ * cell + 2, top - 10, cell - 4, 6))
+            s.blit(app.small.render(f"m{int(k)}", True, DIM), (x0, top + r_ * cell + cell // 2 - 7))
+            for c_ in range(len(on)):
+                v = float(table[r_, c_])
+                base = np.array(EXCITE if v > 0 else INHIBIT, dtype=float)
+                f = min(1.0, abs(v) / 3.0)
+                shade = tuple(int(x) for x in np.array(IDLE) + (base - np.array(IDLE)) * f)
+                pygame.draw.rect(s, shade, (left + c_ * cell, top + r_ * cell, cell - 1, cell - 1))
+        gx = left + len(on) * cell + 12
+        s.blit(app.small.render("gradienti (x, y)", True, DIM), (gx, top - 14))
+        for r_, k in enumerate(on):
+            gxv, gyv = g.m_grad[0, k]
+            s.blit(app.small.render(f"m{int(k)} {gxv:+.1f} {gyv:+.1f}", True, DIM), (gx, top + r_ * cell))

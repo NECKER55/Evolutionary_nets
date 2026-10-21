@@ -6,6 +6,40 @@ Come funzionano il mondo, gli agenti, la riproduzione e le mutazioni. L'interfac
 Tutti i numeri qui sotto sono i valori di default. Tra parentesi c'è il nome
 della costante in `evonets/config.py` che li controlla.
 
+## 0. Due tipi di simulazione
+
+Si sceglie con `sim_mode` (riga "Simulazione" del menu, `--mode` nel terminale);
+è parte dello stato della corsa e si conserva riprendendola.
+
+- **evoluzione** (predefinita): evolvono sensi e cervello, come descritto in
+  tutto il resto di questo documento.
+- **cervello**: i **sensi sono fissi e decisi da noi**, uguali per tutti
+  (`net/senses.py`, set `sensor_set`): non mutano, non si duplicano, non si
+  rompono, e il nervo entra nel cervello sempre nello stesso punto. **Evolve
+  solo il cervello**, con tutte le altre regole (neuroni, collegamenti, pesi,
+  plasticità, duplicazioni, incrocio, sesso, fecondità, riserve). Lo scopo è
+  adattare un cervello ai sensi dati per sopravvivere nel mondo scelto. Il
+  cervello parte primordiale; i sensi costano energia come sempre (circa 0,64
+  energia/s in tutto).
+
+Il set "naturale" (12 sensi, ognuno specializzato su un solo fenomeno; le
+corse "solo cervello" salvate prima del 2026-10-21 restano con i loro 10):
+
+| Senso | Sente | Sensibilità | Dove sta / dove guarda | Apertura | Adattamento (τ, sottr., div.) |
+|---|---|---|---|---|---|
+| naso sinistro / destro | odore del cibo (0,6; larghezza 0,1) | 15 | muso, ±30° | — | 0,3 s; 0,8; 0,75 (come il naso evoluto) |
+| occhio rosso sinistro / destro | colore del cibo (0,85) | 10 | ±15°, guarda a ±25° | 60° | 1 s; 0,2; 0,5 |
+| occhio blu sinistro / destro | colore dei predatori (0,05) | 6 | fianchi, ±90° | 120° | 1 s; 0,2; 0,5 |
+| vibrazioni | vibrazioni dei predatori (0,4) | 6 | centro | 360° | 1 s; 0,5; 0 |
+| contatto | pressione delle pareti | 2 | muso | 180° | nessuno |
+| energia | energia del corpo (rispetto alle riserve massime) | 4 | interno | — | nessuno |
+| velocità | velocità in avanti | 2 | interno | — | nessuno |
+| gusto | il cibo appena mangiato | 4 | interno | — | nessuno |
+| dolore | veleno e morsi | 4 | interno | — | nessuno |
+
+Nella simulazione "solo cervello" anche il **sistema di valore** è dato
+(forza di partenza, mai mutata): vedi "Imparare durante la vita".
+
 ## 1. Il tempo
 
 - La simulazione avanza a passi di 1/60 di secondo (`dt`).
@@ -188,7 +222,7 @@ asse della "qualità" da 0 a 1:
 | meccanica | pressione da contatto, vibrazioni a distanza | frequenza | la pressione di una parete toccata (frequenza 0); nessuna sorgente di vibrazioni |
 | temperatura | campo nel punto del corpo | la temperatura | uniforme (0,5), nessuna sorgente di calore |
 | magnetismo | campo uniforme, come quello di un pianeta | — | nessun campo |
-| interno | grandezze del corpo | quale grandezza | energia, velocità avanti e indietro, derapata e rotazione a destra e a sinistra |
+| interno | grandezze del corpo | quale grandezza | energia, gusto, dolore, velocità avanti e indietro, derapata e rotazione a destra e a sinistra |
 
 Cosa emette ogni oggetto è una costante della configurazione: dare un suono al
 bersaglio (`target_vibration`), un odore al veleno (`hazard_smell`) o un campo
@@ -336,11 +370,89 @@ pezzo di corteccia:
 - Gli anelli trattengono informazione da un passo all'altro: sono la **memoria**
   dell'agente. Non esiste altra memoria.
 - Alla nascita tutti i neuroni partono da zero.
-- **I pesi possono cambiare durante la vita**, se l'individuo ha dei neuroni
-  modulatori: vedi "Imparare durante la vita" qui sotto. Ciò che si impara non
-  si eredita.
+- **I pesi cambiano durante la vita** (hebbiano di base, omeostasi e, se ci
+  sono neuroni modulatori, plasticità modulata): vedi "Imparare durante la
+  vita" qui sotto. Ciò che si impara non si eredita.
 
 **Imparare durante la vita** (dettagli in [SPEC_FASE_E.md](SPEC_FASE_E.md)).
+
+- **La plasticità cambia la forza, mai il tipo**: ogni sinapsi nasce
+  eccitatoria o inibitoria (per la legge di Dale nei neuroni a impulsi, dal
+  segno del gene per i sensi e nelle reti continue) e lo resta tutta la vita;
+  la sua forza |w| va da 0 a `synapse_max`. Le attività contano come
+  frequenze (|attività|).
+- **Hebbiano di base, sempre attivo** (η_h gene del neurone che riceve,
+  velocità di partenza 1e-4, `hebb_initial_rate`: neutrale; l'evoluzione può
+  alzarla o spegnerla). Non serve un modulatore. Scrive una **traccia
+  provvisoria** (come l'early-LTP), che svanisce da sola con il tempo τ del
+  neurone (gene "persist", partenza 30 s, `early_initial_tau`; in natura 1–3
+  ore). Diventa stabile solo se, mentre c'è, arriva un modulatore
+  (*tagging and capture*, Frey e Morris 1997): una quota
+  1 − exp(−`capture_rate` · |M| · dt) a passo, con M buono o cattivo (si
+  ricorda sia ciò che premia sia ciò che spaventa). Così l'attività di tutti i
+  giorni non sovrascrive i circuiti: resta solo ciò che accade insieme a un
+  segnale importante.
+  - Sinapsi eccitatorie, regola BCM: Δ|w| = η_h · pre · post · (post − θ),
+    con la soglia mobile θ = ā² / a*. Sopra la soglia la sinapsi si rafforza,
+    sotto si indebolisce; se il neurone è troppo attivo la soglia sale. A
+    regime l'attività del neurone va verso a*.
+  - Sinapsi inibitorie, regola di Vogels: Δ|w| = η_h · pre · (post − a*).
+    L'inibizione cresce dove il neurone è più attivo del desiderato e cala
+    dove lo è meno: tiene in equilibrio eccitazione e inibizione.
+- **Frequenze**: le regole di Hebb e l'omeostasi lavorano sulle frequenze,
+  sempre ≥ 0. Nella rete a impulsi l'attività è già una frequenza; nella rete
+  continua x = tanh(...) è lo scarto dalla frequenza spontanea, e la frequenza
+  è (1 + x)/2 (x = 0: il neurone spara al suo ritmo di riposo).
+- **Scaling omeostatico, sempre attivo**: ogni neurone interno e ogni motore
+  tiene la media ā della propria frequenza su un tempo lungo (120 s,
+  `homeo_tau`: molto più di qualsiasi comportamento, come in natura dove
+  sono ore) e moltiplica le sinapsi eccitatorie che riceve per
+  exp(h · dt · (a* − ā)) e quelle inibitorie per l'inverso (come ha misurato
+  Turrigiano). Geni del neurone: l'attività desiderata a* = sigmoide(gene) e
+  la forza h = `homeo_initial_rate` · e^gene (partenza 1e-4 per secondo:
+  neutrale). Chi è troppo attivo si indebolisce gli ingressi, chi è troppo
+  zitto se li rafforza. Si nasce in equilibrio (ā = a*).
+- **Omeostasi dell'eccitabilità** (Desai 1999), un meccanismo distinto con
+  un gene proprio ("intrinsic", stessa partenza): la corrente di fondo si
+  sposta di h_i · dt · (a* − ā), cioè cresce se il neurone è troppo zitto.
+- **Sistema di valore innato**: come in tutti gli animali, si nasce già
+  sapendo cosa è buono e cosa fa male. Due nuclei, come l'area tegmentale
+  ventrale (dopamina) e il locus coeruleus (noradrenalina), ricevono il
+  **gusto** (un impulso a ogni cibo mangiato, che svanisce in 0,5 s,
+  `taste_tau`) e il **dolore** (veleno e morsi) e proiettano su tutto il
+  cervello: a M di ogni neurone si aggiunge forza_gusto · gusto −
+  forza_dolore · dolore. Così ciò che il cervello ha appena fatto (la
+  traccia provvisoria) diventa stabile quando si mangia o ci si fa male, e
+  la plasticità modulata prende il verso giusto. Le due forze sono geni
+  dell'individuo (`Genome.value`, partenza `value_initial` = 1, in scala
+  logaritmica): passano interi da un genitore e mutano come gli altri geni,
+  quindi l'evoluzione può rafforzarli o spegnerli; nella simulazione "solo
+  cervello" sono fissi. Gusto e dolore sono anche grandezze del corpo
+  (fenomeno "interno"): la rete può evolvere recettori che li sentono. Le
+  popolazioni salvate prima (formato < 16) si aprono con i nuclei spenti.
+- **Periodo critico**: come in natura, l'hebbiano è fortissimo nello
+  sviluppo e si chiude con l'età. Per ogni neurone
+  η_h(età) = η_h · (1 + (B − 1) · e^(−età/τ_c)), dove η_h è la velocità
+  dell'adulto, B quante volte è più forte all'inizio (partenza 100,
+  `critical_initial_boost`) e τ_c in quanti secondi si chiude (partenza 2 s,
+  `critical_initial_tau`): B e τ_c sono geni del neurone ("boost",
+  "closure"), così neuroni diversi possono avere finestre diverse, come le
+  aree della corteccia. L'età si conta in secondi dall'inizio del grembo
+  (senza grembo, dalla nascita); un sopravvissuto ha già vissuto una vita
+  intera per ogni generazione superata, quindi non torna bambino in
+  un'arena nuova. Con i valori di partenza il periodo critico cade per lo
+  più nel grembo: lì il cablaggio si rifinisce (circa il 10% dei pesi),
+  alla nascita l'hebbiano è circa 9 volte quello dell'adulto e dopo 15 s è
+  quello dell'adulto. La plasticità modulata (la dopamina) resta aperta per
+  tutta la vita. Le popolazioni salvate prima (formato < 15) si aprono con
+  il periodo critico spento (B = 1): sono evolute senza.
+- **Saturazione graduale** (van Rossum 2000): ogni rafforzamento è
+  moltiplicato per 1 − |w| / `synapse_max`: una sinapsi grande cresce sempre
+  meno, invece di sbattere contro un tetto.
+- Come le altre plasticità, ciò che cambia durante la vita non si eredita.
+- **Salvataggi di prima del formato 10** (senza a*): aprendoli, una vita di
+  prova di 10 s misura la frequenza media di ogni neurone, che diventa il suo
+  a* (la popolazione era in equilibrio); costa circa mezzo minuto, una volta.
 
 - Ogni neurone ha, tra i suoi geni, una **regola di plasticità** per le
   sinapsi che riceve: Δw = η · M · (A·pre·post + B·pre + C·post + D). η, A, B,
@@ -454,6 +566,58 @@ sensoriale e la sua rete:
 sta, i geni propri e tutti i collegamenti *in ingresso*), uno per recettore,
 uno per il meccanismo di mutazione. Nell'incrocio ogni blocco arriva intero da
 un genitore.
+
+### Genoma diretto o sviluppo (`genome`)
+
+Con il genoma **diretto** (predefinito, e quello di tutte le corse di prima)
+il genoma scrive ogni collegamento e ogni peso, come descritto sopra. Con lo
+**sviluppo** (`genome = "sviluppo"`, riga "Genoma" del menu; dettagli in
+[SPEC_SVILUPPO.md](SPEC_SVILUPPO.md)) scrive invece le regole per costruire il
+cervello, come in natura (chemoaffinità di Sperry):
+
+- **Marcatori**: molecole di superficie. Ogni recettore, neurone interno e
+  motore esprime ciascun marcatore in una quantità tra 0 e 1, che dipende da
+  un gene della cellula e, per i marcatori a **gradiente**, dalla sua
+  posizione nel cervello (come Eph ed efrine, che costruiscono le mappe
+  topografiche: due geni per marcatore, lungo x e lungo y). Si parte con 2
+  marcatori; i posti crescono come quelli dei neuroni.
+- **Tabella di affinità** (gene dell'individuo): quanto un marcatore
+  sull'assone si lega a un marcatore sul bersaglio, con il segno.
+- **Alla nascita**: affinità(s → t) = Σ espressione_s[a] · tabella[a, b] ·
+  espressione_t[b]; il collegamento nasce con probabilità
+  p_geometria(d) · (1 − e^(−|affinità|)) (senza affinità non nasce nulla); il
+  peso è affinità · e^guadagno, con il **guadagno** gene del neurone che
+  riceve (quanti recettori postsinaptici ha), al più ±`synapse_max`. Nelle
+  reti a impulsi il segno viene dal tipo di chi trasmette.
+- Lo sviluppo è in parte **casuale**: fratelli con lo stesso genoma hanno
+  cervelli simili ma non uguali. Il cervello sviluppato appartiene
+  all'individuo: un genitore che sopravvive tiene il suo, ogni figlio sviluppa
+  il proprio.
+- **Mutazioni**: i pesi e i collegamenti non sono geni e non mutano; mutano le
+  espressioni, i gradienti, la tabella e il guadagno (come gli altri geni). Un
+  marcatore si **duplica** (la copia è espressa uguale ovunque e riga e
+  colonna della tabella si dividono a metà: nessun cambiamento finché non
+  diverge), si rompe (più facilmente se lega molti marcatori) o si ripara;
+  tra copie della stessa famiglia vale lo scambio ineguale. Un neurone
+  duplicato porta con sé i suoi marcatori: i suoi collegamenti nascono dallo
+  sviluppo.
+- **Incrocio**: ogni marcatore (esistenza, gradiente, riga della tabella)
+  passa intero da un genitore, abbinato per identità; quello di un solo
+  genitore passa con probabilità 1/2. Una cellula esprime ogni marcatore come
+  nel genitore da cui viene (o, se lui non lo ha, come nell'altro).
+- **Solo cervello**: anche i marcatori dei sensi sono fissi, uguali per tutti,
+  senza gradiente, mai mutati.
+- **Il grembo** (net/womb.py): ogni neonato, prima di entrare nell'arena,
+  vive `prenatal_time` (5 s) di **attività spontanea**. I sensi ricevono onde
+  che scorrono lungo l'ordine dei nervi, come le onde della retina: sensi
+  vicini sono attivi insieme, lontani no (più un rumore di fondo). La rete
+  gira e agiscono Hebb, l'omeostasi delle sinapsi e della soglia; la
+  plasticità modulata no (nel grembo non c'è ricompensa); il corpo non si
+  muove. ā parte vuota e si costruisce con l'attività vera. Alla nascita il
+  cervello rifinito, ā e la corrente di fondo diventano il **fenotipo**
+  dell'individuo (`born_avg`, `born_bias`): ogni vita, in ogni arena, parte da
+  lì. I sopravvissuti non rinascono. Con il genoma diretto non c'è grembo
+  (non c'è un cervello sviluppato da rifinire): si nasce con ā = a*.
 
 ## 12. La generazione
 

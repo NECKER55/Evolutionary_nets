@@ -1,9 +1,9 @@
 import numpy as np
+from nets import rich
 
 from evonets import Config
 from evonets.evo import Evolution, crossover, reproduce
 from evonets.net import Brains, NeuralController, SpikingBrains
-from nets import rich
 
 N_IN = 10
 
@@ -15,7 +15,7 @@ def brains(n=60, seed=0, **kw):
 def single(weights_in=0.0, bias=0.0, leak=0.0, substeps=1, gain=1.0):
     """Un individuo con un solo neurone interno (il n. 0) collegato all'ingresso 0."""
     cfg = Config(net_hidden_slots=2, receptor_slots=1, receptor_initial=1, spike_substeps=substeps,
-                 spike_gain=gain)
+                 spike_gain=gain, plasticity=False)  # qui si prova il neurone, non come impara
     b = SpikingBrains(cfg, 1, 4, 0)
     b.weights[:] = 0.0
     b.traits[:] = 0.0  # tipo 0 = eccitatorio
@@ -120,7 +120,7 @@ def test_reset_restores_behaviour_and_population_is_reproducible():
 def test_leak_gene_is_inherited_and_mutated_with_the_rest_of_the_neuron():
     b = brains(20)
     cfg, g = b.cfg, b.genome
-    assert g.traits.shape[2] == SpikingBrains.N_TRAITS == 9
+    assert g.traits.shape[2] == SpikingBrains.N_TRAITS == 17
     kids = reproduce(g.take([0]), 30, cfg, np.random.default_rng(0))
     assert (kids.traits[:, :, 1] != g.traits[0, :, 1]).any()
     b.set_genome(kids)
