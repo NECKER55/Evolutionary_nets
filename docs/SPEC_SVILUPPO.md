@@ -367,6 +367,21 @@ nascita (rumore nei sensi, scelta: indipendente o a onde correlate tra sensi
 vicini), con Hebb, omeostasi e soglia; la traccia si consolida da sola (lo
 sviluppo fissa ciò che si forma); ā nasce dall'attività vera. Sulla GPU.
 
+*Fase 2 fatta il 2026-10-21* (net/womb.py e gpu/womb.py, formato 14, 202
+test). Onde che scorrono lungo `r_y` (velocità 0,5 lati/s, larghezza 0,1, una
+ogni 1,5 s in media, da un capo o dall'altro) più rumore 0,05; 5 s; Hebb,
+omeostasi e soglia accese, plasticità modulata spenta (niente ricompensa:
+M = 0, non M = 1 come nella prima bozza della sezione 3); ā come media di
+tutto il grembo (tempo min(homeo_tau, tempo trascorso)); alla nascita pesi,
+ā e corrente di fondo diventano fenotipo (`born_avg`, `born_bias`), la
+traccia provvisoria è già nei pesi. Solo con lo sviluppo. Sulla GPU con
+`lax.scan` su tutta la popolazione (i non nati fermi): stessi risultati di
+NumPy, nessun costo visibile (1,06 s/gen contro 1,09 del diretto). Con le
+velocità di partenza di oggi (Hebb 1e-4) il grembo cambia i pesi dello 0,6%:
+risolve il punto 8 (ā vera alla nascita: 0,40 contro a* 0,50 nella rete a
+impulsi), ma la rifinitura del cablaggio diventa forte solo con la Fase 3,
+dove la plasticità hebbiana è massima prima della nascita.
+
 **Fase 3 — periodi critici (4).** η_h(età) = η_h · (r + (1 − r) · e^(−età/τ_c)),
 con τ_c e r geni del neurone; la plasticità modulata resta aperta.
 

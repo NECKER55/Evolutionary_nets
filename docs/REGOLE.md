@@ -570,6 +570,17 @@ cervello, come in natura (chemoaffinità di Sperry):
   nel genitore da cui viene (o, se lui non lo ha, come nell'altro).
 - **Solo cervello**: anche i marcatori dei sensi sono fissi, uguali per tutti,
   senza gradiente, mai mutati.
+- **Il grembo** (net/womb.py): ogni neonato, prima di entrare nell'arena,
+  vive `prenatal_time` (5 s) di **attività spontanea**. I sensi ricevono onde
+  che scorrono lungo l'ordine dei nervi, come le onde della retina: sensi
+  vicini sono attivi insieme, lontani no (più un rumore di fondo). La rete
+  gira e agiscono Hebb, l'omeostasi delle sinapsi e della soglia; la
+  plasticità modulata no (nel grembo non c'è ricompensa); il corpo non si
+  muove. ā parte vuota e si costruisce con l'attività vera. Alla nascita il
+  cervello rifinito, ā e la corrente di fondo diventano il **fenotipo**
+  dell'individuo (`born_avg`, `born_bias`): ogni vita, in ogni arena, parte da
+  lì. I sopravvissuti non rinascono. Con il genoma diretto non c'è grembo
+  (non c'è un cervello sviluppato da rifinire): si nasce con ā = a*.
 
 ## 12. La generazione
 
