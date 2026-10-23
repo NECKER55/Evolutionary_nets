@@ -25,7 +25,7 @@ Si sceglie la corsa e la si lancia con Invio (o il pulsante).
 | Generazioni | dopo quante fermarsi e salvare; 0 = senza limite |
 | Esame ogni | ogni quante generazioni fare l'esame fisso ai 20 più anziani ([REGOLE.md](REGOLE.md), punto 20); 0 = mai. Default 50 |
 | Selezione finale | finite le generazioni, quante prove fanno ancora i sopravvissuti, senza figli ([REGOLE.md](REGOLE.md), punto 19); 0 = niente. Si attiva solo con Generazioni > 0 |
-| Riprendi da | un salvataggio in `runs/` da cui continuare; rete, individui e tutte le costanti vengono da lì |
+| Riprendi da | un salvataggio in `runs/` da cui continuare; rete, individui e tutte le costanti vengono da lì. Invio o clic aprono l'elenco: i salvataggi sono raggruppati per giorno (Oggi, Ieri, poi le date), dal più recente, ognuno con l'ora e un riepilogo (generazione, individui, genoma, rete, sensi, mondo e posizione della scala, ultimo esame). Scrivendo si filtra su nome e riepilogo (per esempio "sviluppo impulsi"); Su/Giù, Pag e rotella scorrono, Invio o clic sceglie, Esc chiude senza cambiare |
 | Salva in | dove salvare; per una corsa nuova propone un nome con data e ora, così non sovrascrive nulla |
 
 Con un salvataggio scelto, "Esplora reti e genomi" lo apre nell'esploratore

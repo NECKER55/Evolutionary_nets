@@ -4,7 +4,9 @@ esplorarne le reti. `Screen` è la base di tutte le schermate."""
 
 import json
 import secrets
-from datetime import datetime
+import zipfile
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -13,10 +15,13 @@ import pygame
 from ..config import Config
 from ..evo import Evolution
 from ..net.anatomy import KIND_NAMES
-from .render import BG, DIM, PLAYER, TARGET, TEXT
-from .widgets import ROW_H, Button, Choice, Number, Text
+from .render import BG, BORDER, DIM, IDLE, PLAYER, TARGET, TEXT
+from .widgets import ROW_H, Button, Choice, Number, Picker, Text
 
 RUNS = Path("runs")
+DAYS = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
+MONTHS = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre",
+          "ottobre", "novembre", "dicembre")
 
 
 class Screen:
@@ -61,6 +66,209 @@ def save_info(path) -> str:
         return f"illeggibile: {err}"
 
 
+# --- L'elenco dei salvataggi ------------------------------------------------
+
+
+@dataclass
+class SaveSummary:
+    """Ciò che serve per riconoscere un salvataggio in un elenco."""
+    path: str
+    when: datetime  # ultima modifica del file
+    name: str
+    facts: str  # generazione, tipo di corsa, esame, a parole brevi
+    error: bool = False
+
+    def text(self) -> str:
+        """Tutto ciò su cui si può cercare."""
+        return f"{self.name} {self.facts}".lower()
+
+
+_SUMMARIES: dict[tuple[str, float], SaveSummary] = {}
+
+
+def _rows(path) -> int | None:
+    """Quanti individui, dalla forma dei pesi, senza decomprimerli."""
+    with zipfile.ZipFile(path) as z, z.open("weights.npy") as f:
+        fmt = np.lib.format
+        header = fmt.read_array_header_1_0 if fmt.read_magic(f) == (1, 0) else fmt.read_array_header_2_0
+        shape = header(f)[0]
+    return int(shape[0])
+
+
+def summarize(path) -> SaveSummary:
+    """Il riepilogo di un salvataggio, letto solo dalle parti piccole del file
+    e ricordato finché il file non cambia."""
+    path = Path(path)
+    when = datetime.fromtimestamp(path.stat().st_mtime)
+    key = (str(path), when.timestamp())
+    if key not in _SUMMARIES:
+        try:
+            with np.load(path) as d:
+                saved = json.loads(str(d["config"])) if "config" in d else {}
+                net = str(d["net_type"]) if "net_type" in d else saved.get("net_type", "rate")
+                facts = [f"gen. {int(d['generation'])}", f"{_rows(path)} ind."]
+                facts.append("genoma " + (saved.get("genome") or "diretto"))
+                facts.append({"rate": "rete continua", "spike-ei": "a impulsi"}.get(net, net))
+                facts.append("sensi fissi" if saved.get("sim_mode") == "cervello" else "sensi che evolvono")
+                if saved.get("task") == "cibo":
+                    where = " 0,00"
+                    if "log" in d:
+                        steps = [e for e in json.loads(str(d["log"])) if e.get("event") == "scala"]
+                        if steps:
+                            where = f" {steps[-1]['position']:.2f}".replace(".", ",")
+                    facts.append({"scala": f"cibo, scala{where}", "basico": "cibo, controllo basico",
+                                  "complesso": "cibo, controllo complesso"}.get(saved.get("ladder"), "cibo"))
+                else:
+                    facts.append("bersaglio")
+                exams = json.loads(str(d["exams"])) if "exams" in d else []
+                if exams:
+                    facts.append(f"esame {exams[-1]['score']:.0%}")
+            _SUMMARIES[key] = SaveSummary(str(path), when, path.name, " · ".join(facts))
+        except Exception as err:  # file illeggibile o di un altro formato
+            _SUMMARIES[key] = SaveSummary(str(path), when, path.name, f"illeggibile: {err}", error=True)
+    return _SUMMARIES[key]
+
+
+def day_label(day: date, today: date) -> str:
+    """"Oggi, 23 ottobre", "Ieri, 22 ottobre", "martedì 20 ottobre" (con
+    l'anno se non è quello di oggi)."""
+    text = f"{day.day} {MONTHS[day.month - 1]}" + (f" {day.year}" if day.year != today.year else "")
+    if day == today:
+        return f"Oggi, {text}"
+    if day == today - timedelta(days=1):
+        return f"Ieri, {text}"
+    return f"{DAYS[day.weekday()]} {text}"
+
+
+def grouped(summaries, today: date, query: str = "") -> list[tuple[str, list[SaveSummary]]]:
+    """I salvataggi che contengono tutte le parole di `query`, raggruppati per
+    giorno: dal più recente, e nel giorno dal più recente."""
+    words = query.lower().split()
+    days: dict[date, list[SaveSummary]] = {}
+    for x in sorted(summaries, key=lambda x: x.when, reverse=True):
+        if all(w in x.text() for w in words):
+            days.setdefault(x.when.date(), []).append(x)
+    return [(day_label(day, today), items) for day, items in days.items()]
+
+
+class SavePicker:
+    """L'elenco dei salvataggi sopra il menu: raggruppati per giorno, con un
+    riepilogo per ciascuno; si scorre con frecce o rotella, si filtra
+    scrivendo, Invio o clic sceglie, Esc chiude senza cambiare."""
+
+    ITEM_H, HEAD_H = 40, 28
+
+    def __init__(self, files, current):
+        self.summaries = [summarize(p) for p in files]
+        self.query = ""
+        self.scroll = 0
+        self.rows: list[tuple[str, object]] = []  # ("nessuno"/"giorno"/"file", dato), per disegnare
+        self.rects: list[tuple[pygame.Rect, str | None]] = []
+        self._build()
+        paths = [v for kind, v in self.rows if kind != "giorno"]
+        self.pick = paths.index(current) if current in paths else 0
+
+    def _build(self) -> None:
+        self.rows = [("nessuno", None)] if not self.query else []
+        for label, items in grouped(self.summaries, date.today(), self.query):
+            self.rows.append(("giorno", label))
+            self.rows += [("file", x) for x in items]
+        self.choices = [None if kind == "nessuno" else v.path for kind, v in self.rows if kind != "giorno"]
+        self.pick = min(getattr(self, "pick", 0), max(len(self.choices) - 1, 0))
+
+    def handle(self, ev):
+        """None finché si sceglie; ("scelto", percorso o None) o ("annullato",)."""
+        if ev.type == pygame.KEYDOWN:
+            if ev.key == pygame.K_ESCAPE:
+                return ("annullato",)
+            if ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                return ("scelto", self.choices[self.pick]) if self.choices else None
+            step = {pygame.K_DOWN: 1, pygame.K_UP: -1, pygame.K_PAGEDOWN: 8, pygame.K_PAGEUP: -8}.get(ev.key)
+            if step:
+                self.pick = int(np.clip(self.pick + step, 0, max(len(self.choices) - 1, 0)))
+            elif ev.key == pygame.K_HOME:
+                self.pick = 0
+            elif ev.key == pygame.K_END:
+                self.pick = max(len(self.choices) - 1, 0)
+            elif ev.key == pygame.K_BACKSPACE:
+                self.query = self.query[:-1]
+                self._build()
+            elif ev.unicode and ev.unicode.isprintable():
+                self.query += ev.unicode
+                self.pick = 0
+                self._build()
+        elif ev.type == pygame.MOUSEWHEEL:
+            self.scroll = max(0, self.scroll - ev.y * self.ITEM_H)
+        elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+            for rect, path in self.rects:
+                if rect.collidepoint(ev.pos):
+                    return ("scelto", path)
+        return None
+
+    def _keep_visible(self, top: int, height: int) -> None:
+        """Scorre l'elenco perché la riga scelta resti a vista."""
+        y, k = 0, 0
+        for kind, _ in self.rows:
+            h = self.HEAD_H if kind == "giorno" else self.ITEM_H
+            if kind != "giorno":
+                if k == self.pick:
+                    self.scroll = min(max(self.scroll, y + h - height), y)
+                    if k == 0:
+                        self.scroll = 0  # in cima: si vede anche il primo giorno
+                    return
+                k += 1
+            y += h
+
+    def draw(self, s, app, moved: bool) -> None:
+        w, h = s.get_size()
+        shade = pygame.Surface((w, h), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, 170))  # il menu resta dietro, in ombra
+        s.blit(shade, (0, 0))
+        box = pygame.Rect(60, 30, min(w - 120, 1100), h - 60)
+        pygame.draw.rect(s, (20, 22, 30), box)
+        pygame.draw.rect(s, BORDER, box, 1)
+        s.blit(app.big.render("Scegli un salvataggio", True, PLAYER), (box.x + 20, box.y + 14))
+        query = self.query + ("_" if pygame.time.get_ticks() // 500 % 2 else " ")
+        hint = f"filtro: {query}" if self.query else "scrivi per filtrare (nome, genoma, rete, sensi...)"
+        s.blit(app.font.render(hint, True, TEXT if self.query else DIM), (box.x + 20, box.y + 50))
+        s.blit(app.small.render(f"{len(self.summaries)} salvataggi in runs/   ·   Su/Giù, rotella   ·   Invio o clic "
+                                f"sceglie   ·   Esc annulla", True, DIM), (box.x + 20, box.y + 72))
+        top, bottom = box.y + 96, box.bottom - 10
+        if moved:
+            self._keep_visible(top, bottom - top)
+        clip = s.get_clip()
+        s.set_clip(pygame.Rect(box.x, top, box.w, bottom - top))
+        self.rects = []
+        y, k = top - self.scroll, 0
+        mouse = pygame.mouse.get_pos()
+        for kind, v in self.rows:
+            if kind == "giorno":
+                if top - self.HEAD_H < y < bottom:
+                    s.blit(app.font.render(v, True, TARGET), (box.x + 20, y + 6))
+                    pygame.draw.line(s, BORDER, (box.x + 20, y + self.HEAD_H - 3), (box.right - 20, y + self.HEAD_H - 3))
+                y += self.HEAD_H
+                continue
+            rect = pygame.Rect(box.x + 14, y, box.w - 28, self.ITEM_H - 4)
+            if top - self.ITEM_H < y < bottom:
+                chosen = k == self.pick
+                if chosen or rect.collidepoint(mouse):
+                    pygame.draw.rect(s, (70, 58, 24) if chosen else IDLE, rect, border_radius=4)
+                if kind == "nessuno":
+                    s.blit(app.font.render("Nessuno: reti nuove", True, TEXT), (rect.x + 10, y + 11))
+                else:
+                    s.blit(app.font.render(f"{v.when:%H:%M}   {v.name}", True, TEXT), (rect.x + 10, y + 3))
+                    facts = v.facts
+                    while len(facts) > 4 and app.small.size(facts)[0] > rect.w - 80:
+                        facts = facts[:-4] + "..."
+                    s.blit(app.small.render(facts, True, (255, 110, 90) if v.error else DIM), (rect.x + 70, y + 21))
+                self.rects.append((rect, v if kind == "nessuno" else v.path))
+            k += 1
+            y += self.ITEM_H
+        if not self.choices:
+            s.blit(app.font.render("nessun salvataggio corrisponde al filtro", True, DIM), (box.x + 20, top + 10))
+        s.set_clip(clip)
+
+
 class Launcher(Screen):
     """Il menu: si sceglie il tipo di corsa e la si lancia, oppure si apre un
     salvataggio per esplorarne le reti."""
@@ -68,7 +276,6 @@ class Launcher(Screen):
     def __init__(self, app, defaults: dict):
         self.app = app
         self.message, self.error = "", False
-        files = sorted(RUNS.glob("*.npz"), key=lambda p: p.stat().st_mtime, reverse=True)
         self.mode = Choice("Modalità", [("fast", "veloce: statistiche e reti, F per l'arena"),
                                          ("max", "massima velocità: solo statistiche"),
                                          ("live", "dal vivo: arena sempre a schermo")],
@@ -115,11 +322,13 @@ class Launcher(Screen):
                              help="Finite le generazioni, i sopravvissuti rifanno la prova questo numero di "
                                   "volte, senza figli: chi fallisce è eliminato. 0 = niente.")
         load = defaults.get("load")
-        options = [(None, "nessuno: reti nuove")] + [(str(p), p.name) for p in files]
-        if load and load not in [v for v, _ in options]:
-            options.insert(1, (load, Path(load).name))
-        self.load = Choice("Riprendi da", options, help="Un salvataggio in runs/ da cui continuare o da esplorare.",
-                           on_change=self._loaded)
+        self.extra = [load] if load and Path(load).exists() and Path(load).parent.resolve() != RUNS.resolve() else []
+        self.picker: SavePicker | None = None
+        self._moved = False
+        self.load = Picker("Riprendi da", self._open_picker,
+                           help="Invio o clic: l'elenco dei salvataggi in runs/, per giorno, da cui continuare "
+                                "o da esplorare.")
+        self._show_load(None)
         self.save = Text("Salva in", defaults.get("save") or self._fresh_name(),
                          help="Dove salvare: tasto S, fine delle generazioni, uscita dalla corsa.")
         self.fields = [self.mode, self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.chance, self.seed,
@@ -129,8 +338,29 @@ class Launcher(Screen):
         self.inspect_btn = Button("Esplora reti e genomi del salvataggio", self.explore)
         self.quit_btn = Button("Esci", self.quit)
         if load:
-            self.load.select(load)
-            self._loaded(load)
+            self._choose(load)
+
+    def _files(self) -> list[Path]:
+        return sorted(RUNS.glob("*.npz"), key=lambda p: p.stat().st_mtime, reverse=True) + \
+            [Path(p) for p in self.extra]
+
+    def _open_picker(self) -> None:
+        self.picker = SavePicker(self._files(), self.load.value)
+        self._moved = True
+
+    def _show_load(self, path) -> None:
+        """La riga "Riprendi da" con il nome e quando è stato salvato."""
+        self.load.value = path
+        if path is None:
+            self.load.shown = "nessuno: reti nuove"
+        else:
+            x = summarize(path)
+            when = day_label(x.when.date(), date.today()).split(",")[0]
+            self.load.shown = f"{x.name}   ({when.lower() if when in ('Oggi', 'Ieri') else when} {x.when:%H:%M})"
+
+    def _choose(self, path) -> None:
+        self._show_load(path)
+        self._loaded(path)
 
     @staticmethod
     def _fresh_name() -> str:
@@ -229,16 +459,19 @@ class Launcher(Screen):
     def returned(self, message: str) -> None:
         """Si torna al menu da una corsa: i salvataggi possono essere cambiati."""
         self.message, self.error = message, False
-        files = sorted(RUNS.glob("*.npz"), key=lambda p: p.stat().st_mtime, reverse=True)
         current = self.load.value
-        self.load.options = [(None, "nessuno: reti nuove")] + [(str(p), p.name) for p in files]
-        self.load.index = 0
-        if current in [v for v, _ in self.load.options]:
-            self.load.select(current)
-        self._loaded(self.load.value)
+        self._choose(current if current and Path(current).exists() else None)
         self.app.show(self)
 
     def handle(self, ev) -> None:
+        if self.picker is not None:
+            result = self.picker.handle(ev)
+            self._moved = ev.type == pygame.KEYDOWN
+            if result is not None:
+                if result[0] == "scelto":
+                    self._choose(result[1])
+                self.picker = None
+            return
         field = self.fields[self.focus]
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             for k, f in enumerate(self.fields):
@@ -249,7 +482,10 @@ class Launcher(Screen):
                 b.click(ev.pos)
         elif ev.type == pygame.KEYDOWN:
             if ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                self.start()
+                if field is self.load:
+                    self._open_picker()  # Invio su "Riprendi da" apre l'elenco
+                else:
+                    self.start()
             elif ev.key == pygame.K_ESCAPE:
                 self.quit()
             elif ev.key in (pygame.K_DOWN, pygame.K_TAB):
@@ -296,6 +532,7 @@ class Launcher(Screen):
             ("Sinistra/Destra o clic   cambia il valore", DIM),
             ("numeri e percorso si scrivono da tastiera", DIM),
             ("Invio   avvia      Esc   esci", DIM),
+            ("Invio su Riprendi da   elenco dei salvataggi", DIM),
             ("", TEXT),
             ("Durante la corsa", TEXT),
             ("", TEXT),
@@ -317,3 +554,6 @@ class Launcher(Screen):
         ]
         for k, (text, color) in enumerate(lines):
             s.blit(app.font.render(text, True, color), (help_x, 110 + 20 * k))
+        if self.picker is not None:
+            self.picker.draw(s, app, self._moved)
+            self._moved = False

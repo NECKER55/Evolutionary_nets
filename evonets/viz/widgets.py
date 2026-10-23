@@ -116,6 +116,27 @@ class Text(Field):
             self.edited = True
 
 
+class Picker(Field):
+    """Una scelta fatta in un elenco a parte: la riga mostra la scelta attuale,
+    e Invio, le frecce o un clic aprono l'elenco (`on_open`)."""
+
+    def __init__(self, label, on_open, help: str = ""):
+        super().__init__(label, help)
+        self.on_open = on_open
+        self.value = None
+        self.shown = ""  # come si mostra la scelta attuale
+
+    def text(self) -> str:
+        return f"{self.shown}  [scegli...]"
+
+    def change(self, step: int) -> None:
+        if self.enabled:
+            self.on_open()
+
+    def click(self, pos) -> None:
+        self.change(1)
+
+
 class Button:
     def __init__(self, label: str, action, primary: bool = False):
         self.label, self.action, self.primary = label, action, primary
