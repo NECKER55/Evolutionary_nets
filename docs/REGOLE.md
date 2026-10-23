@@ -348,7 +348,11 @@ pezzo di corteccia:
 - i **recettori** entrano dal bordo sinistro, all'altezza data da un loro gene:
   alla nascita segue la direzione in cui guardano (una mappa topografica, come
   la retina), poi deriva con le mutazioni;
-- i **motori** stanno in posizioni fisse sul bordo destro;
+- i **motori** stanno in posizioni fisse sul bordo destro. Con i quattro motori
+  della rete a impulsi il cervello è **bilaterale** come il corpo: lo sterzo
+  verso sinistra nella metà sinistra (y = 0,125, dove entrano i nervi dei
+  recettori che guardano a sinistra), quello verso destra nella metà destra
+  (y = 0,875), avanti e indietro vicino alla linea mediana (0,45 e 0,55);
 - ogni **neurone interno** sta dove dice il suo gene di posizione. Alla nascita
   di una popolazione casuale le posizioni sono sparse a caso; poi si ereditano
   e si spostano di poco con le mutazioni.
@@ -606,6 +610,14 @@ cervello, come in natura (chemoaffinità di Sperry):
   posizione nel cervello (come Eph ed efrine, che costruiscono le mappe
   topografiche: due geni per marcatore, lungo x e lungo y). Si parte con 2
   marcatori; i posti crescono come quelli dei neuroni.
+- **Asse sinistra-destra del fondatore**: i 2 marcatori di partenza sono una
+  coppia di gradienti opposti lungo y (pendenza `marker_map_gradient` 12),
+  ciascuno legato a se stesso (`marker_map_affinity` 2), con un po' di
+  variazione tra individui (`marker_map_std` 0,3). Ogni cellula si collega
+  soprattutto alla sua stessa metà: il recettore che guarda a destra allo
+  sterzo verso destra, come la mappa del tetto ottico. Alla partenza il 42%
+  degli individui nasce con un riflesso "gira verso ciò che vedi", il 13% con
+  quello opposto, gli altri senza.
 - **Tabella di affinità** (gene dell'individuo): quanto un marcatore
   sull'assone si lega a un marcatore sul bersaglio, con il segno.
 - **Alla nascita**: affinità(s → t) = Σ espressione_s[a] · tabella[a, b] ·

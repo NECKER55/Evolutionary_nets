@@ -108,9 +108,33 @@ def initial_markers(cfg, n: int, n_rec: int, n_targets: int, rng: np.random.Gene
         r_mark = np.broadcast_to(senses, (n, n_rec, m)).copy()
     active = np.zeros((n, m), dtype=bool)
     active[:, :on] = True
-    return dict(r_mark=r_mark, n_mark=rng.normal(0.0, std, (n, n_targets, m)),
-                m_grad=rng.normal(0.0, cfg.marker_gradient_std, (n, m, 2)),
-                m_table=rng.normal(0.0, cfg.marker_table_std, (n, m, m)), m_active=active)
+    genes = dict(r_mark=r_mark, n_mark=rng.normal(0.0, std, (n, n_targets, m)),
+                 m_grad=rng.normal(0.0, cfg.marker_gradient_std, (n, m, 2)),
+                 m_table=rng.normal(0.0, cfg.marker_table_std, (n, m, m)), m_active=active)
+    if cfg.marker_map_gradient > 0.0 and on >= 2:
+        _bilateral_map(cfg, genes, rng)
+    return genes
+
+
+def _bilateral_map(cfg, genes: dict, rng: np.random.Generator) -> None:
+    """Sul posto: i marcatori 0 e 1 diventano l'asse sinistra-destra del
+    fondatore. Il marcatore 0 cresce verso l'alto del cervello (destra), l'1
+    verso il basso (sinistra), con la stessa pendenza; ognuno si lega a se
+    stesso e quasi per niente all'altro. Una cellula si collega quindi
+    soprattutto alle cellule della sua stessa metà: recettore di destra ->
+    sterzo verso destra. Ogni individuo differisce un poco (`marker_map_std`).
+    Con i sensi fissi della simulazione "solo cervello" i recettori non
+    seguono i gradienti e la mappa riguarda solo i neuroni."""
+    n, sd = len(genes["m_grad"]), cfg.marker_map_std
+    pair = slice(0, 2)
+    for marks in ("r_mark", "n_mark"):
+        if cfg.sim_mode != "cervello" or marks == "n_mark":
+            genes[marks][:, :, pair] = rng.normal(0.0, sd, genes[marks][:, :, pair].shape)
+    slope = cfg.marker_map_gradient * (1.0 + rng.normal(0.0, sd, (n, 2)))
+    genes["m_grad"][:, pair] = np.stack([rng.normal(0.0, sd, (n, 2)), slope * np.array([1.0, -1.0])], axis=-1)
+    table = rng.normal(0.0, sd, (n, 2, 2))
+    table[:, [0, 1], [0, 1]] += cfg.marker_map_affinity
+    genes["m_table"][:, pair, pair] = table
 
 
 def _seed(name: str) -> int:

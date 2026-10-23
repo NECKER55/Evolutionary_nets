@@ -252,3 +252,29 @@ def test_generation_statistics_count_markers_types_and_value():
     a = Anatomy(e.cfg, e.ctrl.brains.genome.take([0]))
     assert a.summary()["markers"] == 2 and a.color.shape == (a.n_nodes, 3)
     assert any("marcatori espressi" in line for line in a.describe(a.n_nodes - 1))
+
+
+def test_founder_left_right_axis_wires_each_receptor_mostly_to_its_own_side():
+    cfg, b = grown(n=2000, kind=SpikingBrains, net_type="spike-ei")
+    g, H = b.genome, b.genome.n_hidden
+    a = dev.affinity(g)[:, H:, :2]  # motori <- i due recettori di partenza (-30°, +30°)
+    right, left = 2, 3
+    assert np.median(a[:, left, 0]) > 2 * np.median(a[:, right, 0])
+    assert np.median(a[:, right, 1]) > 2 * np.median(a[:, left, 1])
+    w = g.weights[:, H:, :2]
+    steer = (w[:, right, 1] - w[:, left, 1]) - (w[:, right, 0] - w[:, left, 0])
+    assert (steer > 0).mean() > 2 * (steer < 0).mean() and (steer < 0).any()  # c'è variazione
+
+
+def test_without_the_map_the_founder_markers_are_random():
+    cfg, b = grown(n=2000, kind=SpikingBrains, net_type="spike-ei", marker_map_gradient=0.0)
+    g, H = b.genome, b.genome.n_hidden
+    a = dev.affinity(g)[:, H:, :2]
+    assert abs(np.median(a[:, 3, 0]) - np.median(a[:, 2, 0])) < 0.2
+
+
+def test_founder_tuning_is_neutral_across_individuals_and_shared_by_paired_receptors():
+    cfg, b = grown(n=2000)
+    mu = b.genome.r_mu  # (N, R, P)
+    assert 0.2 < mu[:, 0, 0].std() and abs(mu[:, 0, 0].mean() - 0.5) < 0.05  # nessun colore privilegiato
+    assert np.abs(mu[:, 0] - mu[:, 1]).mean() < 0.1  # i due recettori: copie dello stesso gene

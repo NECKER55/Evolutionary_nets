@@ -125,8 +125,8 @@ posizione, come i posti dei neuroni.
 
 ## 6. Partenza
 
-- 2 marcatori; la tabella di affinità e i marcatori di ogni neurone, recettore
-  e motore partono a caso.
+- 2 marcatori: l'asse sinistra-destra (sezione 12). Gli altri posti, spenti,
+  hanno geni a caso.
 - Corpo e cervello primordiali come oggi: 2 recettori generalisti, nessun
   neurone interno acceso.
 - Omeostasi debole e casuale (come l'adattamento sensoriale).
@@ -441,3 +441,63 @@ Fase 0 ──► Fase 1 ──► Fase 2 ──► Fase 3
              └──► Fase 5           ▼
 Fase 4 (in parallelo) ──────► Fase 6 ──► Mondo
 ```
+
+## 12. Partenza ordinata: asse sinistra-destra e sintonia neutra (2026-10-22)
+
+### Il problema
+
+Nelle tre corse con lo sviluppo del 21 ottobre la popolazione ha perso gli
+occhi in 8–70 generazioni ed è rimasta cieca (corsa delle 22:34: 1506
+generazioni, 96% senza recettori, scala ferma a 0,18 dalla generazione 112).
+Le cause, misurate:
+
+1. **Cablaggio a caso**: con i marcatori a caso un occhio raggiunge i motori
+   senza ordine; spesso fa girare via dal cibo o fermare.
+2. **Sintonia sulle pareti**: tutti i recettori nascevano con μ = 0,5, il
+   colore delle pareti, non del cibo (0,85).
+3. **Recettori daltonici e generalisti** (non ancora cambiato, vedi sotto):
+   con σ = 0,4 e la stessa sensibilità a tutti i fenomeni, la differenza tra
+   i due occhi segue la direzione del cibo appena (correlazione 0,09).
+
+Ai ciechi evoluti di quella corsa (riuscita 0,465) abbiamo dato due occhi
+cablati verso il cibo, a mano, per una vita:
+
+| occhi | riuscita |
+|---|---|
+| nessuno | 0,465 |
+| generalisti, σ 0,4, apertura 120° (come la partenza) | 0,007 |
+| solo luce, σ 0,4, apertura 120° | 0,05–0,08 |
+| solo luce, σ 0,15, apertura 90° | 0,54 |
+| solo luce, σ 0,1, apertura 60° | 0,70 |
+| solo luce, σ 0,05, apertura 60° | 0,75–0,80 |
+| come sopra ma cablati al contrario | 0,12 |
+| generalisti, σ 0,15, apertura 90° | 0,175 |
+
+La vista renderebbe molto, ma la partenza è lontana dalla strada che ci
+porta: è la valle che la selezione non attraversa.
+
+### Cosa cambia
+
+- **Asse sinistra-destra** (`marker_map_*`): i 2 marcatori del fondatore sono
+  gradienti opposti lungo y, ognuno legato a se stesso. Le cellule si
+  collegano soprattutto alla propria metà del cervello. In natura: le mappe
+  topografiche di Eph ed efrine, la mappa del tetto ottico allineata con
+  quella motoria dell'orientamento. Senza variazione tra individui
+  (`marker_map_std` 0,3) la selezione non avrebbe da scegliere: 42% nasce con
+  il riflesso verso, 13% con quello opposto, il resto senza.
+- **Cervello bilaterale** (`geometry.BILATERAL`, solo con 4 motori): sterzo
+  sinistro nella metà sinistra, destro nella destra, avanti e indietro
+  vicino alla linea mediana (in una metà sola un occhio spingerebbe avanti e
+  l'altro indietro). Vale anche per le popolazioni salvate: cambia la
+  lunghezza (e il costo) dei loro collegamenti verso i motori.
+- **Sintonia neutra**: μ a caso su tutto l'asse, una per individuo e per
+  fenomeno; i recettori dello stesso individuo sono copie dello stesso gene
+  (come gli organi pari) e differiscono di 0,05.
+- L'odore del cibo c'era già dal primo stadio (`food_smell` 1).
+
+### Effetto misurato
+
+Generazione 0, 750 agenti, primo stadio, 3 semi: riusciti 50 → 55. Corsa di
+40 generazioni, 2 semi: l'uso dei recettori scende ancora (34–43% alla 40,
+contro il 38% alla 24 di prima). Le tre modifiche da sole non bastano: resta
+il punto 3, i recettori generalisti e daltonici.

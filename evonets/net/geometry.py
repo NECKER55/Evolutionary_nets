@@ -11,7 +11,11 @@ più. Le posizioni nei geni sono in [0, 1] e vengono scalate al lato vero.
 - I recettori entrano dal bordo sinistro (x = 0), all'altezza data dal loro
   gene `r_y`: all'inizio segue la direzione in cui guardano (una mappa
   topografica), poi deriva con le mutazioni.
-- I motori stanno in posizioni fisse sul bordo destro (x = 1).
+- I motori stanno in posizioni fisse sul bordo destro (x = 1). Con i quattro
+  motori delle reti a impulsi il cervello è bilaterale, come il corpo: lo
+  sterzo verso sinistra sta nella metà sinistra (y bassa, dove entrano i nervi
+  dei recettori che guardano a sinistra), quello verso destra nella metà
+  destra, avanti e indietro (muscoli assiali) vicini alla linea mediana.
 - I neuroni interni stanno dove dice il loro gene di posizione.
 
 Come nella corteccia, la probabilità che esista un collegamento cala in modo
@@ -28,9 +32,16 @@ stesso (d = 0) fa eccezione: in natura è raro, e ha la sua probabilità
 import numpy as np
 
 
+# Altezza dei quattro motori (avanti, indietro, destra, sinistra) nel cervello
+# bilaterale. Destra = verso gli angoli positivi, gli stessi dei recettori che
+# entrano sopra 0,5 (r_y segue la direzione in cui guardano).
+BILATERAL = np.array([0.45, 0.55, 0.875, 0.125])
+
+
 def motor_anchors(n_out: int) -> np.ndarray:
     """Posizioni fisse (n_out, 2) dei motori, sul bordo destro."""
-    return np.stack([np.ones(n_out), (np.arange(n_out) + 0.5) / n_out], axis=1)
+    y = BILATERAL if n_out == 4 else (np.arange(n_out) + 0.5) / n_out
+    return np.stack([np.ones(n_out), y], axis=1)
 
 
 def receptor_anchors(r_y: np.ndarray) -> np.ndarray:

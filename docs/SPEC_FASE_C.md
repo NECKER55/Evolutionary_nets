@@ -402,7 +402,7 @@ mutazione**, in forma di logaritmi:
 |---|---|
 | recettori | 2, ai lati del muso (±30°), apertura 120° |
 | sensibilità | uguale su tutti e 6 i fenomeni, bassa (g ≈ 5): risponde a tutto, con molto rumore |
-| sintonia | μ = 0,5 e σ larga (0,4) su ogni fenomeno |
+| sintonia | μ a caso su tutto l'asse, una per individuo e per fenomeno (i due recettori sono copie dello stesso gene: differiscono appena), σ larga (0,4) |
 | neuroni interni | 0 accesi (scorta iniziale: 8 posti spenti) |
 | collegamenti | dai recettori ai motori, con la probabilità geometrica di oggi; pesi casuali |
 | geni delle mutazioni | i valori attuali di `config.py`, con un po' di variazione tra individui |

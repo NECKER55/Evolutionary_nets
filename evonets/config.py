@@ -146,6 +146,15 @@ class Config:
     marker_initial_std: float = 1.5
     marker_gradient_std: float = 2.0
     marker_table_std: float = 2.0
+    # Asse sinistra-destra (docs/SPEC_SVILUPPO.md, sezione 12): i primi due
+    # marcatori del fondatore sono una coppia di gradienti opposti lungo
+    # l'altezza del cervello, che si legano ciascuno a se stesso. Ne nasce una
+    # mappa ordinata: i nervi dei recettori che guardano a sinistra raggiungono
+    # soprattutto lo sterzo verso sinistra, come la mappa del tetto ottico.
+    # 0 = nessuna mappa (marcatori tutti a caso). Varietà tra individui: std.
+    marker_map_gradient: float = 12.0  # pendenza in scala logistica per unità di cervello
+    marker_map_affinity: float = 2.0  # legame di ogni marcatore della coppia con se stesso
+    marker_map_std: float = 0.3
     # Il grembo (net/womb.py, solo con lo sviluppo): secondi di attività
     # spontanea prima della nascita. I sensi ricevono onde che scorrono lungo
     # l'ordine dei nervi (come le onde della retina): velocità (lati del

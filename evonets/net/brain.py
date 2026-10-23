@@ -396,7 +396,11 @@ def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Ge
     r_active = np.zeros((n, R), dtype=bool)
     r_active[:, :on] = True
     r_sens = np.log(cfg.receptor_initial_gain) + rng.normal(0.0, 0.2, (n, R, P))
-    r_mu = np.clip(0.5 + rng.normal(0.0, 0.05, (n, R, P)), 0.0, 1.0)
+    # Sintonia: nessun colore, odore o grandezza è privilegiato. Ogni individuo
+    # ha la sua, a caso su tutto l'asse; i suoi recettori sono copie dello
+    # stesso gene (come gli organi pari di un corpo bilaterale) e differiscono
+    # appena.
+    r_mu = np.clip(rng.random((n, 1, P)) + rng.normal(0.0, 0.05, (n, R, P)), 0.0, 1.0)
     r_width = np.log(cfg.receptor_initial_width) + rng.normal(0.0, 0.1, (n, R, P))
     r_aperture = np.full((n, R), np.log(np.radians(cfg.receptor_initial_aperture_deg)))
     # Mappa topografica: il nervo entra nel cervello a un'altezza che segue la
