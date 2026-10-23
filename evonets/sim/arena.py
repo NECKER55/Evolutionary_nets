@@ -238,13 +238,26 @@ def eat_kernel(food, food_on, pos, alive, W, H, cw, ch, ncx, ncy, reach, b_start
     return eater
 
 
+# --- Il clima -----------------------------------------------------------------
+
+def temperature(cfg, pos: np.ndarray, t: float) -> np.ndarray:
+    """La temperatura (tra 0 e 1) nei punti (..., 2) all'istante t: una
+    fascia calda al centro del mondo (in altezza), fresca verso i bordi, più
+    le stagioni. Con arena_temperature = 0 è 0,5 dappertutto."""
+    band = -np.cos(2.0 * np.pi * pos[..., 1] / cfg.arena_size_h)
+    season = np.sin(2.0 * np.pi * t / cfg.arena_season)
+    return np.clip(0.5 + cfg.arena_temperature * band + cfg.arena_temp_season * season * (cfg.arena_temperature > 0),
+                   0.0, 1.0)
+
+
 # --- Il cibo -----------------------------------------------------------------
 
 class Patches:
     """Le macchie fertili: centri che derivano (passeggiata casuale lenta,
     `arena_patch_speed`, direzione che cambia di `arena_patch_turn` rad/√s) e
-    fertilità che oscilla con le stagioni, ogni macchia con la sua fase. La
-    fertilità nel punto x è arena_background + Σ F_k · exp(-|x - c_k|² / 2σ²)."""
+    fertilità che oscilla con le stagioni, ogni macchia con la sua fase. Il
+    cibo nasce dentro il cerchio di raggio σ = arena_patch_sigma, con densità
+    exp(-r² / 2σ²) (più fitto al centro), e arena_background ovunque."""
 
     def __init__(self, cfg, W: float, H: float, rng: np.random.Generator):
         k = cfg.arena_patches
@@ -254,13 +267,18 @@ class Patches:
         self.phase = rng.uniform(0.0, 2.0 * np.pi, k)
         self.health = np.ones(k)  # 1 = intatta; cala dove si mangia (manopola arena_depletion)
         self.good = np.zeros(k, dtype=int)  # il colore buono nella macchia: 0 rosso, 1 giallo
+        self.climate = False  # il clima cambia la fertilità (lo accende l'ecologia, con il motore JAX)
 
     def fertility(self, t: float) -> np.ndarray:
         """(k,) la fertilità di ogni macchia all'istante t: la stagione (tra
         arena_season_low e 1) per la salute."""
         cfg = self.cfg
         wave = 0.5 + 0.5 * np.sin(2.0 * np.pi * t / cfg.arena_season + self.phase)
-        return (cfg.arena_season_low + (1.0 - cfg.arena_season_low) * wave) * self.health
+        base = (cfg.arena_season_low + (1.0 - cfg.arena_season_low) * wave) * self.health
+        if not self.climate:
+            return base
+        warm = 1.0 + cfg.arena_temp_food * (temperature(cfg, self.centre, t) - 0.5)  # al caldo si produce di più
+        return base * np.maximum(warm, 0.0)
 
     def nearest(self, pts: np.ndarray) -> np.ndarray:
         """(n,) la macchia più vicina a ogni punto, -1 se è oltre 2σ."""
@@ -286,11 +304,75 @@ class Patches:
         which = rng.choice(len(mass), n, p=mass / mass.sum())
         out = rng.uniform([0.0, 0.0], [self.W, self.H], (n, 2))  # il fondo: ovunque
         inside = which < len(self.centre)
-        out[inside] = self.centre[which[inside]] + sigma * rng.standard_normal((int(inside.sum()), 2))
+        # Dentro il cerchio di raggio σ, più fitto al centro: una campana
+        # tagliata al bordo (r² / 2σ² esponenziale troncata a 1/2).
+        k = int(inside.sum())
+        r = sigma * np.sqrt(-2.0 * np.log1p(-rng.random(k) * (1.0 - np.exp(-0.5))))
+        a = rng.uniform(0.0, 2.0 * np.pi, k)
+        out[inside] = self.centre[which[inside]] + r[:, None] * np.stack([np.cos(a), np.sin(a)], axis=1)
         out %= [self.W, self.H]
         if which_too:
             return out, np.where(inside, which, -1)
         return out
+
+
+class Pools:
+    """Le pozze d'acqua: ferme, ognuna con il suo volume, che cala bevendo (e
+    con la siccità). Il raggio è arena_pool_radius · √(volume / pieno). Una
+    pozza vuota sparisce; quando ne restano meno di arena_pools_min, ogni
+    secondo ne nasce una nuova con probabilità 1 / arena_pool_wait. Nascono
+    lontano dalle macchie di cibo ma non troppo: il centro della macchia più
+    vicina tra arena_pool_gap_min e arena_pool_gap_max (con la manopola
+    arena_pool_distance fino a arena_pool_far_*), e non sopra un'altra pozza. I posti sono arena_pool_slots; volume 0 = posto libero."""
+
+    def __init__(self, cfg, W: float, H: float, rng: np.random.Generator, patches: "Patches", start: bool = True):
+        self.cfg, self.W, self.H = cfg, W, H
+        k = cfg.arena_pool_slots
+        self.centre = np.zeros((k, 2))
+        self.volume = np.zeros(k)
+        for _ in range(min(cfg.arena_pools, k) if start else 0):
+            self.add(rng, patches)
+
+    @property
+    def on(self) -> np.ndarray:
+        return self.volume > 0
+
+    def radius(self) -> np.ndarray:
+        cfg = self.cfg
+        return cfg.arena_pool_radius * np.sqrt(np.clip(self.volume / cfg.arena_pool_volume, 0.0, 1.0))
+
+    def _gap(self, pts: np.ndarray, others: np.ndarray) -> np.ndarray:
+        d = pts[:, None, :] - others[None]
+        d = d - [self.W, self.H] * np.floor(d / [self.W, self.H] + 0.5)
+        return np.hypot(d[..., 0], d[..., 1]).min(axis=1) if len(others) else np.full(len(pts), np.inf)
+
+    def add(self, rng: np.random.Generator, patches: "Patches") -> bool:
+        """Una pozza nuova e piena in un posto libero, se c'è un punto adatto."""
+        cfg = self.cfg
+        free = np.flatnonzero(~self.on)
+        if not len(free):
+            return False
+        pts = rng.uniform([0.0, 0.0], [self.W, self.H], (400, 2))
+        food = self._gap(pts, patches.centre)
+        water = self._gap(pts, self.centre[self.on])
+        far = cfg.arena_pool_distance  # la manopola: dalle vicine alle lontane
+        lo = cfg.arena_pool_gap_min + far * (cfg.arena_pool_far_min - cfg.arena_pool_gap_min)
+        hi = cfg.arena_pool_gap_max + far * (cfg.arena_pool_far_max - cfg.arena_pool_gap_max)
+        ok = (food >= lo) & (food <= hi) & (water >= 3 * cfg.arena_pool_radius)
+        if not ok.any():
+            return False
+        self.centre[free[0]] = pts[np.flatnonzero(ok)[0]]
+        self.volume[free[0]] = cfg.arena_pool_volume
+        return True
+
+    def step(self, tick: float, rng: np.random.Generator, patches: "Patches") -> None:
+        """Evaporazione (manopola arena_drought) e pozze nuove quando sono poche."""
+        cfg = self.cfg
+        self.volume = np.maximum(self.volume - cfg.arena_drought * cfg.arena_pool_volume * tick / cfg.arena_pool_dry,
+                                 0.0)
+        self.volume[self.volume < 1.0] = 0.0  # una goccia non è una pozza
+        if self.on.sum() < cfg.arena_pools_min and rng.random() < tick / cfg.arena_pool_wait:
+            self.add(rng, patches)
 
 
 class ArenaFood:
@@ -325,13 +407,24 @@ class ArenaFood:
         self._owed = 0.0
         self.grow(world, k // 2)  # si parte con metà del cibo possibile
 
+    def rate(self) -> float:
+        """Cibi che ricrescono al secondo (meno, con il cibo raro)."""
+        cfg = self.cfg
+        return cfg.arena_food_rate * (1.0 - (1.0 - cfg.arena_scarce_rate) * cfg.arena_scarcity)
+
+    def limit(self) -> int:
+        """Cibi presenti insieme al massimo (meno, con il cibo raro)."""
+        cfg = self.cfg
+        return int(cfg.arena_food_max * (1.0 - (1.0 - cfg.arena_scarce_max) * cfg.arena_scarcity))
+
     def grow(self, world, n: int) -> None:
         """Fino a `n` cibi nuovi nei posti liberi, dove la fertilità è alta.
         Con le manopole del mondo (docs/SPEC_ARENA.md, sezione 15): una quota
         arena_fruits / 2 è un frutto cattivo, del colore che nella sua macchia
         non è buono; una quota arena_extraction / 2 è da aprire, metà duro e
         metà grande."""
-        free = np.flatnonzero(~self.food_on)[:n]
+        n = min(n, self.limit() - int(self.food_on.sum()))
+        free = np.flatnonzero(~self.food_on)[:max(n, 0)]
         if not len(free):
             return
         cfg, rng = self.cfg, world.rng
@@ -352,7 +445,7 @@ class ArenaFood:
         cfg = self.cfg
         dt = cfg.dt
         self.patches.step(dt, world.rng)
-        self._owed += cfg.arena_food_rate * dt
+        self._owed += self.rate() * dt
         new = int(self._owed)
         if new:
             self._owed -= new

@@ -21,9 +21,10 @@ from ..net import womb
 from ..net.brain import META, Genome
 from ..net.controllers import NeuralController
 from ..net.development import develop, population_stats
-from ..sim.arena import ArenaWorld
+from ..net.geometry import brain_side, connect_prob, distances
+from ..sim.arena import ArenaWorld, Pools, temperature
 from .exam import Exam
-from .genetics import crossover, mutate
+from .genetics import crossover, mutate as _mutate_genes
 from .saves import FORMAT, RUN_STATE, code_version
 
 # Lo stato di una corsa nell'arena che viene dal salvataggio (oltre a
@@ -32,9 +33,12 @@ ARENA_STATE = ("arena_cap", "arena_size_w", "arena_size_h")
 # Le manopole del mondo che si complica, nell'ordine in cui il mondo le alza
 # (docs/SPEC_ARENA.md, sezione 15). Vengono dal salvataggio: sono lo stato del
 # mondo, non regole.
-DIALS = ("arena_depletion", "arena_fruits", "arena_reversal", "arena_predation", "arena_extraction", "arena_night")
-DIAL_NAMES = ("macchie che si esauriscono", "frutti cattivi", "inversione dei colori", "predazione",
-              "cibo da aprire", "notte")
+DIALS = ("arena_scarcity", "arena_thirst", "arena_pool_distance", "arena_depletion", "arena_fruits", "arena_reversal", "arena_predation",
+         "arena_extraction", "arena_night", "arena_drought")
+DIAL_NAMES = ("cibo raro", "sete", "pozze lontane", "macchie che si esauriscono", "frutti cattivi", "inversione dei colori", "predazione",
+              "cibo da aprire", "notte", "siccità")
+# Le regole che esistono solo con il motore JAX (con NumPy si spengono).
+ONLY_GPU = ("arena_temperature", "arena_water")
 EXTRA_MOTORS = 4  # mordere, luce, odore, nutrire
 ADULT = 60.0  # s: età minima per l'esame
 # Lo stato del mondo nei salvataggi, con il prefisso "w_" (pos è anche un
@@ -54,6 +58,10 @@ class Ecology:
         self.world = ArenaWorld(cfg, cfg.arena_cap, initial, seed)
         self.ctrl = NeuralController(cfg, cfg.arena_cap, seed, EXTRA_MOTORS)
         self.rng = np.random.default_rng([seed, 11])  # nascite, partner, esami
+        if cfg.arena_hidden_initial > 0:
+            g = self.ctrl.brains.genome
+            self._primordial(g)
+            self.ctrl.brains.set_genome(g)
         n = cfg.arena_cap
         # Il corpo (geni dell'arena, fuori dal genoma del cervello): taglia (in
         # scala logaritmica), colore della luce, molecola dell'odore; e chi è il
@@ -81,15 +89,28 @@ class Ecology:
         self._last = {"nati": 0, "con partner": 0, "colonizzatori": 0, "fame": 0, "vecchiaia": 0, "mangiati": 0}
         self.next_tick = cfg.arena_tick
         self.next_stats = cfg.arena_stats_every
+        self._food_sum, self._food_n = 0, 0  # cibo presente, sommato a ogni secondo del minuto
         if self.ctrl.brains.genome.n_markers:
             self._womb(np.flatnonzero(self.world.alive))
         self.gpu = None  # l'arena sulla GPU (gpu/arena.py), se c'è
         self._stale = False  # cervelli compilati sul processore da rifare (con la GPU)
+        water = cfg.arena_water and cfg.engine == "gpu"
+        # L'acqua: la riserva di ognuno e le pozze (con un generatore proprio).
+        w = self.world
+        self.pool_rng = np.random.default_rng([seed, 13])
+        w.water = np.where(w.alive, self._full_water(np.arange(n)), 0.0)
+        w.drunk_total = 0.0
+        w.deaths.setdefault("sete", 0)
+        w.pools = Pools(cfg, w.W, w.H, self.pool_rng, w.task.patches, start=water)
+        self._drinks_reset()
         if cfg.engine == "gpu":
             self._start_gpu()
-        if self.gpu is None:  # il mondo che si complica c'è solo con il motore JAX
+        if self.gpu is None:  # il mondo che si complica, il clima e l'acqua ci sono solo con il motore JAX
             for k in DIALS:
                 setattr(cfg, k, 0.0)
+            cfg.arena_temperature = 0.0
+            cfg.arena_water = False
+            w.pools.volume[:] = 0.0
 
     def _start_gpu(self, key=None) -> None:
         from ..gpu import available
@@ -99,10 +120,112 @@ class Ecology:
         from ..gpu.arena import ArenaGpu
 
         self.gpu = ArenaGpu(self.world, self.ctrl, self.seed, self.bodies())
+        self.world.task.patches.climate = self.cfg.arena_temperature > 0
         if key is not None:
             import jax.numpy as jnp
 
             self.gpu.s["key"] = jnp.asarray(key, dtype=jnp.uint32)
+
+    # --- La misura delle bevute ------------------------------------------------
+    # Una volta al secondo: chi sta bevendo (l'acqua è salita). Una bevuta
+    # comincia quando si inizia a bere e finisce quando si smette; l'intervallo
+    # è il tempo dalla fine di una bevuta (o dalla nascita) all'inizio della
+    # successiva. Per ogni essere si tiene il primo intervallo e la media dei
+    # successivi: se i successivi sono più brevi, torna alla pozza più in
+    # fretta di quando l'ha trovata la prima volta (impara dove sta).
+
+    def _drinks_reset(self) -> None:
+        n = self.world.n
+        self._prev_water = self.world.water.copy()
+        self._drinking = np.zeros(n, bool)
+        self._dry_since = np.zeros(n)  # fine dell'ultima bevuta (o nascita)
+        self._first_gap = np.full(n, np.nan)
+        self._later_sum, self._later_n = np.zeros(n), np.zeros(n, int)
+        self._gaps: list[float] = []  # intervalli conclusi in questo minuto
+
+    def _born(self, slots) -> None:
+        """Le misure delle bevute ripartono per chi nasce nei posti `slots`."""
+        self._drinking[slots] = False
+        self._dry_since[slots] = self.world.t
+        self._first_gap[slots] = np.nan
+        self._later_sum[slots], self._later_n[slots] = 0.0, 0
+        self._prev_water[slots] = self.world.water[slots]
+
+    def _watch_drinks(self) -> None:
+        w = self.world
+        now = w.alive & (w.water > self._prev_water + 1e-6)
+        start = np.flatnonzero(now & ~self._drinking)
+        gap = w.t - self._dry_since[start]
+        self._gaps.extend(gap.tolist())
+        first = np.isnan(self._first_gap[start])
+        self._first_gap[start[first]] = gap[first]
+        self._later_sum[start[~first]] += gap[~first]
+        self._later_n[start[~first]] += 1
+        self._dry_since[self._drinking & ~now] = w.t  # chi ha smesso di bere
+        self._drinking = now
+        self._prev_water = w.water.copy()
+
+    def drink_stats(self) -> dict:
+        """Intervallo medio tra le bevute nel minuto, e quanto più in fretta
+        tornano a bere i vivi che hanno già bevuto almeno due volte dopo la
+        prima (mediana di intervalli successivi / primo intervallo)."""
+        alive = np.flatnonzero(self.world.alive & (self._later_n >= 2) & (self._first_gap > 0))
+        ratio = self._later_sum[alive] / self._later_n[alive] / self._first_gap[alive]
+        out = {"drink_gap": round(float(np.mean(self._gaps)), 1) if self._gaps else None,
+               "drink_bouts": len(self._gaps),
+               "return_ratio": round(float(np.median(ratio)), 2) if len(alive) >= 5 else None,
+               "return_n": len(alive)}
+        self._gaps = []
+        return out
+
+    def _full_water(self, rows) -> np.ndarray:
+        """La riserva d'acqua piena dei posti `rows` (dipende dalla taglia)."""
+        return self.cfg.arena_water_max * self.sizes()[rows]
+
+    def _mutate(self, kids: Genome) -> None:
+        """Le mutazioni dei figli; poi (arena_wire_new, genoma diretto) i
+        neuroni interni appena comparsi crescono i loro collegamenti con la
+        regola della nascita: probabilità che cala con la distanza nel cervello
+        e con la portata dell'individuo, in entrata e in uscita."""
+        cfg = self.cfg
+        before = kids.active.copy()
+        _mutate_genes(kids, cfg, self.rng)
+        if cfg.arena_wire_new:
+            self._wire(kids, kids.active & ~before)
+
+    def _primordial(self, g: Genome) -> None:
+        """Gli esseri primordiali: arena_hidden_initial neuroni interni
+        accesi (i primi posti). Con il genoma diretto si collegano con la
+        regola della nascita; con lo sviluppo i collegamenti nascono dai
+        marcatori, quindi si rifà lo sviluppo."""
+        k = min(self.cfg.arena_hidden_initial, g.n_hidden)
+        if k <= 0:
+            return
+        new = np.zeros_like(g.active)
+        new[:, :k] = ~g.active[:, :k]
+        g.active[:, :k] = True
+        if g.n_markers:
+            g.unborn()
+            develop(g, self.cfg, self.rng, self.ctrl.brains.GAIN)
+        else:
+            self._wire(g, new)
+
+    def _wire(self, kids: Genome, new: np.ndarray) -> None:
+        """I neuroni interni `new` (N, H) fanno crescere dendriti e assone."""
+        cfg = self.cfg
+        if kids.n_markers or not new.any():
+            return
+        rows = np.flatnonzero(new.any(axis=1))
+        g, R = kids, kids.n_rec
+        dist = distances(cfg, g.pos[rows], g.r_y[rows], g.n_out, brain_side(cfg, g.r_active[rows], g.active[rows],
+                                                                              g.n_out))
+        reach = np.exp(g.meta[rows, META.index("conn_range")])
+        p = connect_prob(cfg, dist, R, reach)  # (n, T, S)
+        grow = self.rng.random(p.shape) < p
+        for j, i in enumerate(rows):
+            for k in np.flatnonzero(new[i]):
+                g.conn[i, k, :] = grow[j, k, :]  # dendriti: da chi riceve
+                g.conn[i, :, R + k] = grow[j, :, R + k]  # assone: a chi manda
 
     def sizes(self) -> np.ndarray:
         cfg = self.cfg
@@ -192,6 +315,10 @@ class Ecology:
         cfg, w, rng = self.cfg, self.world, self.world.rng
         tick = cfg.arena_tick
         self.next_tick += tick
+        self._food_sum += int(w.task.food_on.sum())  # per la media del minuto (prima dell'ondata)
+        self._food_n += 1
+        if cfg.arena_water:
+            self._watch_drinks()
         w.age += tick * w.alive
         hazard = cfg.arena_aging_h0 * np.exp(w.age / cfg.arena_aging_tau)
         old = w.alive & (rng.random(w.n) < 1.0 - np.exp(-hazard * tick))
@@ -201,11 +328,15 @@ class Ecology:
         task = w.task
         task.patches.step(tick, rng)
         self._wear(tick)
-        task._owed += cfg.arena_food_rate * tick
-        new = int(task._owed)
-        task._owed -= new
-        task.grow(w, new)
+        task._owed += task.rate() * tick
+        every = cfg.arena_food_every
+        if every <= 0 or int(w.t // every) > int((w.t - tick) // every):  # a ondate: solo allo scoccare
+            new = int(task._owed)
+            task._owed -= new
+            task.grow(w, new)
         self._food_seen = task.food_on.copy()
+        if cfg.arena_water:
+            w.pools.step(tick, self.pool_rng, task.patches)
         died = np.flatnonzero(self._was_alive & ~w.alive)
         if len(died):
             self._remember(died)
@@ -261,6 +392,8 @@ class Ecology:
         w, cfg, rng = self.world, self.cfg, self.rng
         ready = (w.alive & (w.energy >= cfg.arena_birth_energy) & (w.age >= cfg.arena_maturity)
                  & (w.t - self.last_birth >= cfg.arena_birth_interval))
+        if cfg.arena_water:  # serve anche l'acqua da dare al figlio, e restarne un po'
+            ready &= w.water >= cfg.arena_birth_water + cfg.arena_birth_water_spare * self._full_water(np.arange(w.n))
         mothers = np.flatnonzero(ready)
         free = np.flatnonzero(~w.alive)
         if not len(mothers) or not len(free):
@@ -276,7 +409,7 @@ class Ecology:
             if rng.random() < sex[m]:
                 fathers[k] = self._partner(int(m), adults)
         children = crossover(g, mothers, fathers, rng, cfg.receptor_dup_split)
-        mutate(children, cfg, rng)
+        self._mutate(children)
         children.unborn()
         if children.n_markers:
             develop(children, cfg, rng, brains.GAIN)
@@ -288,6 +421,10 @@ class Ecology:
         pos = w.pos[mothers] + cfg.arena_birth_distance * np.stack([np.cos(angle), np.sin(angle)], axis=1)
         w.spawn(slots, pos, cfg.arena_child_energy)
         w.energy[mothers] -= cfg.arena_birth_cost
+        if cfg.arena_water:
+            w.water[mothers] -= cfg.arena_birth_water
+            w.water[slots] = self._full_water(slots)  # il piccolo nasce idratato
+        self._born(slots)
         self.last_birth[mothers] = w.t
         self.last_birth[slots] = -np.inf
         self.ids[slots] = np.arange(self.next_id, self.next_id + len(slots))
@@ -328,18 +465,21 @@ class Ecology:
             pool = Genome.concat([g for _, g, _ in self.archive])
             body = np.array([b for _, _, b in self.archive])[pick]
             kids = crossover(pool, pick, pick, rng, cfg.receptor_dup_split)
-            mutate(kids, cfg, rng)
+            self._mutate(kids)
             kids.unborn()
             if kids.n_markers:
                 develop(kids, cfg, rng, brains.GAIN)
         else:
             fresh = type(brains)(cfg, n, brains.n_out, int(rng.integers(2**31)))
             kids = fresh.genome
+            self._primordial(kids)
             body = np.stack([rng.normal(0.0, cfg.arena_size_std, n), rng.random(n), rng.random(n)], axis=1)
         self._place(slots, kids)
         self.size_gene[slots], self.sig_color[slots], self.sig_mol[slots] = body.T
         self.parent[slots] = -1
         w.spawn(slots, w.task.patches.sample(n, w.t, rng), cfg.energy_init)
+        w.water[slots] = self._full_water(slots)
+        self._born(slots)
         self.last_birth[slots] = -np.inf
         self.ids[slots] = np.arange(self.next_id, self.next_id + n)
         self.next_id += n
@@ -423,22 +563,30 @@ class Ecology:
         now = {"nati": self.totals["nati"], "con partner": self.totals["con partner"],
                "colonizzatori": self.totals["colonizzatori"],
                "fame": w.deaths["fame"], "vecchiaia": w.deaths["vecchiaia"], "mangiati": task.eaten_total,
-               "predati": w.deaths.get("predati", 0), "cattivi": task.bad_total, "cure": task.fed_total}
+               "predati": w.deaths.get("predati", 0), "cattivi": task.bad_total, "cure": task.fed_total,
+               "sete": w.deaths.get("sete", 0), "bevuta": w.drunk_total}
         delta = {k: now[k] - self._last.get(k, 0) for k in now}
         self._last = now
+        food = round(self._food_sum / self._food_n) if self._food_n else int(task.food_on.sum())
+        self._food_sum, self._food_n = 0, 0
         row = {"time": round(w.t, 3), "minute": self.generation, "alive": len(alive),
                "births": delta["nati"], "mates": delta["con partner"], "colonists": delta["colonizzatori"],
                "starved": delta["fame"],
-               "old_age": delta["vecchiaia"], "eaten": delta["mangiati"], "food": int(task.food_on.sum()),
+               "old_age": delta["vecchiaia"], "eaten": delta["mangiati"],
+               "food": food,
                "killed": delta.get("predati", 0), "bad_eaten": delta.get("cattivi", 0),
                "fed": round(float(delta.get("cure", 0.0)), 1),
                "dials": {k: round(getattr(cfg, k), 3) for k in DIALS},
-               "patch_health": round(float(task.patches.health.mean()), 3)}
+               "patch_health": round(float(task.patches.health.mean()), 3),
+               "thirst": delta.get("sete", 0), "drunk": round(float(delta.get("bevuta", 0.0)), 1),
+               "pools": int(w.pools.on.sum()), **(self.drink_stats() if cfg.arena_water else {}),
+               "pool_water": round(float(w.pools.volume.sum() / max(cfg.arena_pool_volume, 1.0)), 3)}
         if len(alive):
             g = b.genome.take(alive)
             row.update({
                 "age_mean": float(w.age[alive].mean()), "age_max": float(w.age[alive].max()),
                 "energy_mean": float(w.energy[alive].mean()),
+                "water_mean": float((w.water[alive] / self._full_water(alive)).mean()) if cfg.arena_water else 1.0,
                 "neurons": float(b.active[alive].sum(axis=1).mean()),
                 "links": float(b.links[alive].sum(axis=(1, 2)).mean()),
                 **receptor_stats(g, b.links[alive]),
@@ -446,6 +594,7 @@ class Ecology:
                 **population_stats(g),
                 "mutation": {k: float(np.exp(np.median(g.meta[:, i]))) for i, k in enumerate(META)},
                 "species": self.species(),
+                "temp_mean": float(temperature(cfg, w.pos[alive], w.t).mean()) if cfg.arena_temperature > 0 else 0.5,
                 "size_mean": float(self.sizes()[alive].mean()), "size_sd": float(self.sizes()[alive].std()),
                 "bite_mean": float(getattr(w, "bite", np.zeros(w.n))[alive].mean()),
                 "glow_mean": float(getattr(w, "glow", np.zeros(w.n))[alive].mean()),
@@ -566,9 +715,11 @@ class Ecology:
             food_color=task.color, food_bad=task.bad, food_kind=task.kind, food_radius=task.radius,
             food_seen=self._food_seen, patch_health=task.patches.health, patch_good=task.patches.good,
             bad_total=task.bad_total, fed_total=task.fed_total,
+            water=w.water, drunk_total=w.drunk_total, pool_centre=w.pools.centre, pool_volume=w.pools.volume,
             deaths=json.dumps(w.deaths), totals=json.dumps(self.totals), last=json.dumps(self._last),
             rng=json.dumps({"world": w.rng.bit_generator.state, "life": self.rng.bit_generator.state,
-                            "noise": self.ctrl.noise_rng.bit_generator.state}),
+                            "noise": self.ctrl.noise_rng.bit_generator.state,
+                            "pools": self.pool_rng.bit_generator.state}),
             obs=self.ctrl.obs, adapt=self.ctrl.adapt,
             history=json.dumps(self.history), log=json.dumps(self.log), exams=json.dumps(self.exams),
             config=json.dumps(dataclasses.asdict(self.cfg)), **extra)
@@ -610,11 +761,12 @@ class Ecology:
                                                                          - set(DIALS) - {"engine", "exam_every"})
                      if saved.get(k) != getattr(cfg, k)}
             engine = cfg.engine
-            dials = {k: getattr(cfg, k) for k in DIALS}  # le spegnerebbe il motore NumPy di passaggio
+            # Il motore NumPy di passaggio spegnerebbe manopole, clima e acqua.
+            keep = {k: getattr(cfg, k) for k in DIALS + ONLY_GPU}
             cfg.engine = "numpy"  # la GPU parte dopo, dallo stato ripreso
             e = cls(cfg, int(d["seed"]), initial=0)
             cfg.engine = engine
-            for k, v in dials.items():
+            for k, v in keep.items():
                 setattr(cfg, k, v)
             w, b, task = e.world, e.ctrl.brains, e.world.task
             b.set_genome(Genome(*(d[f] for f in Genome.FIELDS)))
@@ -642,11 +794,23 @@ class Ecology:
                 task.radius, e._food_seen = d["food_radius"].copy(), d["food_seen"].copy()
                 task.patches.health, task.patches.good = d["patch_health"].copy(), d["patch_good"].copy()
                 task.bad_total, task.fed_total = int(d["bad_total"]), float(d["fed_total"])
+            if "water" in d:  # dal salvataggio; prima dell'acqua: tutti pieni, pozze nuove
+                w.water, w.drunk_total = d["water"].copy(), float(d["drunk_total"])
+            else:
+                w.water = np.where(w.alive, e._full_water(np.arange(w.n)), 0.0)
+            e._drinks_reset()
+            if cfg.arena_water and "pool_volume" in d and len(d["pool_volume"]) == len(w.pools.volume):
+                w.pools.centre, w.pools.volume = d["pool_centre"].copy(), d["pool_volume"].copy()
+            elif cfg.arena_water and cfg.engine == "gpu":
+                for _ in range(min(cfg.arena_pools, len(w.pools.volume))):
+                    w.pools.add(e.pool_rng, task.patches)
             e.totals, e._last = json.loads(str(d["totals"])), json.loads(str(d["last"]))
             states = json.loads(str(d["rng"]))
             w.rng.bit_generator.state = states["world"]
             e.rng.bit_generator.state = states["life"]
             e.ctrl.noise_rng.bit_generator.state = states["noise"]
+            if "pools" in states:
+                e.pool_rng.bit_generator.state = states["pools"]
             e.ctrl.obs, e.ctrl.adapt = d["obs"].copy(), d["adapt"].copy()
             e.history, e.log = json.loads(str(d["history"])), json.loads(str(d["log"]))
             e.exams = json.loads(str(d["exams"]))

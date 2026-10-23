@@ -38,6 +38,13 @@ BODY_QUANTITIES = (
     (0.85, "rotazione destra"),
     (0.95, "rotazione sinistra"),
 )
+# La riserva d'acqua (solo nell'arena continua con il motore JAX), sull'asse
+# dell'interno tra l'energia e il gusto: un recettore interno vicino
+# all'energia sente un po' anche la sete, ma può specializzarsi.
+WATER_QUALITY = 0.11
+# Il sollievo di aver appena bevuto (come il gusto per il cibo), tra il gusto
+# e il dolore.
+QUENCH_QUALITY = 0.21
 
 
 @njit(cache=True, parallel=True)

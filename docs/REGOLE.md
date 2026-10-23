@@ -1014,3 +1014,25 @@ di colonizzatori: macchie che si esauriscono, frutti cattivi, inversione del
 colore buono, predazione (si morde chi è almeno 1,2 volte più piccolo),
 cibo da aprire (duro e grande), notte. Dopo ogni esame, la stessa prova senza
 plasticità misura quanto imparano durante la vita.
+
+**Cibo e clima** (solo con il motore JAX). Il cibo nasce solo nelle macchie.
+La prima manopola della scala del mondo lo rende raro (fino al 40% della
+ricrescita e al 35% dei cibi presenti). Il clima: fascia calda al centro del
+mondo, fresca verso i bordi; al caldo il metabolismo è fino a 1,7 volte e le
+macchie producono fino a 1,75 volte, al freddo il metabolismo scende a 0,6
+volte e le macchie a 0,25 volte. I recettori della temperatura la sentono.
+
+
+**Acqua** (solo con il motore JAX). Una seconda riserva, che cala sempre (di
+più al caldo e correndo): a zero si muore di sete. Si beve stando dentro una
+pozza; le pozze sono ferme, lontane dal cibo ma non troppo, si restringono
+bevendo e spariscono vuote; quando ne restano meno di 4 ne nasce una nuova.
+Fare un figlio costa acqua. Le pozze si vedono (blu), si annusano da lontano
+(umidità) e la sete si sente da dentro. L'ottava manopola, la siccità, le fa
+evaporare.
+
+**Sete graduale e neuroni iniziali** (arena continua). La sete parte leggera
+(un quarto della traspirazione) e sale con una manopola della scala del
+mondo; le pozze nascono appena fuori dalle macchie e una manopola le
+allontana; il figlio nasce idratato. Gli esseri primordiali hanno 2 neuroni
+interni già collegati, e un neurone che compare in un figlio nasce collegato.

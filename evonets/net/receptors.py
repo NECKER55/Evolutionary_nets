@@ -285,6 +285,11 @@ class Prepared:
         self.g_mag = g[..., MAGNETIC]
         q = np.array([qk for qk, _ in signals.BODY_QUANTITIES])
         self.c_body = g[..., INTERNAL, None] * tuning(q, mu[..., INTERNAL, None], sg[..., INTERNAL, None])
+        # L'acqua (arena continua, motore JAX): la pozza vista e la riserva sentita.
+        self.c_pool = L * spectral(mu[..., LIGHT], sg[..., LIGHT], cfg.water_color, cfg.water_color_width,
+                                   cfg.water_albedo)
+        self.c_water = g[..., INTERNAL] * tuning(signals.WATER_QUALITY, mu[..., INTERNAL], sg[..., INTERNAL])
+        self.c_quench = g[..., INTERNAL] * tuning(signals.QUENCH_QUALITY, mu[..., INTERNAL], sg[..., INTERNAL])
 
     def take(self, rows) -> "Prepared":
         new = object.__new__(Prepared)

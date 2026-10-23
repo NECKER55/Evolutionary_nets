@@ -13,7 +13,7 @@ from evonets.sim.arena import ArenaWorld
 def small(**kw) -> Config:
     """Un'arena piccola per i test: niente esame, pochi posti."""
     base = dict(arena_size_w=400.0, arena_size_h=320.0, arena_cap=60, arena_food_max=80, arena_food_rate=5.0,
-                arena_min_alive=0, exam_every=0, engine="numpy")
+                arena_min_alive=0, exam_every=0, engine="numpy", arena_temperature=0.0, arena_water=False)
     return Config(**{**base, **kw})
 
 
@@ -316,12 +316,20 @@ def test_the_world_ladder_raises_one_dial_when_calm_and_lowers_it_when_troubled(
     assert e.gpu is not None
     e.history = [{"colonists": 0, "alive": 20}] * 2
     e._world_ladder()
-    assert cfg.arena_depletion == cfg.arena_dial_step and cfg.arena_fruits == 0.0
+    assert cfg.arena_scarcity == cfg.arena_dial_step and cfg.arena_depletion == 0.0  # prima il cibo raro
     assert e.log[-1]["event"] == "mondo"
     e._dial_at = -10
     e.history = [{"colonists": 3, "alive": 5}] * 2
     e._world_ladder()
-    assert cfg.arena_depletion == 0.0
+    assert cfg.arena_scarcity == 0.0
+
+
+def test_scarce_food_grows_slower_and_less():
+    cfg = small(arena_scarcity=1.0)
+    w = ArenaWorld(cfg, 4, 4, seed=1)
+    assert abs(w.task.rate() - cfg.arena_food_rate * cfg.arena_scarce_rate) < 1e-9
+    w.task.grow(w, 10_000)
+    assert w.task.food_on.sum() == int(cfg.arena_food_max * cfg.arena_scarce_max)
 
 
 def test_eating_wears_out_the_patch():
@@ -336,3 +344,225 @@ def test_eating_wears_out_the_patch():
     before = patches.health[0]
     e._wear(0.0)
     assert patches.health[0] <= before - 10 * cfg.arena_patch_wear + 1e-9
+
+
+def test_the_climate_is_warm_in_the_middle_and_cold_at_the_edges():
+    from evonets.sim.arena import temperature
+
+    cfg = small(arena_temperature=0.4, arena_temp_season=0.0)
+    t = temperature(cfg, np.array([[10.0, 160.0], [10.0, 0.0], [10.0, 320.0]]), 0.0)
+    assert abs(t[0] - 0.9) < 1e-9 and abs(t[1] - 0.1) < 1e-9 and abs(t[2] - 0.1) < 1e-9
+    assert np.allclose(temperature(small(), np.array([[5.0, 80.0]]), 0.0), 0.5)  # senza clima
+
+
+def test_heat_burns_more_energy_and_makes_patches_richer():
+    cfg, w, gpu, ga, jnp = _scene(arena_temperature=0.4, arena_temp_season=0.0)
+    gpu.set_phys()
+    gpu.s["pos"] = jnp.array([[100.0, 160.0], [300.0, 0.5], [200.0, 80.0]])  # caldo, freddo, mezzo
+    out = _physics(gpu, ga, jnp, np.zeros((3, 4)))
+    spent = 100.0 - np.asarray(out["energy"])
+    assert abs(spent[0] / spent[1] - cfg.arena_temp_q ** 0.8) < 0.05  # T 0,9 contro 0,1
+    from evonets.sim.arena import Patches
+
+    patches = Patches(cfg, 400.0, 320.0, np.random.default_rng(0))
+    patches.centre = np.array([[100.0, 160.0], [100.0, 1.0]] + [[50.0, 80.0]] * (len(patches.centre) - 2))
+    cold = patches.fertility(0.0)
+    patches.climate = True
+    warm = patches.fertility(0.0)
+    assert warm[0] > 1.5 * cold[0] and warm[1] < 0.5 * cold[1]
+
+
+def _pool_scene(**kw):
+    """Come _scene, con l'acqua e una pozza sotto il primo essere."""
+    cfg, w, gpu, ga, jnp = _scene(arena_water=True, arena_temperature=0.0, **kw)
+    w.pools.centre[0], w.pools.volume[0] = [100.0, 100.0], cfg.arena_pool_volume
+    w.water[:] = [10.0, 10.0, 0.001]
+    gpu.push_world()
+    gpu.set_phys()
+    return cfg, w, gpu, ga, jnp
+
+
+def test_drinking_fills_the_body_and_shrinks_the_pool_and_thirst_kills():
+    cfg, w, gpu, ga, jnp = _pool_scene()
+    out = _physics(gpu, ga, jnp, np.zeros((3, 4)))
+    water = np.asarray(out["water"])
+    drink = cfg.arena_drink_rate * cfg.dt
+    sweat = cfg.arena_water_loss * cfg.arena_thirst_min * cfg.dt  # sete graduale: la manopola è a 0
+    assert abs(water[0] - (10.0 - sweat + drink)) < 1e-3  # dentro la pozza: beve
+    assert abs(water[1] - (10.0 - sweat + drink)) < 1e-3  # anche il secondo (a 2 u dal centro)
+    assert abs(float(out["pool_vol"][0]) - (cfg.arena_pool_volume - 2 * drink)) < 0.05
+    assert not out["alive"][2] and float(out["thirst"]) == 1.0 and float(out["starved"]) == 0.0  # morto di sete
+
+
+def test_without_water_rules_nobody_gets_thirsty():
+    cfg, w, gpu, ga, jnp = _scene(arena_water=False)
+    out = _physics(gpu, ga, jnp, np.zeros((3, 4)))
+    assert np.allclose(np.asarray(out["water"]), cfg.arena_water_max) and np.asarray(out["alive"]).all()
+
+
+def test_the_thirst_sense_and_the_pool_are_felt():
+    from evonets.net.receptors import Prepared
+
+    cfg, w, gpu, ga, jnp = _pool_scene()
+    p = Prepared(cfg, gpu.ctrl.brains.receptors)
+    assert np.asarray(p.c_water).shape == np.asarray(p.c_pool).shape == gpu.ctrl.brains.receptors.active.shape
+    s = gpu.s
+    food = ga.neighbours(ga.table(s["food"], s["food_on"] > 0, gpu.geo), s["pos"], gpu.geo)
+    beings = ga.neighbours(ga.table(s["pos"], s["alive"] > 0, gpu.geo), s["pos"], gpu.geo)
+    with_pool = np.asarray(ga.quanta(gpu.ph, gpu.P, s, food, beings))
+    gpu.s["pool_vol"] = jnp.zeros_like(s["pool_vol"])
+    dry = np.asarray(ga.quanta(gpu.ph, gpu.P, gpu.s, food, beings))
+    assert (with_pool[0] >= dry[0] - 1e-6).all() and (with_pool[0] > dry[0] + 1e-6).any()  # vista e umidità
+
+
+def test_pools_are_born_near_food_but_apart_and_come_back_when_few():
+    from evonets.sim.arena import Pools
+
+    cfg = small(arena_pools=3, arena_pools_min=2, arena_pool_wait=1.0, arena_pool_gap_min=60.0,
+                arena_pool_gap_max=150.0, arena_pool_radius=10.0)
+    w = ArenaWorld(cfg, 2, 2, seed=1)
+    rng = np.random.default_rng(0)
+    pools = Pools(cfg, w.W, w.H, rng, w.task.patches)
+    assert pools.on.sum() == 3
+    gap = pools._gap(pools.centre[pools.on], w.task.patches.centre)
+    assert ((gap >= 60.0) & (gap <= 150.0)).all()
+    pools.volume[:2] = 0.0  # due prosciugate: ne resta una, meno del minimo
+    pools.step(1.0, rng, w.task.patches)
+    assert pools.on.sum() == 2
+    pools.step(1.0, rng, w.task.patches)
+    assert pools.on.sum() == 2  # non più di quante servono
+
+
+def test_a_child_needs_water_and_is_born_with_a_full_reserve():
+    cfg = small(arena_water=True, engine="numpy")
+    from evonets.evo.ecology import Ecology
+
+    e = Ecology(cfg, seed=2, initial=1)
+    cfg.arena_water = True  # (con NumPy si spegne: qui si prova solo la regola delle nascite)
+    w = e.world
+    w.energy[0], w.age[0] = cfg.arena_birth_energy + 10, cfg.arena_maturity + 1
+    w.water[0] = 5.0
+    e._births()
+    assert w.alive.sum() == 1  # senz'acqua niente figli
+    w.water[0] = cfg.arena_water_max
+    e._births()
+    child = np.flatnonzero(w.alive & (np.arange(w.n) != 0))
+    assert len(child) == 1 and w.water[child[0]] == e._full_water(child)[0]  # nasce idratato
+    assert w.water[0] == cfg.arena_water_max - cfg.arena_birth_water
+
+
+def test_food_comes_in_waves():
+    from evonets.evo.ecology import Ecology
+
+    cfg = small(engine="gpu", arena_food_every=10.0, arena_food_rate=3.0, arena_food_max=200, arena_water=False)
+    e = Ecology(cfg, seed=4, initial=0)
+    if e.gpu is None:
+        return
+    task = e.world.task
+    task.food_on[:] = False
+    e.gpu.push_world(e.bodies())
+    counts = []
+    for _ in range(12):
+        e.run(1.0)
+        counts.append(int(task.food_on.sum()))
+    assert counts[:9] == [0] * 9 and counts[9] == 30 and counts[11] == 30  # tutto insieme allo scoccare dei 10 s
+
+
+def test_the_pool_dial_moves_new_pools_farther_from_food():
+    from evonets.sim.arena import Pools
+
+    for far, lo, hi in ((0.0, "arena_pool_gap_min", "arena_pool_gap_max"),
+                        (1.0, "arena_pool_far_min", "arena_pool_far_max")):
+        cfg = Config(arena_pools=6, arena_pool_distance=far)
+        w = ArenaWorld(cfg, 2, 2, seed=1)
+        pools = Pools(cfg, w.W, w.H, np.random.default_rng(far.__hash__()), w.task.patches)
+        gap = pools._gap(pools.centre[pools.on], w.task.patches.centre)
+        assert pools.on.sum() > 0 and (gap >= getattr(cfg, lo)).all() and (gap <= getattr(cfg, hi)).all()
+
+
+def test_a_new_neuron_grows_its_own_connections():
+    from evonets.evo.ecology import Ecology
+
+    cfg = small(arena_wire_new=True, mut_neuron_toggle=1.0, mut_dup=0.0, mut_conn_add=0.0, mut_conn_del=0.0)
+    e = Ecology(cfg, seed=3, initial=4)
+    g = e.ctrl.brains.genome.take(np.arange(4))
+    g.active[:] = False
+    g.conn[:, : g.n_hidden, :] = False
+    g.conn[:, :, g.n_rec: g.n_rec + g.n_hidden] = False
+    e._mutate(g)
+    R = g.n_rec
+    new = g.active
+    assert new.any()
+    wired = [g.conn[i, k, :].any() or g.conn[i, :, R + k].any() for i, k in zip(*np.nonzero(new))]
+    assert np.mean(wired) > 0.9  # quasi tutti nascono collegati
+    cfg.arena_wire_new = False
+    g2 = e.ctrl.brains.genome.take(np.arange(4))
+    g2.active[:] = False
+    g2.conn[:, : g2.n_hidden, :] = False
+    g2.conn[:, :, R: R + g2.n_hidden] = False
+    e._mutate(g2)
+    assert not g2.conn[:, : g2.n_hidden, :].any()  # senza la regola nascono soli
+
+
+def test_thirst_grows_with_its_dial():
+    lost = []
+    for dial in (0.0, 1.0):
+        cfg, w, gpu, ga, jnp = _pool_scene(arena_thirst=dial)
+        w.pools.volume[:] = 0.0
+        gpu.push_world()
+        out = _physics(gpu, ga, jnp, np.zeros((3, 4)))
+        lost.append(10.0 - float(out["water"][1]))
+    assert abs(lost[0] / lost[1] - cfg.arena_thirst_min) < 1e-3
+
+
+def test_primordial_beings_start_with_wired_hidden_neurons():
+    from evonets.evo.ecology import Ecology
+
+    e = Ecology(small(arena_hidden_initial=2), seed=1, initial=10)
+    g = e.ctrl.brains.genome
+    assert g.active[:, :2].all() and not g.active[:, 2:].any()
+    R = g.n_rec
+    wired = g.conn[:, :2, :].any(axis=2) | g.conn[:, :, R:R + 2].any(axis=1)
+    assert wired.mean() > 0.9
+    none = Ecology(small(arena_hidden_initial=0), seed=1, initial=10).ctrl.brains.genome
+    assert not none.active.any()
+
+
+def test_primordial_hidden_neurons_also_with_the_development_genome():
+    from evonets.evo.ecology import Ecology
+    from evonets.net.brain import live_links
+
+    e = Ecology(small(genome="sviluppo", net_type="spike-ei", arena_hidden_initial=2), seed=1, initial=10)
+    g = e.ctrl.brains.genome
+    assert g.n_markers and g.active[:, :2].all()
+    R = g.n_rec
+    wired = g.conn[:, :2, :].any(axis=2) | g.conn[:, :, R:R + 2].any(axis=1)
+    assert wired.mean() > 0.5  # collegati dallo sviluppo (dai marcatori)
+
+
+def test_drinking_when_thirsty_is_rewarding_and_is_felt():
+    cfg, w, gpu, ga, jnp = _pool_scene()
+    out = _physics(gpu, ga, jnp, np.zeros((3, 4)))
+    q = np.asarray(out["quench"])
+    assert q[0] > 0 and q[1] > 0  # bevono da assetati: sollievo
+    w.water[:] = [99.0, 10.0, 50.0]  # il primo quasi pieno
+    gpu.push_world()
+    gpu.s["quench"] = jnp.zeros(3)
+    q = np.asarray(_physics(gpu, ga, jnp, np.zeros((3, 4)))["quench"])
+    assert q[0] < 0.1 * q[1]  # da sazi quasi niente
+
+
+def test_the_drink_measure_counts_returns_to_water():
+    from evonets.evo.ecology import Ecology
+
+    e = Ecology(small(arena_water=True), seed=1, initial=2)
+    e.cfg.arena_water = True
+    w = e.world
+    i = int(np.flatnonzero(w.alive)[0])
+    e._born(np.array([i]))
+    for t, water in ((1, 50), (11, 60), (12, 60), (17, 70), (18, 70), (21, 80), (22, 80), (25, 90)):
+        w.t = float(t)
+        w.water[i] = water
+        e._watch_drinks()
+    # intervalli: 11 - 0 = 11 (il primo), poi 17 - 12 = 5, 21 - 18 = 3, 25 - 22 = 3
+    assert e._first_gap[i] == 11 and e._later_n[i] == 3 and e._later_sum[i] == 11

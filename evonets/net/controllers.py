@@ -6,6 +6,10 @@ from .brain import Brains, SpikingBrains
 NET_TYPES = {"rate": (Brains, 2), "spike-ei": (SpikingBrains, 4)}
 
 
+# I nomi dei motori in più dell'arena continua, nell'ordine.
+ACTION_LABELS = ("mordere", "luce", "odore", "nutrire")
+
+
 def extra_motors(cfg, genome) -> int:
     """I motori in più di un genoma rispetto a quelli del suo tipo di rete
     (le azioni dell'arena continua; 0 nelle altre arene)."""

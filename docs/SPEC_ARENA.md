@@ -285,16 +285,102 @@ queste pressioni, si accendono da sole e per gradi.
 - I geni del corpo si ereditano (ognuno da uno dei genitori) e mutano con la
   probabilità di mutazione del genitore.
 
-### Le sei manopole, nell'ordine
+### Le dieci manopole, nell'ordine
 
 | | manopola | cosa fa | che cosa chiede |
 |---|---|---|---|
-| 1 | `arena_depletion` | ogni cibo mangiato vicino a una macchia ne toglie l'1% della salute (per la manopola); la salute torna in 500 s; la fertilità è la salute | cercare un'altra macchia, ricordare dove erano |
-| 2 | `arena_fruits` | fino a metà del cibo nuovo è un frutto cattivo, del colore che nella sua macchia non è buono (toglie 30, fa male) | distinguere i colori ed evitare |
-| 3 | `arena_reversal` | ogni 10 minuti ogni macchia ha il colore buono giallo invece di rosso con probabilità fino a ½ | imparare durante la vita quale colore è buono qui |
-| 4 | `arena_predation` | si morde un essere toccato davanti (entro 60°) e almeno 1,2 volte più piccolo: gli si tolgono 40 · morso · taglia di energia al secondo, chi morde ne prende il 60% | cacciare, fuggire, prevedere l'altro |
-| 5 | `arena_extraction` | fino a metà del cibo nuovo è da aprire: **duro** (va morso per 1 s a morso pieno, vale il doppio) o **grande** (va morso da almeno due insieme, vale 6 volte, diviso tra loro) | azioni in più passi, coordinarsi |
-| 6 | `arena_night` | un giorno e una notte ogni 10 minuti: la luce del mondo cala fino a 1 − 0,85; la luce dei segnali no | olfatto, memoria, segnali |
+| 0 | `arena_scarcity` | il cibo diventa raro: ricrescita fino al 40% (18 al secondo) e al più il 35% presenti insieme (525) | arrivare al cibo prima degli altri, vederlo da lontano, non sprecare energia |
+| 1 | `arena_thirst` | sete: la traspirazione sale dal 25% (senza bere ~560 s fermi) al 100% (~140 s) | fare la spola tra cibo e acqua, scegliere quale bisogno prima |
+| 2 | `arena_pool_distance` | le pozze nuove nascono più lontane dal cibo: dal centro della macchia più vicina da 230–300 u fino a 260–450 u | andare a bere lontano e tornare, orientarsi, ricordare dov'è l'acqua |
+| 3 | `arena_depletion` | ogni cibo mangiato vicino a una macchia ne toglie l'1% della salute (per la manopola); la salute torna in 500 s; la fertilità è la salute | cercare un'altra macchia, ricordare dove erano |
+| 4 | `arena_fruits` | fino a metà del cibo nuovo è un frutto cattivo, del colore che nella sua macchia non è buono (toglie 30, fa male) | distinguere i colori ed evitare |
+| 5 | `arena_reversal` | ogni 10 minuti ogni macchia ha il colore buono giallo invece di rosso con probabilità fino a ½ | imparare durante la vita quale colore è buono qui |
+| 6 | `arena_predation` | si morde un essere toccato davanti (entro 60°) e almeno 1,2 volte più piccolo: gli si tolgono 40 · morso · taglia di energia al secondo, chi morde ne prende il 60% | cacciare, fuggire, prevedere l'altro |
+| 7 | `arena_extraction` | fino a metà del cibo nuovo è da aprire: **duro** (va morso per 1 s a morso pieno, vale il doppio) o **grande** (va morso da almeno due insieme, vale 6 volte, diviso tra loro) | azioni in più passi, coordinarsi |
+| 8 | `arena_night` | un giorno e una notte ogni 10 minuti: la luce del mondo cala fino a 1 − 0,85; la luce dei segnali no | olfatto, memoria, segnali |
+| 9 | `arena_drought` | siccità: le pozze evaporano (piene, in 600 s con la manopola al massimo) | trovare pozze nuove, ricordare dove sono |
+
+Il cibo nasce **solo nelle macchie** (`arena_background` = 0 dal 2026-10-23; era
+0,05). Il cibo raro fin dall'inizio non regge: con 450, 550 o 700 cibi al
+massimo e senza fondo la popolazione non si è mai retta da sola in 27 minuti
+(0–8 nati al minuto, 180–290 colonizzatori al minuto, il cibo sempre tutto lì
+da trovare). Per questo è la prima manopola della scala, non un valore fisso.
+
+### Il cibo a ondate
+
+Il cibo non ricresce un po' ogni secondo: matura 30 al secondo e nasce tutto
+insieme ogni 60 s (`arena_food_every`), fino al massimo di 1500, solo nelle
+macchie. Tra un'ondata e l'altra si consuma: conviene esserci quando ricresce.
+Calibrazione provvisoria (prove interrotte a 5–6 minuti di mondo, popolazione
+ancora tenuta dai colonizzatori): ogni 60 s con 30/s e 1500 ha avuto meno
+colonizzatori (90 al minuto) di 30 s / 30 / 900 (153), 60 s / 20 / 1000 (141),
+30 s / 20 / 600 (202).
+
+### Neuroni nuovi già collegati
+
+Nell'arena (`arena_wire_new`, genoma diretto) un neurone interno che compare in
+un figlio nasce collegato: in entrata e in uscita, con la probabilità della
+nascita (cala con la distanza nel cervello e con la portata dell'individuo).
+Prima nasceva senza collegamenti e doveva aspettarli dalle mutazioni (1% per
+collegamento): in 40 minuti i vivi avevano 0,05–0,2 neuroni interni.
+
+### Esseri primordiali con 2 neuroni interni
+
+Gli esseri primordiali (all'inizio e i colonizzatori nuovi quando l'archivio
+è vuoto) nascono con 2 neuroni interni accesi e collegati con la regola della
+nascita (`arena_hidden_initial`), invece di nessuno. Serve a capire se il
+limite è la mancanza di neuroni o la mancanza di motivi per usarli: se il
+mondo non li premia, la selezione li spegne.
+
+### Il clima
+
+Una temperatura da 0 a 1: una fascia calda al centro del mondo, fresca verso
+i bordi (in alto e in basso, che sul toro si toccano), 0,5 ± 0,4, più ± 0,1
+con le stagioni (`arena_temperature`, `arena_temp_season`).
+- **Metabolismo**: tutto il consumo per 3^(T − 0,5) (Q10 degli ectotermi): da
+  0,58 volte al freddo a 1,73 al caldo (`arena_temp_q`).
+- **Cibo**: la fertilità di una macchia per 1 + 1,5 · (T − 0,5) dove si trova
+  (`arena_temp_food`): da 0,25 a 1,75 volte. Le macchie si spostano,
+  attraversano zone calde e fredde.
+- **Sensi**: i recettori della temperatura sentono quella del punto dove
+  stanno.
+Al caldo c'è più cibo ma si brucia di più; al freddo si risparmia ma si mangia
+poco. Il clima c'è sempre (non è una manopola della scala), solo con il motore
+JAX.
+
+### L'acqua
+
+Una seconda riserva del corpo, accanto all'energia (solo motore JAX,
+`arena_water`). Scelte concordate il 2026-10-23: sete subito ma leggera, pozze
+ferme, in posti diversi dal cibo ma non troppo lontani, consumate piano piano,
+che riappaiono quando sono poche; un senso interno nuovo per la sete.
+- **Riserva**: 100 · taglia. Cala di 0,7/s (per la manopola della sete: da
+  un quarto a tutto) · taglia^0,75 · (1 + 0,5 · |spinta|)
+  · lo stesso Q10 del clima: senza bere si resiste ~140 s fermi, ~55 s correndo
+  al caldo. A zero si muore di sete (contati a parte da fame e predazione).
+- **Pozze**: 6 all'inizio, su 10 posti. Ferme. Nascono con il centro della
+  macchia di cibo più vicina tra 230 e 300 u (appena fuori dal bordo della
+  macchia, che con la pozza fa 220) e lontane da altre pozze; la manopola
+  "pozze lontane" porta le nuove fino a 260–450 u (a velocità piena 9–15 s). Volume 60000; raggio 60 · √(volume / pieno): si
+  restringono bevendo. Vuote spariscono; con meno di 4 pozze ne nasce una
+  nuova (in media dopo 60 s). Con la siccità evaporano anche da sole.
+- **Bere**: stando dentro una pozza, 25/s fino al pieno; se in tanti chiedono
+  più di quanto resta, si divide.
+- **Figli**: il genitore paga 40 d'acqua e deve restargliene il 10% della
+  riserva; il figlio nasce con la riserva piena (idratato dal genitore, come
+  con il latte o il tuorlo).
+
+Prima versione (pozze a 260–450 u, figlio con 40 d'acqua, servivano 40 + 20%):
+in 40 minuti di mondo la popolazione non si è mai retta da sola (80–96% di
+colonizzatori, nessun nipote, nessun adulto pronto a riprodursi, 30–60% dei
+morti senz'acqua); la stessa corsa senz'acqua si reggeva dal minuto 12 con
+29 generazioni. Analisi del 2026-10-24.
+- **Sensi**: le pozze si vedono (blu, 0,1 sull'asse della luce; piatte, non
+  nascondono niente; dentro si vede acqua tutt'attorno), si annusano
+  (umidità, molecola 0,15, portata 100 u contro i 25 del cibo), e la riserva
+  si sente da dentro: una grandezza nuova sull'asse dell'interno, a 0,11, tra
+  l'energia (0,05) e il gusto (0,17). Un recettore interno generalista la
+  sente insieme all'energia; specializzandosi distingue fame e sete.
 
 Sempre presenti, come capacità: i **segnali** (luce e odore di ciascuno, che
 gli altri vedono e annusano) e le **cure** (chi nutre passa 20 energia/s a un

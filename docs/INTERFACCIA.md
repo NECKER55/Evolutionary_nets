@@ -55,7 +55,12 @@ complica: le sei manopole del mondo con una barra ciascuna; esseri grandi
 quanto la loro taglia, con un alone del colore del loro segnale quando si
 illuminano e il muso rosso quando mordono; frutti rossi e gialli (anello
 scuro: cattivo, per chi guarda), cibo duro con bordo bianco spesso, cibo
-grande più grosso; di notte un velo scuro. Se l'essere seguito muore si passa
+grande più grosso; di notte un velo scuro. Lo sfondo mostra il clima: rosso
+dove fa caldo, blu dove fa freddo (anche nella mappa intera); il pannello dice
+la temperatura dove sta l'essere seguito e quanto consuma lì. Le pozze d'acqua
+sono dischi blu (anche nella mappa), più piccoli man mano che si beve; il
+pannello conta le pozze e i morti di sete, e dice l'acqua dell'essere seguito
+(0% = muore di sete). Le manopole sono su due colonne. Se l'essere seguito muore si passa
 al più anziano.
 
 | Tasto | Azione |
@@ -74,7 +79,23 @@ al più anziano.
 | `Ctrl+S` | salva |
 | `Esc` | torna al menu (salva se ci sono novità) |
 
-L'esploratore delle reti non c'è ancora per l'arena.
+Tre schede, come nelle altre corse (`V` o clic sui bottoni in alto a destra):
+
+- **Mondo**: la vista descritta sopra.
+- **Panoramica**: *a che punto siamo* (le sei manopole del mondo, quale è in
+  corso e che cosa chiede, se la popolazione si regge da sola), e quattro
+  grafici minuto per minuto, ciascuno con una frase che lo spiega:
+  *popolazione* (vivi, nati, morti di fame, di vecchiaia, predati,
+  colonizzatori), *cervello e corpo* (sensi usati, neuroni, collegamenti,
+  taglia, morso, luce), *esame* (normale e senza plasticità: la differenza è
+  quanto imparano durante la vita), *il mondo* (cibo mangiato e presente,
+  frutti cattivi, salute delle macchie, energia data ai figli).
+- **Reti**: l'esploratore delle reti, con tre elenchi: i 100 più anziani vivi,
+  i campioni (il più anziano di ogni minuto), tutti i vivi (`1` `2` `3` o
+  `Tab`; `R` rifà la foto dei vivi). Per ogni essere: numero, età, taglia,
+  cibi mangiati, neuroni, collegamenti. Clic su un neurone: da chi riceve e a
+  chi manda. `Invio`: si torna al mondo seguendo l'essere scelto. Le azioni
+  (mordere, luce, odore, nutrire) compaiono tra i motori.
 
 ## La corsa: la pagina principale
 

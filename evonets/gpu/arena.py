@@ -10,7 +10,10 @@ complica (docs/SPEC_ARENA.md, sezione 15), che c'è solo qui:
   grande (va morso in due);
 - la predazione (si morde chi è abbastanza più piccolo), le cure (si nutre un
   proprio figlio), i segnali (luce del proprio colore, odore della propria
-  molecola), la notte (la luce del mondo cala, quella dei segnali no).
+  molecola), la notte (la luce del mondo cala, quella dei segnali no);
+- il clima (consumo e fertilità secondo la temperatura) e l'acqua: una
+  seconda riserva che cala sempre, le pozze dove si beve (viste in blu,
+  annusate da lontano), la sete sentita da dentro.
 
 A manopole spente, con taglia 1 e azioni ferme, è il mondo base.
 
@@ -39,6 +42,7 @@ CELL_SLOTS = 16  # oggetti per cella e per tipo che i sensi vedono
 ROWS = 64  # righe aggiornate insieme alla nascita (si ripete se sono di più)
 BLOCK = 256  # si calcolano i posti fino all'ultimo vivo, arrotondati a multipli di BLOCK
 FOOD_KEYS = ("food", "food_on", "food_r", "food_color", "food_bad", "food_kind", "work")
+POOL_KEYS = ("pool", "pool_vol")  # le pozze: (K, 2) e (K,)
 EXTRA = 4  # azioni: mordere, luce, odore, nutrire
 NORMAL, HARD, BIG = 0, 1, 2  # tipi di cibo
 
@@ -91,6 +95,19 @@ def daylight(ph, t):
     """La luce del mondo: 1 di giorno, fino a 1 - 0,85 · manopola a mezzanotte."""
     night = 0.5 - 0.5 * jnp.cos(2.0 * jnp.pi * t / ph["arena_day"])
     return 1.0 - 0.85 * ph["arena_night"] * night
+
+
+def temperature(ph, pos, t):
+    """Come `sim.arena.temperature`."""
+    band = -jnp.cos(2.0 * jnp.pi * pos[..., 1] / ph["arena_size_h"])
+    season = jnp.sin(2.0 * jnp.pi * t / ph["arena_season"])
+    on = (ph["arena_temperature"] > 0).astype(F)
+    return jnp.clip(0.5 + ph["arena_temperature"] * band + ph["arena_temp_season"] * season * on, 0.0, 1.0)
+
+
+def pool_radius(ph, s):
+    """Il raggio di ogni pozza: si restringe man mano che si beve."""
+    return ph["arena_pool_radius"] * jnp.sqrt(jnp.clip(s["pool_vol"] / ph["arena_pool_volume"], 0.0, 1.0))
 
 
 def radius(ph, s):
@@ -151,6 +168,13 @@ def quanta(ph, P, s, near_food, near_being):
     glow = s["glow"][who] * _spectral(P["mu_l"][..., None], P["sg_l"][..., None], s["sig_color"][who],
                                      ph["being_color_width"])
     out += P["g_l"] * (fade_being * glow).mean(-1)
+    # Le pozze: piatte, non nascondono niente; dentro una pozza si vede acqua tutt'attorno.
+    p_r = pool_radius(ph, s)
+    p_ok = s["pool_vol"] > 0  # (K,)
+    wx = _wrap(s["pool"][None, None, :, 0] - px[..., None], W)  # (N, R, K)
+    wy = _wrap(s["pool"][None, None, :, 1] - py[..., None], H)
+    d_pool, _ = hits(wx, wy, jnp.broadcast_to(p_r, (N, p_r.shape[0])), jnp.broadcast_to(p_ok, (N, p_ok.shape[0])))
+    out += day * P["c_pool"] * jnp.exp(-d_pool / L).mean(-1)
     # Odori: cibo (molecola del suo colore), esseri, segnali (molecola propria).
     lam = ph["odor_range"]
     near_f = jnp.exp(-jnp.maximum(jnp.sqrt(fx * fx + fy * fy) - f_r[:, None, :], 0.0) / lam) * f_ok[:, None, :]
@@ -161,6 +185,8 @@ def quanta(ph, P, s, near_food, near_being):
     out += P["g_c"] * _tuning(ph["being_molecule"], P["mu_c"], P["sg_c"]) * ph["being_smell"] * near_b.sum(-1)
     sig = _tuning(s["sig_mol"][bi][:, None, :], P["mu_c"][..., None], P["sg_c"][..., None])  # (N, R, Cb)
     out += P["g_c"] * ph["arena_signal_smell"] * (near_b * sig * s["smell"][bi][:, None, :]).sum(-1)
+    humid = (jnp.exp(-jnp.maximum(jnp.sqrt(wx * wx + wy * wy) - p_r, 0.0) / ph["water_odor_range"]) * p_ok).sum(-1)
+    out += P["g_c"] * _tuning(ph["water_molecule"], P["mu_c"], P["sg_c"]) * ph["water_smell"] * humid
     # Tatto: gli altri esseri toccati, sul lato che li guarda.
     bx = _wrap(beings[..., 0] - s["pos"][:, 0, None], W)  # (N, Cb), dal centro del corpo
     by = _wrap(beings[..., 1] - s["pos"][:, 1, None], H)
@@ -169,10 +195,15 @@ def quanta(ph, P, s, near_food, near_being):
     facing = (bx[:, None, :] * nx[..., None] + by[:, None, :] * ny[..., None]) / jnp.maximum(dist, 1e-9)[:, None, :]
     out += P["c_press"] * (touch[:, None, :] * jnp.maximum(0.0, facing)).sum(-1)
     # Temperatura dell'ambiente, bussola, corpo (l'energia rispetto alla propria riserva).
-    out += P["g_t"] * _tuning(jnp.clip(ph["ambient_temperature"], 0.0, 1.0), P["mu_t"], P["sg_t"])
+    temp = jnp.where(ph["arena_temperature"] > 0, temperature(ph, jnp.stack([px, py], -1), s["t"]),
+                     jnp.clip(ph["ambient_temperature"], 0.0, 1.0))  # il clima nel punto del recettore
+    out += P["g_t"] * _tuning(temp, P["mu_t"], P["sg_t"])
     centre = s["heading"][:, None] + P["centre"]
     out += P["g_mag"] * jnp.maximum(0.0, jnp.cos(centre) * ph["magnetic"][0] + jnp.sin(centre) * ph["magnetic"][1])
     out += jnp.einsum("nrk,nk->nr", P["c_body"], body(ph, {**s, "energy": s["energy"] / s["size"]}))
+    full = ph["arena_water_max"] * s["size"]
+    out += P["c_water"] * jnp.clip(s["water"] / full, 0.0, 1.0)[:, None] * (ph["arena_water"] > 0)  # la sete
+    out += P["c_quench"] * s["quench"][:, None]  # il sollievo di aver appena bevuto
     return out
 
 
@@ -246,7 +277,29 @@ def physics(ph, P, s, actions, extra, near_food, near_being):
                          + mass * ph["metabolism_move"] * jnp.abs(act[:, 0]) ** ph["metabolism_exponent"]
                          + mass * ph["metabolism_turn"] * jnp.abs(turn) ** ph["metabolism_exponent"])
               + P["upkeep"] + ph["arena_bite_cost"] * bite + ph["arena_signal_cost"] * (light + odor)) * alive
+    heat = ph["arena_temp_q"] ** (temperature(ph, s["pos"], s["t"]) - 0.5)  # Q10: al caldo si consuma di più
+    effort = effort * heat
     energy = jnp.maximum(s["energy"] - effort * dt, 0.0)
+    # Acqua: la traspirazione, poi si beve dentro una pozza (la più vicina).
+    thirsty = ph["arena_water"] > 0
+    w_max = ph["arena_water_max"] * size
+    sweat = ph["arena_water_loss"] * kleiber * (1.0 + ph["arena_water_move"] * jnp.abs(act[:, 0])) * heat
+    water = jnp.maximum(s["water"] - sweat * dt * thirsty * alive, 0.0)
+    p_r = pool_radius(ph, s)
+    wx = _wrap(s["pool"][None, :, 0] - pos[:, 0, None], W)  # (N, K)
+    wy = _wrap(s["pool"][None, :, 1] - pos[:, 1, None], H)
+    p_d = jnp.where(s["pool_vol"] > 0, jnp.sqrt(wx * wx + wy * wy), jnp.inf)
+    which = jnp.argmin(p_d, 1)
+    inside = (p_d.min(1) <= jnp.take(p_r, which)) & alive & thirsty
+    want = jnp.where(inside, jnp.minimum(ph["arena_drink_rate"] * dt, w_max - water), 0.0)
+    k_pools = s["pool_vol"].shape[0]
+    asked = jax.ops.segment_sum(want, which, k_pools)
+    share = jnp.where(asked > 0, jnp.minimum(1.0, s["pool_vol"] / jnp.maximum(asked, 1e-9)), 0.0)
+    drunk = want * share[which]
+    relief = ph["arena_drink_reward"] * drunk / w_max * jnp.clip(1.0 - water / w_max, 0.0, 1.0)  # più sete, più sollievo
+    quench = jnp.minimum(s["quench"] * jnp.exp(-dt / ph["taste_tau"]) + relief, 1.0)
+    water = jnp.minimum(water + drunk, w_max)
+    pool_vol = jnp.maximum(s["pool_vol"] - jax.ops.segment_sum(drunk, which, k_pools), 0.0)
     # Morsi: a un essere toccato davanti (entro 60°) e abbastanza più piccolo.
     touching = ok & (d <= reach + 0.5)
     ahead = (ox * fx[:, None] + oy * fy[:, None]) / safe > 0.5
@@ -304,9 +357,12 @@ def physics(ph, P, s, actions, extra, near_food, near_being):
     energy = jnp.clip(energy, 0.0, e_max)
     taste = jnp.minimum(s["taste"] * jnp.exp(-dt / ph["taste_tau"]) + good_meals, 1.0)
     pain = jnp.minimum(bitten.astype(F) + bad_meals, 1.0)
-    dead = alive & (energy <= 0.0)
-    starved = dead & ~killed
+    dry = alive & thirsty & (water <= 0.0) & (energy > 0.0)
+    dead = alive & ((energy <= 0.0) | dry)
+    starved = dead & ~killed & ~dry
     return dict(pos=pos, vel=vel, heading=heading, ang_vel=ang_vel, energy=jnp.where(dead, 0.0, energy),
+                water=jnp.where(dead, 0.0, water), pool_vol=pool_vol, quench=jnp.where(dead, 0.0, quench), thirst=s["thirst"] + dry.sum(),
+                drunk=s["drunk"] + drunk.sum(),
                 alive=(alive & ~dead).astype(F), bump=bump.astype(F), taste=taste, pain=pain,
                 food_on=food_on, work=work, eaten=s["eaten"] + good_meals, glow=light, smell=odor, bite=bite,
                 starved=s["starved"] + starved.sum(), killed=s["killed"] + killed.sum(),
@@ -324,10 +380,12 @@ def make_run(net_type: str, n_hidden: int, substeps: int, geo: tuple):
         near_being = neighbours(table(s["pos"], alive > 0, geo), s["pos"], geo)
         key, sub = jax.random.split(s["key"])
         obs, m = respond(ph, P, s, sub, alive, near_food, near_being)
+        # Il sistema di valore: il segnale positivo è il gusto più il sollievo della sete.
+        valued = {**s, "taste": jnp.minimum(s["taste"] + s["quench"], 1.0)}
         if net_type == "rate":
-            brain, out = rate_brain(ph, P, s, obs, alive, n_hidden)
+            brain, out = rate_brain(ph, P, valued, obs, alive, n_hidden)
         else:
-            brain, out = spike_brain(ph, P, s, obs, alive, n_hidden, substeps)
+            brain, out = spike_brain(ph, P, valued, obs, alive, n_hidden, substeps)
         extra = jnp.clip(brain["state"][:, n_hidden + base: n_hidden + base + EXTRA], 0.0, 1.0)
         world = physics(ph, P, s, out[:, :2] * alive[:, None], extra, near_food, near_being)
         return {**s, **world, **brain, "obs": obs, "m": m, "key": key}
@@ -338,7 +396,7 @@ def make_run(net_type: str, n_hidden: int, substeps: int, geo: tuple):
         n = P["active"].shape[0]
         if m >= n:
             return jax.lax.fori_loop(0, k, lambda i, s: step(ph, P, s), s)
-        rows = [key for key, v in s.items() if key not in FOOD_KEYS and v.ndim and v.shape[0] == n]
+        rows = [key for key, v in s.items() if key not in FOOD_KEYS + POOL_KEYS and v.ndim and v.shape[0] == n]
         cut = {key: (v[:m] if key in rows else v) for key, v in s.items()}
         cut = jax.lax.fori_loop(0, k, lambda i, c: step(ph, {key: v[:m] for key, v in P.items()}, c), cut)
         return {key: (s[key].at[:m].set(v) if key in rows else v) for key, v in cut.items()}
@@ -351,7 +409,8 @@ def make_run(net_type: str, n_hidden: int, substeps: int, geo: tuple):
 BRAIN_PARAMS = ("links", "target_on", "eta", "rule", "kmod", "learns", "upkeep", "hebb", "sign", "intrinsic",
                 "boost", "closure", "value", "early_keep", "homeo", "target_act")
 SENSE_PARAMS = ("angles", "body", "active", "centre", "half", "mu_c", "sg_c", "g_c", "c_press", "mu_m", "sg_m", "g_m",
-                "mu_t", "sg_t", "g_t", "g_mag", "c_body", "keep", "sub", "div", "c_food", "c_fruit", "c_being")
+                "mu_t", "sg_t", "g_t", "g_mag", "c_body", "keep", "sub", "div", "c_food", "c_fruit", "c_being",
+                "c_pool", "c_water", "c_quench")
 
 
 def pack_params(brains) -> dict:
@@ -378,9 +437,9 @@ def pack_brain_state(brains, obs, adapt) -> dict:
     return {k: np.asarray(v, dtype=np.float32) for k, v in out.items()}
 
 
-WORLD = ("pos", "vel", "heading", "ang_vel", "energy", "taste", "bump")
-ACTIONS = ("bite", "glow", "smell")  # livelli dell'ultimo passo (per l'interfaccia)
-COUNTERS = ("starved", "killed", "meals", "bad_meals", "fed")
+WORLD = ("pos", "vel", "heading", "ang_vel", "energy", "taste", "bump", "water")
+ACTIONS = ("bite", "glow", "smell", "quench")  # livelli dell'ultimo passo (per l'interfaccia e le misure)
+COUNTERS = ("starved", "killed", "meals", "bad_meals", "fed", "thirst", "drunk")
 
 
 def arena_phys(cfg) -> dict:
@@ -388,9 +447,16 @@ def arena_phys(cfg) -> dict:
     for k in ("arena_size_w", "arena_size_h", "being_molecule", "being_smell", "being_color_width", "arena_day",
               "arena_night", "arena_predation", "arena_bite_rate", "arena_bite_ratio", "arena_bite_gain",
               "arena_bite_cost", "arena_hard_work", "arena_hard_energy", "arena_big_energy", "arena_signal_cost",
-              "arena_signal_smell", "arena_feed_rate", "arena_feed_gain"):
+              "arena_signal_smell", "arena_feed_rate", "arena_feed_gain", "arena_temperature", "arena_temp_season",
+              "arena_temp_q", "arena_season", "arena_water_max", "arena_water_loss", "arena_water_move",
+              "arena_drink_rate", "arena_pool_radius", "arena_pool_volume", "water_molecule", "water_smell",
+              "water_odor_range", "arena_drink_reward"):
         ph[k] = np.float32(getattr(cfg, k))
     ph["food_energy"] = np.float32(cfg.arena_food_energy)  # nell'arena il cibo vale arena_food_energy
+    ph["arena_water"] = np.float32(bool(cfg.arena_water))
+    # La sete graduale: la traspirazione cresce con la manopola.
+    ph["arena_water_loss"] = np.float32(cfg.arena_water_loss * (cfg.arena_thirst_min
+                                                                 + (1.0 - cfg.arena_thirst_min) * cfg.arena_thirst))
     return ph
 
 
@@ -404,6 +470,11 @@ class ArenaGpu:
     def __init__(self, world, ctrl, seed: int, bodies: dict):
         cfg = world.cfg
         self.cfg, self.world, self.ctrl = cfg, world, ctrl
+        if not hasattr(world, "pools"):  # un mondo senza ecologia (le prove): pieni d'acqua, nessuna pozza
+            from ..sim.arena import Pools
+
+            world.water = np.full(world.n, cfg.arena_water_max)
+            world.pools = Pools(cfg, world.W, world.H, np.random.default_rng(0), world.task.patches, start=False)
         b = ctrl.brains
         self.geo = (float(world.cells[0]), float(world.cells[1]), int(world.cells[2]), int(world.cells[3]))
         self.P = {k: jnp.asarray(v) for k, v in pack_params(b).items()}
@@ -441,7 +512,8 @@ class ArenaGpu:
     def pull(self) -> None:
         """Mondo e cibo dalla GPU agli oggetti NumPy (i cervelli restano lì)."""
         w, task = self.world, self.world.task
-        g = jax.device_get({k: self.s[k] for k in WORLD + ACTIONS + COUNTERS + ("alive", "food_on", "eaten")})
+        g = jax.device_get({k: self.s[k] for k in WORLD + ACTIONS + COUNTERS + ("alive", "food_on", "eaten",
+                                                                                 "pool_vol")})
         for k in WORLD:
             setattr(w, k, np.asarray(g[k], dtype=float))
         w.bump = g["bump"] > 0
@@ -449,6 +521,7 @@ class ArenaGpu:
         for k in ACTIONS:
             setattr(w, k, np.asarray(g[k], dtype=float))
         task.food_on = g["food_on"] > 0
+        w.pools.volume = np.asarray(g["pool_vol"], dtype=float)
         task.eaten = np.asarray(g["eaten"]).astype(int)
         now = {k: float(g[k]) for k in COUNTERS}
         new = {k: now[k] - self.counts[k] for k in COUNTERS}
@@ -458,6 +531,8 @@ class ArenaGpu:
         task.eaten_total += int(round(new["meals"]))
         task.bad_total += int(round(new["bad_meals"]))
         task.fed_total += new["fed"]
+        w.deaths["sete"] = w.deaths.get("sete", 0) + int(round(new["thirst"]))
+        w.drunk_total = getattr(w, "drunk_total", 0.0) + new["drunk"]
         w.grids_dirty = True
 
     def push_world(self, bodies: dict | None = None) -> None:
@@ -466,7 +541,8 @@ class ArenaGpu:
         w, task = self.world, self.world.task
         upd = {k: getattr(w, k) for k in WORLD}
         upd.update(alive=w.alive, food=task.food, food_on=task.food_on, eaten=task.eaten,
-                   food_color=task.color, food_bad=task.bad, food_kind=task.kind, food_r=task.radius)
+                   food_color=task.color, food_bad=task.bad, food_kind=task.kind, food_r=task.radius,
+                   pool=w.pools.centre, pool_vol=w.pools.volume)
         if bodies is not None:
             upd.update(bodies)
         for k, v in upd.items():  # identità e genitori come interi: a 32 bit decimali si confonderebbero
