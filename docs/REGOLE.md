@@ -643,7 +643,9 @@ cervello, come in natura (chemoaffinità di Sperry):
   espressioni, i gradienti, la tabella e il guadagno (come gli altri geni). Un
   marcatore si **duplica** (la copia è espressa uguale ovunque e riga e
   colonna della tabella si dividono a metà: nessun cambiamento finché non
-  diverge), si rompe (più facilmente se lega molti marcatori) o si ripara;
+  diverge), si rompe o si ripara. Il gene di un marcatore ha lunghezza fissa
+  7 (esistenza, gradiente, dominio di legame): come in natura non diventa più
+  fragile perché esistono altri marcatori;
   tra copie della stessa famiglia vale lo scambio ineguale. Un neurone
   duplicato porta con sé i suoi marcatori: i suoi collegamenti nascono dallo
   sviluppo.
@@ -651,8 +653,14 @@ cervello, come in natura (chemoaffinità di Sperry):
   passa intero da un genitore, abbinato per identità; quello di un solo
   genitore passa con probabilità 1/2. Una cellula esprime ogni marcatore come
   nel genitore da cui viene (o, se lui non lo ha, come nell'altro).
-- **Solo cervello**: anche i marcatori dei sensi sono fissi, uguali per tutti,
-  senza gradiente, mai mutati.
+- **Solo cervello**: anche i geni dei marcatori dei sensi sono fissi, uguali
+  per tutti, mai mutati. Come le cellule della retina, però, i sensi seguono i
+  gradienti secondo l'altezza a cui entra il loro nervo: l'occhio sinistro e
+  il destro hanno un'etichetta di lato e l'asse sinistra-destra vale anche per
+  loro (per i due marcatori dell'asse la parte propria dei sensi è nulla: il
+  lato lo dice solo la posizione). I due sensi di una coppia (sinistro e
+  destro) sono lo stesso organo: hanno gli stessi marcatori propri e
+  differiscono solo per la posizione del nervo.
 - **Il grembo** (net/womb.py): ogni neonato, prima di entrare nell'arena,
   vive `prenatal_time` (5 s) di **attività spontanea**. I sensi ricevono onde
   che scorrono lungo l'ordine dei nervi, come le onde della retina: sensi

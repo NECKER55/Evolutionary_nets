@@ -427,9 +427,8 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     if not fixed:
         g.r_active = np.where(g.r_active, rng.random(g.r_active.shape) >= on,
                               rng.random(g.r_active.shape) < np.minimum(1.0, mu)[:, None])
-    if developed:  # anche un marcatore si rompe (più facilmente se lega molti altri) o si ripara
-        length = development.MARKER_BASE_LENGTH + 2 * g.m_active.sum(axis=1)
-        broken = 1.0 - (1.0 - np.minimum(1.0, mu)) ** length
+    if developed:  # anche un marcatore si rompe o (raramente) si ripara
+        broken = 1.0 - (1.0 - np.minimum(1.0, mu)) ** development.MARKER_GENE_LENGTH
         g.m_active = np.where(g.m_active, rng.random(g.m_active.shape) >= broken[:, None],
                               rng.random(g.m_active.shape) < np.minimum(1.0, mu)[:, None])
     _duplicate(g, rng, np.minimum(1.0, rate("dup")), cfg.receptor_dup_split, receptors=not fixed)

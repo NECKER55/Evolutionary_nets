@@ -213,9 +213,10 @@ all'apprendimento.
    recettori postsinaptici, in scala logaritmica). Il peso iniziale di s → t è
    affinità(s, t) · guadagno_t, limitato a ±`synapse_max`. Più gradi di libertà
    restando indiretto: il genoma descrive i neuroni, non le sinapsi.
-3. **Sensi fissi** (`sim_mode = "cervello"`): anche i marcatori dei sensi sono
-   fissi (uguali per tutti, mai mutati): il cervello deve adattarsi a sensi del
-   tutto dati. Si estraggono una volta, con un seme fisso del set di sensi.
+3. **Sensi fissi** (`sim_mode = "cervello"`): anche i geni dei marcatori dei
+   sensi sono fissi (uguali per tutti, mai mutati): il cervello deve adattarsi
+   a sensi dati. Dal 2026-10-23 seguono però i gradienti secondo l'altezza del
+   loro nervo, come la retina (sezione 14). Si estraggono una volta, con un seme fisso del set di sensi.
    Quando un marcatore si duplica, la copia nei sensi vale quanto l'originale e
    poi non deriva. Nella simulazione completa i marcatori dei recettori
    evolvono come quelli dei neuroni.
@@ -572,3 +573,47 @@ mutazione non si congelano (`weight_prob` 0,09 alla 150). Restano aperti: la
 riuscita sul bersaglio non è ancora migliore in 100 generazioni, e gli
 individui tengono in media 0,7 recettori su 2 (l'asse sinistra-destra rende
 con due occhi).
+
+## 14. Sensi con il lato, organi pari, marcatori a lunghezza fissa (2026-10-23)
+
+### Il problema
+
+Corsa `corsa-20261023-134433` (solo cervello, sviluppo canalizzato): tutta la
+popolazione usava un solo occhio, il rosso destro (97%), e la scala si è
+fermata tra 0,82 e 0,94 dalla generazione 100 (esame 0,18). Il secondo occhio
+non arrivava perché ogni passo per aggiungerlo peggiorava:
+1. i sensi fissi non seguivano i gradienti: occhio sinistro e destro erano
+   chimicamente indistinguibili e l'asse sinistra-destra valeva solo per i
+   neuroni;
+2. i marcatori si perdevano (da 4 a 2,1): la lunghezza del gene, 3 + 2 per
+   marcatore acceso, rendeva ognuno più fragile quanti più ce n'erano, e le
+   rotture superavano sempre le duplicazioni.
+
+Dopo le prime due correzioni, la corsa `corsa-20261023-151336` usava 7,4
+recettori (contro 1,7) con i marcatori stabili, ma quasi solo quelli di
+sinistra (occhi 88–95% contro 8–19%): i marcatori propri dei sensi fissi erano
+estratti per ogni senso, e i due lati di una coppia erano diversi (per esempio
+1,18 contro 2,55 sul marcatore 2 dell'occhio rosso), con lo stesso pregiudizio
+in tutta la popolazione.
+
+### Cosa cambia
+
+- **I sensi seguono i gradienti** secondo l'altezza del loro nervo, come le
+  cellule della retina (Eph/efrine): anche i sensi fissi hanno un'etichetta
+  di lato. Per i due marcatori dell'asse la parte propria dei sensi fissi è
+  nulla: il lato lo dice solo la posizione.
+- **Organi pari** (`senses.organs`): i due sensi di una coppia (sinistro e
+  destro) sono lo stesso organo, con gli stessi marcatori propri.
+- **Gene di un marcatore a lunghezza fissa** (7: esistenza, gradiente, dominio
+  di legame), come in natura: non si allunga con il numero dei partner.
+
+### Effetto misurato alla nascita (solo cervello, 3000 individui)
+
+| coppia | prima: riflesso verso / opposto | ora: usato sinistro / destro | ora: riflesso verso / opposto |
+|---|---|---|---|
+| nasi | 7% / 4% | 26% / 25% | 23% / 5% |
+| occhi rossi | 13% / 6% | 19% / 19% | 16% / 4% |
+| occhi gialli | 11% / 10% | 32% / 31% | 17% / 8% |
+| occhi blu | 19% / 3% | 41% / 39% | 37% / 7% |
+
+Non ancora verificato in evoluzione con la versione completa.

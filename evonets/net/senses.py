@@ -75,6 +75,23 @@ def senses(cfg) -> tuple[Sense, ...]:
     return SETS[cfg.sensor_set]
 
 
+SIDES = (" sinistro", " destro")
+
+
+def organs(cfg) -> np.ndarray:
+    """(R,) a quale organo appartiene ogni senso del set: i due sensi di una
+    coppia (stesso nome, "sinistro" e "destro") sono lo stesso organo, come
+    gli organi pari di un corpo bilaterale, fatti dagli stessi geni."""
+    names = []
+    for x in senses(cfg):
+        name = x.name
+        for side in SIDES:
+            name = name.replace(side, "")
+        names.append(name)
+    kinds = list(dict.fromkeys(names))
+    return np.array([kinds.index(name) for name in names])
+
+
 def genes(cfg, n: int) -> dict[str, np.ndarray]:
     """I geni dei recettori del set, uguali per `n` individui (un posto per senso)."""
     s = senses(cfg)

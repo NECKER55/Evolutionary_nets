@@ -76,7 +76,7 @@ class Anatomy:
         # Sviluppo: identità di ogni cellula (colore dei marcatori che esprime).
         self.markers = genome.n_markers > 0 and bool(genome.m_active[0].any())
         if self.markers:
-            self.expression = development.expression(genome, cfg.sim_mode == "cervello")[0]  # (S, M)
+            self.expression = development.expression(genome)[0]  # (S, M)
             self.color = development.identity(genome, 0)
             self.marker_color = development.marker_colors(genome, 0)
 

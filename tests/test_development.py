@@ -136,7 +136,7 @@ def test_with_development_weights_and_connections_are_not_genes():
     assert np.array_equal(g.conn, c) and np.array_equal(g.weights, w)  # muta il genoma, non il cervello
     assert not np.array_equal(g.n_mark, marks)
     kids = reproduce(b.genome, 50, cfg, np.random.default_rng(1))
-    a = dev.affinity(kids, False)
+    a = dev.affinity(kids)
     assert not kids.conn[a == 0.0].any()  # i figli sono sviluppati dai loro marcatori
 
 
@@ -152,10 +152,65 @@ def test_brain_mode_fixes_the_markers_of_the_senses():
         for k in range(g.n_markers):
             if g.m_fam[i, k] < first.shape[1]:
                 assert np.allclose(g.r_mark[i, :, k], first[:, g.m_fam[i, k]])
-    # i sensi non seguono i gradienti
+    # come la retina, i sensi seguono i gradienti secondo l'altezza del loro nervo
     g.m_grad[:] = 5.0
-    e = dev.expression(g, fixed_senses=True)
-    assert np.allclose(e[:, : g.n_rec], dev.sigmoid(g.r_mark) * g.m_active[:, None, :])
+    e = dev.expression(g)
+    xy = dev.positions(g)[:, : g.n_rec] - 0.5
+    drive = g.r_mark + np.einsum("nsd,nmd->nsm", xy, g.m_grad)
+    assert np.allclose(e[:, : g.n_rec], dev.sigmoid(drive) * g.m_active[:, None, :])
+
+
+def test_in_brain_mode_the_eyes_know_their_side():
+    """Sensi fissi: l'occhio rosso destro (nervo a 0,6) esprime di più il
+    marcatore della destra, il sinistro quello della sinistra, e chi nasce con
+    un riflesso lo ha molto più spesso verso il lato dello stimolo che al
+    contrario (geometria.BILATERAL: motori 2 = destra, 3 = sinistra)."""
+    from evonets.net.senses import SETS
+
+    cfg, b = grown(n=1000, kind=SpikingBrains, sim_mode="cervello")
+    g = b.genome
+    names = [x.name for x in SETS[cfg.sensor_set]]
+    left, right = names.index("occhio rosso sinistro"), names.index("occhio rosso destro")
+    e = dev.expression(g)
+    assert (e[:, right, 0] > e[:, left, 0]).mean() > 0.9 and (e[:, left, 1] > e[:, right, 1]).mean() > 0.9
+    H = g.n_hidden
+    w = np.abs(g.weights)
+    toward = w[:, H + 2, right] + w[:, H + 3, left]
+    away = w[:, H + 2, left] + w[:, H + 3, right]
+    assert (toward > away + 0.1).mean() > 2.0 * (away > toward + 0.1).mean()  # alla partenza circa 22% contro 8%
+
+
+def test_paired_senses_are_the_same_organ_and_neither_side_is_favoured():
+    """Sensi fissi: sinistro e destro di una coppia hanno gli stessi marcatori
+    propri (lo stesso organo) e alla nascita sono usati altrettanto spesso."""
+    from evonets.net.brain import live_links
+    from evonets.net.senses import SETS, organs
+
+    cfg, b = grown(n=3000, kind=SpikingBrains, sim_mode="cervello")
+    g = b.genome
+    organ = organs(cfg)
+    names = [x.name for x in SETS[cfg.sensor_set]]
+    left, right = names.index("occhio rosso sinistro"), names.index("occhio rosso destro")
+    assert organ[left] == organ[right] and organ[left] != organ[names.index("occhio giallo sinistro")]
+    assert np.allclose(g.r_mark[:, left], g.r_mark[:, right])
+    used = live_links(g.conn, g.active, g.r_active)[:, :, : g.n_rec].any(axis=1)
+    for k in range(0, 8, 2):  # le quattro coppie: nasi, occhi rossi, gialli, blu
+        assert abs(used[:, k].mean() - used[:, k + 1].mean()) < 0.04
+
+
+def test_a_marker_is_not_more_fragile_because_others_exist():
+    cfg = Config(genome="sviluppo", marker_slots=8, marker_initial=8, mut_dup=1e-5)
+    rng = np.random.default_rng(0)
+    lost = []
+    for on in (2, 8):
+        b = Brains(cfg, 4000, 2, 1)
+        g = b.genome
+        g.m_active[:, on:] = False
+        g.meta[:, META_INDEX["toggle"]] = np.log(0.01)
+        before = g.m_active.sum()
+        mutate(g, cfg, rng)
+        lost.append(1.0 - (g.m_active[:, :on]).sum() / before)
+    assert abs(lost[0] - lost[1]) < 0.01 and abs(lost[0] - (1 - 0.99 ** dev.MARKER_GENE_LENGTH)) < 0.01
 
 
 def test_development_runs_save_and_resume(tmp_path):
