@@ -583,8 +583,9 @@ sensoriale e la sua rete:
 - per ciascun collegamento possibile, se **esiste** e il suo **peso**;
 - per ciascun neurone interno o motore, i suoi **geni propri**;
 - il **meccanismo di mutazione e di riproduzione**: i tassi di mutazione, la
-  portata λ dei collegamenti e quanto spesso l'individuo, come madre, fa figli
-  con un partner (gene `sex`, punto 14);
+  portata λ dei collegamenti, quanto spesso l'individuo, come madre, fa figli
+  con un partner (gene `sex`, punto 14) e, con lo sviluppo, la precisione con
+  cui il cervello si costruisce (gene `canal`);
 - per ogni gene di recettore e di neurone interno, la sua **discendenza**:
   un'identità (quale gene è) e una famiglia (da quale gene antenato discendono
   lui e le sue copie). I geni dei primi individui hanno l'identità del loro
@@ -608,26 +609,34 @@ cervello, come in natura (chemoaffinità di Sperry):
   motore esprime ciascun marcatore in una quantità tra 0 e 1, che dipende da
   un gene della cellula e, per i marcatori a **gradiente**, dalla sua
   posizione nel cervello (come Eph ed efrine, che costruiscono le mappe
-  topografiche: due geni per marcatore, lungo x e lungo y). Si parte con 2
-  marcatori; i posti crescono come quelli dei neuroni.
-- **Asse sinistra-destra del fondatore**: i 2 marcatori di partenza sono una
+  topografiche: due geni per marcatore, lungo x e lungo y). Si parte con 4
+  marcatori su 6 posti; i posti crescono come quelli dei neuroni.
+- **Asse sinistra-destra del fondatore**: i primi 2 marcatori di partenza sono una
   coppia di gradienti opposti lungo y (pendenza `marker_map_gradient` 12),
   ciascuno legato a se stesso (`marker_map_affinity` 2), con un po' di
   variazione tra individui (`marker_map_std` 0,3). Ogni cellula si collega
   soprattutto alla sua stessa metà: il recettore che guarda a destra allo
-  sterzo verso destra, come la mappa del tetto ottico. Alla partenza il 42%
-  degli individui nasce con un riflesso "gira verso ciò che vedi", il 13% con
-  quello opposto, gli altri senza.
+  sterzo verso destra, come la mappa del tetto ottico. Gli altri 2 marcatori
+  partono a caso. Alla partenza il 52% degli individui nasce con un riflesso
+  "gira verso ciò che vedi", il 13% con quello opposto, gli altri senza.
 - **Tabella di affinità** (gene dell'individuo): quanto un marcatore
   sull'assone si lega a un marcatore sul bersaglio, con il segno.
 - **Alla nascita**: affinità(s → t) = Σ espressione_s[a] · tabella[a, b] ·
-  espressione_t[b]; il collegamento nasce con probabilità
-  p_geometria(d) · (1 − e^(−|affinità|)) (senza affinità non nasce nulla); il
+  espressione_t[b]. L'attrazione che arriva al bersaglio si attenua con la
+  distanza: |affinità| · e^(−d/λ), con λ la portata dell'individuo. Il
+  collegamento nasce con probabilità sigmoide(k · (attrazione − 1)), spostata
+  perché senza attrazione sia 0 (`develop_threshold` 1). È la
+  **canalizzazione**: le vie attratte con forza nascono quasi sempre, le deboli
+  quasi mai. k, la **precisione dello sviluppo**, è un gene dell'individuo
+  (`canal`, partenza `develop_precision` 8). Un neurone con se stesso nasce
+  con probabilità `net_self_prob` · (1 − e^(−|affinità|)). Il
   peso è affinità · e^guadagno, con il **guadagno** gene del neurone che
   riceve (quanti recettori postsinaptici ha), al più ±`synapse_max`. Nelle
   reti a impulsi il segno viene dal tipo di chi trasmette.
-- Lo sviluppo è in parte **casuale**: fratelli con lo stesso genoma hanno
-  cervelli simili ma non uguali. Il cervello sviluppato appartiene
+- Lo sviluppo è in parte **casuale**, ma solo vicino alla soglia: fratelli con
+  lo stesso genoma hanno le stesse vie principali (alla partenza un clone
+  ritrova l'88% dei collegamenti del genitore) e differiscono in quelle al
+  limite. Il cervello sviluppato appartiene
   all'individuo: un genitore che sopravvive tiene il suo, ogni figlio sviluppa
   il proprio.
 - **Mutazioni**: i pesi e i collegamenti non sono geni e non mutano; mutano le

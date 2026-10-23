@@ -66,7 +66,7 @@ def test_position_is_inherited_with_its_neuron_and_drifts_inside_the_brain():
             src = 0 if np.array_equal(child.weights[k, h], g.weights[0, h]) else 1
             assert np.array_equal(child.pos[k, h], g.pos[src, h])
     big = Config(mut_pos_prob=1.0, mut_pos_std=0.5)
-    child.meta[:, :] = np.log(np.array([0.1, 0.3, 0.01, 0.01, 0.01, 0.005, 1.0, 0.5, 0.05, 0.3, 0.5]))
+    child.meta[:, :] = np.log(np.array([0.1, 0.3, 0.01, 0.01, 0.01, 0.005, 1.0, 0.5, 0.05, 0.3, 0.5, 8.0]))
     mutate(child, big, np.random.default_rng(2))
     assert ((child.pos >= 0.0) & (child.pos <= 1.0)).all() and ((child.r_y >= 0) & (child.r_y <= 1)).all()
 

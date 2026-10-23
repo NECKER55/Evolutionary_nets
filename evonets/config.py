@@ -141,8 +141,8 @@ class Config:
     # Sviluppo: posti e marcatori accesi alla partenza (i posti crescono come
     # quelli dei neuroni), dispersione delle espressioni (scala logistica), dei
     # gradienti e della tabella di affinità alla partenza.
-    marker_slots: int = 4
-    marker_initial: int = 2
+    marker_slots: int = 6
+    marker_initial: int = 4
     marker_initial_std: float = 1.5
     marker_gradient_std: float = 2.0
     marker_table_std: float = 2.0
@@ -155,6 +155,13 @@ class Config:
     marker_map_gradient: float = 12.0  # pendenza in scala logistica per unità di cervello
     marker_map_affinity: float = 2.0  # legame di ogni marcatore della coppia con se stesso
     marker_map_std: float = 0.3
+    # Canalizzazione (docs/SPEC_SVILUPPO.md, sezione 13): un collegamento nasce
+    # con p = sigmoide(k · (|affinità| · e^(−d/λ) − develop_threshold)): le vie
+    # attratte con forza nascono quasi sempre, le deboli quasi mai, il caso
+    # conta solo vicino alla soglia. k, la precisione dello sviluppo, è un gene
+    # dell'individuo ("canal"); questo è il suo valore di partenza.
+    develop_threshold: float = 1.0
+    develop_precision: float = 8.0
     # Il grembo (net/womb.py, solo con lo sviluppo): secondi di attività
     # spontanea prima della nascita. I sensi ricevono onde che scorrono lungo
     # l'ordine dei nervi (come le onde della retina): velocità (lati del

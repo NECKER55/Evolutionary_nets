@@ -10,9 +10,12 @@ from .receptors import P, Prepared, ReceptorGenes
 # Geni del meccanismo di mutazione, uno per individuo (vedi genetics.mutate e
 # docs/SPEC_FASE_C.md, sezione 5). Nel genoma stanno come logaritmi.
 META = ("weight_prob", "weight_std", "conn_add", "conn_del", "toggle", "dup", "pos_prob", "pos_std",
-        "rec_drift", "conn_range", "sex")
+        "rec_drift", "conn_range", "sex", "canal")
 # "sex": probabilità che un figlio di questo individuo (come madre) nasca con
 # un partner invece che come sua copia. Come i tassi, evolve.
+# "canal": precisione dello sviluppo (development.py), la pendenza della soglia
+# con cui l'attrazione tra due cellule diventa un collegamento. Alta: fratelli
+# identici hanno lo stesso cervello; bassa: lo sviluppo tira a sorte.
 META_INDEX = {name: k for k, name in enumerate(META)}
 
 
@@ -20,7 +23,7 @@ def meta_start(cfg: Config) -> np.ndarray:
     """I valori di partenza dei geni delle mutazioni (dalla configurazione)."""
     return np.array([cfg.mut_weight_prob, cfg.mut_weight_std, cfg.mut_conn_add, cfg.mut_conn_del,
                      cfg.mut_neuron_toggle, cfg.mut_dup, cfg.mut_pos_prob, cfg.mut_pos_std,
-                     cfg.mut_rec_drift, cfg.net_conn_range, cfg.crossover_rate])
+                     cfg.mut_rec_drift, cfg.net_conn_range, cfg.crossover_rate, cfg.develop_precision])
 
 
 PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", "toggle", "dup", "pos_prob", "sex")]

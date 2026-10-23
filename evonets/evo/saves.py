@@ -44,8 +44,10 @@ from . import ladder
 # 15 = periodo critico, due geni per neurone (i file precedenti: spento,
 #     B = 1, perché le loro popolazioni sono evolute senza);
 # 16 = gusto e dolore tra le grandezze del corpo, sistema di valore innato
-#     (i file precedenti: nuclei spenti, le popolazioni sono evolute senza).
-FORMAT = 16
+#     (i file precedenti: nuclei spenti, le popolazioni sono evolute senza);
+# 17 = canalizzazione dello sviluppo, gene della precisione (i file precedenti:
+#     il valore di partenza; il cervello di chi è già nato non cambia).
+FORMAT = 17
 # Geni della plasticità aggiunti nel formato 5, per chi non li aveva: η quasi
 # nullo, regola a zero, nessun modulatore.
 NO_PLASTICITY = np.array([-30.0, 0.0, 0.0, 0.0, 0.0, -5.0])
@@ -79,6 +81,7 @@ CONVERSIONS = (
     (13, "stato alla nascita dal grembo: assente, valgono i geni"),
     (14, "periodo critico spento (la popolazione è evoluta senza)"),
     (15, "sistema di valore spento (la popolazione è evoluta senza)"),
+    (16, "precisione dello sviluppo aggiunta (valore di partenza): i figli nascono canalizzati"),
 )
 
 
@@ -198,7 +201,7 @@ def load(cls, cfg: Config, path):
             g = Genome(*(d[prefix + f] if prefix + f in d
                          else None if f in Genome.LINEAGE + Genome.MARKERS + Genome.BORN + ("value",) else np.full(shape, ADDED_IN_4[f])
                          for f in Genome.FIELDS))
-            if g.meta.shape[1] < len(META):  # geni nati dopo (il sesso): il valore di partenza
+            if g.meta.shape[1] < len(META):  # geni nati dopo (il sesso, la precisione dello sviluppo): il valore di partenza
                 start = np.log(np.maximum(meta_start(cfg), cfg.mutation_floor))[g.meta.shape[1]:]
                 g.meta = np.concatenate([g.meta, np.broadcast_to(start, (len(g), len(start)))], axis=1)
             if fmt < 6:  # prima la sensibilità era in quanti: stessa risposta, nuova unità

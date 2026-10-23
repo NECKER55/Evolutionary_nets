@@ -10,16 +10,21 @@ affinità**, gene dell'individuo, dice quanto un marcatore sull'assone si lega
 a un marcatore sul bersaglio, con il segno. Alla nascita:
 
 1. affinità(s → t) = Σ_a Σ_b espressione_s[a] · tabella[a, b] · espressione_t[b];
-2. il collegamento nasce con probabilità
-   p = p_geometria(d) · (1 − e^(−|affinità|)): senza affinità non nasce nulla,
-   con affinità forte la probabilità satura, la distanza conta come sempre
-   (`geometry.connect_prob`, con la portata λ dell'individuo);
+2. l'attrazione che arriva al bersaglio è |affinità| · e^(−d/λ): il segnale
+   che guida l'assone si attenua con la distanza d, con la portata λ
+   dell'individuo. Il collegamento nasce con probabilità
+   p = sigmoide(k · (attrazione − `develop_threshold`)), spostata perché senza
+   attrazione sia 0, con k la precisione
+   dello sviluppo, gene dell'individuo ("canal"). È la **canalizzazione** di
+   Waddington: le vie attratte con forza nascono quasi sempre, le deboli quasi
+   mai, e il caso decide solo vicino alla soglia. Un neurone con se stesso fa
+   eccezione, come nella geometria: `net_self_prob` · (1 − e^(−|affinità|));
 3. il peso iniziale è affinità · e^guadagno, con il guadagno gene del neurone
    che riceve, limitato a ±`synapse_max`. Nelle reti a impulsi il segno viene
    dal tipo del neurone che trasmette (legge di Dale): l'affinità dà la forza.
 
-Lo sviluppo è in parte casuale (quali collegamenti nascono), come in natura:
-fratelli identici hanno cervelli simili ma non uguali sinapsi per sinapsi. Il
+Lo sviluppo è in parte casuale, come in natura: fratelli identici hanno le
+stesse vie principali e differiscono nei collegamenti al limite. Il
 risultato, il cervello sviluppato, sta in `Genome.weights` e `Genome.conn` e
 appartiene all'individuo.
 
@@ -29,7 +34,7 @@ uguali per tutti, senza gradiente, mai mutati.
 
 import numpy as np
 
-from .geometry import brain_side, connect_prob, distances, motor_anchors
+from .geometry import brain_side, distances, motor_anchors
 
 GRADIENT_SPAN = 1.0  # le posizioni nel cervello vanno da -0,5 a +0,5 attorno al centro
 # Lunghezza del gene di un marcatore per la probabilità di rompersi (vedi
@@ -39,7 +44,7 @@ MARKER_BASE_LENGTH = 3
 
 
 def sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-x))
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -500.0, 500.0)))
 
 
 def positions(g) -> np.ndarray:
@@ -79,8 +84,8 @@ def develop(g, cfg, rng: np.random.Generator, gain_index: int) -> None:
     a = affinity(g, fixed)
     side = brain_side(cfg, g.r_active, g.active, g.n_out)
     dist = distances(cfg, g.pos, g.r_y, g.n_out, side)
-    reach = np.exp(g.meta[:, _conn_range_index()])
-    p = connect_prob(cfg, dist, g.n_rec, reach) * (1.0 - np.exp(-np.abs(a)))
+    p = connect_prob(cfg, np.abs(a), dist, g.n_rec, np.exp(g.meta[:, _meta_index("conn_range")]),
+                     np.exp(g.meta[:, _meta_index("canal")]))
     g.conn = rng.random(p.shape) < p
     from .brain import scale_gene
 
@@ -88,10 +93,24 @@ def develop(g, cfg, rng: np.random.Generator, gain_index: int) -> None:
     g.weights = np.clip(a * gain[:, :, None], -cfg.synapse_max, cfg.synapse_max) * g.conn
 
 
-def _conn_range_index() -> int:
+def connect_prob(cfg, attraction: np.ndarray, dist: np.ndarray, n_rec: int, reach: np.ndarray,
+                 precision: np.ndarray) -> np.ndarray:
+    """(N, T, S): probabilità che ogni collegamento nasca, dall'affinità in
+    valore assoluto, dalle distanze, dalla portata `reach` (N,) e dalla
+    precisione `precision` (N,) di ogni individuo."""
+    arriving = attraction * np.exp(-dist / reach[:, None, None])
+    k = precision[:, None, None]
+    floor = sigmoid(-k * cfg.develop_threshold)  # senza attrazione: nessun collegamento
+    p = np.maximum(sigmoid(k * (arriving - cfg.develop_threshold)) - floor, 0.0) / (1.0 - floor)
+    t = np.arange(dist.shape[1])
+    p[:, t, n_rec + t] = cfg.net_self_prob * (1.0 - np.exp(-attraction[:, t, n_rec + t]))
+    return p
+
+
+def _meta_index(name: str) -> int:
     from .brain import META_INDEX
 
-    return META_INDEX["conn_range"]
+    return META_INDEX[name]
 
 
 def initial_markers(cfg, n: int, n_rec: int, n_targets: int, rng: np.random.Generator) -> dict:

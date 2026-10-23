@@ -7,7 +7,7 @@ from evonets.evo import Evolution, crossover, mutate, reproduce
 from evonets.net import Brains, SpikingBrains
 from evonets.net import development as dev
 from evonets.net.brain import META_INDEX, Genome
-from evonets.net.geometry import brain_side, connect_prob, distances
+from evonets.net.geometry import brain_side, distances
 
 
 def grown(n=60, seed=0, kind=Brains, **kw):
@@ -24,19 +24,45 @@ def test_without_affinity_no_synapse_grows():
     assert not g.conn.any() and not g.weights.any()
 
 
-def test_connection_probability_is_geometry_times_affinity_and_weight_is_affinity_times_gain():
+def test_connection_probability_is_canalized_and_weight_is_affinity_times_gain():
     cfg, b = grown(n=1)
     g = b.genome
     a = dev.affinity(g)
     side = brain_side(cfg, g.r_active, g.active, g.n_out)
-    geo = connect_prob(cfg, distances(cfg, g.pos, g.r_y, g.n_out, side), g.n_rec, g.rate("conn_range"))
-    expected = geo * (1.0 - np.exp(-np.abs(a)))
+    dist = distances(cfg, g.pos, g.r_y, g.n_out, side)
+    k = g.rate("canal")
+    floor = dev.sigmoid(-k * cfg.develop_threshold)[:, None, None]
+    arriving = np.abs(a) * np.exp(-dist / g.rate("conn_range")[:, None, None])
+    expected = np.maximum(dev.sigmoid(k[:, None, None] * (arriving - cfg.develop_threshold)) - floor, 0) / (1 - floor)
+    t = np.arange(dist.shape[1])
+    expected[:, t, g.n_rec + t] = cfg.net_self_prob * (1.0 - np.exp(-np.abs(a[:, t, g.n_rec + t])))
     many = Genome.concat([g] * 4000)
     dev.develop(many, cfg, np.random.default_rng(1), Brains.GAIN)
     assert np.allclose(many.conn.mean(axis=0), expected[0], atol=0.03)
     gain = np.exp(g.traits[0, :, Brains.GAIN])
     w = np.clip(a[0] * gain[:, None], -cfg.synapse_max, cfg.synapse_max)
     assert np.allclose(many.weights[many.conn], np.broadcast_to(w, many.conn.shape)[many.conn])
+
+
+def test_strong_attraction_always_grows_a_connection_and_weak_almost_never():
+    """La canalizzazione: lontano dalla soglia lo sviluppo non tira a sorte."""
+    cfg = Config(genome="sviluppo")
+    attraction = np.array([[[0.0, 0.5, 2.0, 4.0, 0.0]]])  # l'ultima sorgente è il bersaglio stesso
+    near, far_reach = np.full((1, 1, 5), 0.01), np.array([1e9])
+    p = dev.connect_prob(cfg, attraction, near, 4, far_reach, np.array([cfg.develop_precision]))[0, 0]
+    assert p[0] == 0.0 and p[1] < 0.03 and p[2] > 0.99 and p[3] > 0.999
+    noisy = dev.connect_prob(cfg, attraction, near, 4, far_reach, np.array([0.5]))[0, 0]
+    assert 0.2 < noisy[2] < 0.8  # con poca precisione anche le vie forti sono un terno al lotto
+
+
+def test_identical_twins_share_most_of_their_brain():
+    """Con la precisione di partenza un clone ritrova quasi tutto il cervello
+    del genitore (senza canalizzazione era circa un terzo)."""
+    cfg, b = grown(n=300, kind=SpikingBrains)
+    g = b.genome
+    twin = g.take(np.arange(len(g)))
+    dev.develop(twin, cfg, np.random.default_rng(7), Brains.GAIN)
+    assert (g.conn & twin.conn).sum() / g.conn.sum() > 0.8
 
 
 def test_markers_follow_position_gradients():
@@ -71,7 +97,8 @@ def test_marker_duplication_does_not_change_any_affinity():
         f = int(np.flatnonzero(~g.m_active[i])[0])
         dev.duplicate_marker(g, i, k, f, 10**12 + i)
     assert np.allclose(dev.affinity(g), before)
-    assert (g.m_active.sum(axis=1) == 3).all() and (g.m_fam[:, 2] == g.m_fam[:, 0]).all()
+    f = cfg.marker_initial
+    assert (g.m_active.sum(axis=1) == f + 1).all() and (g.m_fam[:, f] == g.m_fam[:, 0]).all()
 
 
 def permuted(g: Genome, order) -> Genome:
@@ -91,7 +118,7 @@ def test_markers_pair_by_identity_in_crossover_wherever_they_sit():
     cfg, b = grown(n=1)
     g = b.genome
     g.m_active[:] = True  # tutti accesi: nessuno è "solo di un genitore"
-    order = np.array([2, 0, 3, 1])
+    order = np.array([2, 0, 3, 1, 5, 4])
     pair = Genome.concat([g, permuted(g, order)])
     rng = np.random.default_rng(0)
     for _ in range(20):
@@ -222,7 +249,7 @@ def test_only_newborns_go_through_the_womb_and_the_direct_genome_never_does():
 # --- Vedere l'identità ---------------------------------------------------------
 
 def test_cells_with_the_same_markers_have_the_same_colour_and_type():
-    cfg, b = grown(n=1)
+    cfg, b = grown(n=1, marker_slots=4)
     g = b.genome
     g.active[0, :4] = True
     g.n_mark[0, 0] = g.n_mark[0, 1] = [3.0, -3.0, 0.0, 0.0]  # due neuroni gemelli
@@ -246,11 +273,11 @@ def test_a_marker_and_its_copies_share_a_colour():
 def test_generation_statistics_count_markers_types_and_value():
     e = Evolution(Config(population=12, genome="sviluppo", engine="numpy"), 0)
     s = e.run_generation()
-    assert s["markers"] == 2.0 and "types" in s and s["value"] == [1.0, 1.0]
+    assert s["markers"] == e.cfg.marker_initial and "types" in s and s["value"] == [1.0, 1.0]
     from evonets.net.anatomy import Anatomy
 
     a = Anatomy(e.cfg, e.ctrl.brains.genome.take([0]))
-    assert a.summary()["markers"] == 2 and a.color.shape == (a.n_nodes, 3)
+    assert a.summary()["markers"] == e.cfg.marker_initial and a.color.shape == (a.n_nodes, 3)
     assert any("marcatori espressi" in line for line in a.describe(a.n_nodes - 1))
 
 

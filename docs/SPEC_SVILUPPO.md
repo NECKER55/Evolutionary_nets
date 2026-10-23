@@ -45,7 +45,8 @@ Scelte dell'utente (2026-10-14):
 | meccanismo di mutazione | come oggi, più il tasso di duplicazione dei marcatori; tolti comparsa e scomparsa dei collegamenti | geni dell'individuo |
 | **pesi e collegamenti** | **non ci sono più**: nascono con lo sviluppo | — |
 
-I marcatori sono quantità di espressione tra 0 e 1. All'inizio ce ne sono 2.
+I marcatori sono quantità di espressione tra 0 e 1. All'inizio ce ne sono 4
+(sezione 13).
 
 ## 3. Lo sviluppo: come nasce un cervello
 
@@ -59,15 +60,18 @@ Per ogni individuo, alla nascita:
    affinità(s, t) = Σ_a Σ_b  marcatore_s[a] · tabella[a, b] · marcatore_t[b]
    ```
 
-3. **Crescita degli assoni.** Il collegamento nasce con probabilità
+3. **Crescita degli assoni** (canalizzata, sezione 13). Il collegamento nasce
+   con probabilità
 
    ```
-   p = net_conn_prob · (1 − e^(−|affinità|)) · e^(−distanza / λ)
+   attrazione = |affinità| · e^(−distanza / λ)
+   p = sigmoide(k · (attrazione − develop_threshold)), spostata perché p(0) = 0
    ```
 
-   Senza affinità non nasce nulla; con affinità forte la probabilità satura; la
-   distanza conta come oggi. λ è il gene di oggi. Un neurone con se stesso usa
-   `net_self_prob` al posto della parte con la distanza.
+   Senza affinità non nasce nulla; con attrazione ben sopra la soglia nasce
+   quasi sempre, ben sotto quasi mai. λ è il gene di oggi, k (precisione dello
+   sviluppo) un gene nuovo dell'individuo. Un neurone con se stesso nasce con
+   probabilità `net_self_prob` · (1 − e^(−|affinità|)).
 4. **Forza iniziale.** Il peso iniziale è l'affinità, limitata a ±`synapse_max`.
    Nelle reti a impulsi il segno viene dal tipo del neurone che trasmette
    (legge di Dale) e l'affinità dà la forza.
@@ -125,8 +129,8 @@ posizione, come i posti dei neuroni.
 
 ## 6. Partenza
 
-- 2 marcatori: l'asse sinistra-destra (sezione 12). Gli altri posti, spenti,
-  hanno geni a caso.
+- 4 marcatori su 6 posti: i primi 2 sono l'asse sinistra-destra (sezione 12),
+  gli altri 2 partono a caso. I posti spenti hanno geni a caso.
 - Corpo e cervello primordiali come oggi: 2 recettori generalisti, nessun
   neurone interno acceso.
 - Omeostasi debole e casuale (come l'adattamento sensoriale).
@@ -160,8 +164,8 @@ posizione, come i posti dei neuroni.
 
 ## 9. Limiti noti
 
-- La forma delle formule (affinità come somma di prodotti, probabilità che
-  satura) è una scelta nostra: è la "chimica" del simulatore.
+- La forma delle formule (affinità come somma di prodotti, soglia della
+  canalizzazione) è una scelta nostra: è la "chimica" del simulatore.
 - Il cervello sviluppato e la sua plasticità costano calcolo: lo sviluppo si fa
   a ogni nascita, l'attività spontanea aggiunge circa il 10% di una vita per
   ogni nato.
@@ -501,3 +505,70 @@ Generazione 0, 750 agenti, primo stadio, 3 semi: riusciti 50 → 55. Corsa di
 40 generazioni, 2 semi: l'uso dei recettori scende ancora (34–43% alla 40,
 contro il 38% alla 24 di prima). Le tre modifiche da sole non bastano: resta
 il punto 3, i recettori generalisti e daltonici.
+
+## 13. Canalizzazione dello sviluppo e 4 marcatori (2026-10-23)
+
+### Il problema: il genoma si ereditava, il cervello no
+
+La causa principale della cecità della sezione 12 non era la vista, ma
+l'eredità. Con p = p_geometria(d) · (1 − e^(−|affinità|)) la geometria faceva
+da tetto (in media 0,32): anche un'affinità fortissima faceva nascere una via
+una volta su tre. Misurato alla partenza: un **clone identico, senza
+mutazioni, ritrovava il 30% dei collegamenti del genitore** (29% di quelli dai
+recettori), nessun collegamento aveva p > 0,9, la media era 0,15. Un genitore
+che riusciva grazie a un occhio collegato allo sterzo giusto lo passava a meno
+di un figlio su tre: la selezione non poteva accumulare un cablaggio. In
+più ogni mutazione dei 2 marcatori spostava tutte le sinapsi insieme e la
+popolazione si difendeva abbassando i tassi di mutazione (`weight_prob` da 0,1
+a 0,0024 nella corsa delle 22:34), cioè smettendo di evolvere. Le corse con il
+genoma diretto, con gli stessi recettori generalisti di partenza, la vista se
+la costruivano: i recettori generalisti allungano la strada, non la chiudono.
+
+### Cosa cambia
+
+- **Canalizzazione** (Waddington; in natura un assone guidato da segnali forti
+  trova il bersaglio in modo affidabile, i gemelli identici hanno le stesse
+  vie principali): attrazione = |affinità| · e^(−d/λ); p = sigmoide(k ·
+  (attrazione − `develop_threshold`)), spostata perché p(0) = 0. La distanza
+  decide fin dove un assone arriva, non più se nasce quando è attratto con
+  forza. `develop_threshold` 1.
+- **Precisione dello sviluppo** come gene dell'individuo (`canal`, partenza
+  `develop_precision` 8): la selezione può rendere lo sviluppo più preciso o
+  più rumoroso (come i geni della canalizzazione, per esempio Hsp90).
+- **4 marcatori su 6 posti** alla partenza (i primi 2 sono l'asse
+  sinistra-destra): mutazioni con effetti più locali, pesi iniziali con più
+  gradi di libertà.
+- Salvataggi: formato 17; i file precedenti ricevono il gene col valore di
+  partenza, il cervello di chi è già nato non cambia.
+
+### Effetto misurato
+
+Generazione 0 (750 agenti, reti a impulsi):
+
+| | prima | ora |
+|---|---|---|
+| collegamenti alla nascita | 4,5 | 9,6 (diretto: 9,2) |
+| recettori usati | 0,92 | 1,23 |
+| collegamenti ritrovati da un clone | 30% | 88% (83% dai recettori) |
+| riflesso verso / opposto | — | 52% / 13% |
+
+Calibrazione: soglia 0,5 → 14 collegamenti; 1,5 → 6; 2 → 3,9. Precisione 4 →
+clone 78%; 16 → 93%. Con 2 marcatori e la canalizzazione: 3 collegamenti,
+0,21 recettori usati (troppo pochi); con 3: 6,9 e 0,86.
+
+Evoluzione, 3 semi, semi diversi dalle corse di confronto (indicativo):
+
+| | recettori usati | collegamenti | risultato |
+|---|---|---|---|
+| bersaglio, 100 gen., sviluppo prima | 0,12 | 0,7 | riuscita 8,4% |
+| bersaglio, 100 gen., sviluppo ora | 0,77 | 9,2 | riuscita 7,4% |
+| bersaglio, 100 gen., diretto | 0,89 | 6,4 | riuscita 10,7% |
+| cibo con la scala, gen. 150, corsa delle 22:34 | 0,07 | 3,8 | scala 0,18, ferma per 1400 gen. |
+| cibo con la scala, gen. 150, sviluppo ora | 0,69 | 12,6 | scala 0,29, in salita |
+| cibo con la scala, gen. 150, diretto (`010003`) | 1,10 | 7,8 | scala 0,28 |
+
+I sensi restano e la scala sale come con il genoma diretto; i tassi di
+mutazione non si congelano (`weight_prob` 0,09 alla 150). Restano aperti: la
+riuscita sul bersaglio non è ancora migliore in 100 generazioni, e gli
+individui tengono in media 0,7 recettori su 2 (l'asse sinistra-destra rende
+con due occhi).
