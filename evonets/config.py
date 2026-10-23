@@ -388,6 +388,61 @@ class Config:
     ladder_step: float = 0.02  # di quanto si muove (posizione da 0 a 3)
     ladder_crash: float = 0.05  # di quanto scende se nessuno completa
 
+    # Arena continua (task = "arena", docs/SPEC_ARENA.md): tutti gli esseri in
+    # un mondo unico senza bordi, senza generazioni: si nasce con l'energia,
+    # si muore di fame o di vecchiaia. Le altre modalità non usano queste.
+    arena_size_w: float = 2000.0  # u, il mondo (toroidale)
+    arena_size_h: float = 1400.0
+    arena_cap: int = 3000  # posti: esseri vivi al massimo (sicurezza contro l'esplosione)
+    arena_cell: float = 80.0  # u, celle della griglia dei vicini (più della portata della vista)
+    # Vecchiaia (Gompertz): probabilità di morire per secondo h0 · e^(età / τ);
+    # vita mediana circa 600 s, entro 300 s ne muore l'8%, entro 900 s quasi tutti.
+    arena_aging_h0: float = 8.6e-5
+    arena_aging_tau: float = 150.0  # s
+    # Riproduzione: con energia almeno arena_birth_energy, età almeno
+    # arena_maturity e arena_birth_interval s dall'ultimo figlio. Il figlio
+    # riceve arena_child_energy, il genitore ne paga arena_birth_cost (fare un
+    # figlio costa più di quanto il figlio riceve).
+    arena_birth_energy: float = 300.0
+    arena_child_energy: float = 150.0
+    arena_birth_cost: float = 200.0
+    arena_maturity: float = 30.0  # s
+    arena_birth_interval: float = 30.0  # s
+    arena_birth_distance: float = 3.0  # u: il figlio nasce accanto al genitore
+    # Partner: un adulto entro arena_mate_range, compatibile (almeno
+    # arena_mate_share delle identità dei geni in comune), con la probabilità
+    # del gene "sex" del genitore. Il partner non paga.
+    arena_mate_range: float = 20.0  # u
+    arena_mate_share: float = 0.5
+    # Cibo a macchie fertili che si spostano (passeggiata casuale lenta) e
+    # cambiano con le stagioni (fertilità tra arena_season_low e 1, ogni
+    # macchia con la sua fase); fuori dalle macchie un fondo debole.
+    arena_patches: int = 8
+    arena_patch_sigma: float = 120.0  # u, raggio tipico di una macchia
+    arena_patch_speed: float = 0.1  # u/s: circa mezza macchia in una vita mediana
+    arena_patch_turn: float = 0.05  # rad/√s: quanto in fretta cambia direzione
+    arena_season: float = 1200.0  # s, periodo delle stagioni
+    arena_season_low: float = 0.3
+    arena_background: float = 0.05  # fertilità fuori dalle macchie, rispetto al massimo
+    arena_food_rate: float = 45.0  # cibi che ricrescono al secondo, in tutto il mondo
+    arena_food_max: int = 1500  # cibi presenti insieme, al massimo
+    arena_food_radius: float = 3.0
+    # Colonizzatori (isola e continente): finché i vivi sono meno di
+    # arena_min_alive arrivano esseri nuovi, copie mutate di chi ha mangiato di
+    # più tra i vissuti (un archivio dei migliori arena_archive), o reti nuove
+    # se nessuno ha ancora mangiato. Smettono quando la popolazione si
+    # mantiene da sola. 0 = mai (si può estinguere).
+    arena_min_alive: int = 100
+    arena_archive: int = 50
+    arena_tick: float = 1.0  # s: ogni quanto si contano nascite e morti per vecchiaia
+    arena_stats_every: float = 60.0  # s: una riga di storia
+    # Gli altri esseri: dischi opachi del loro colore, con un odore loro.
+    being_color: float = 0.25
+    being_color_width: float = 0.06
+    being_albedo: float = 1.0
+    being_molecule: float = 0.45
+    being_smell: float = 0.3
+
     # Pericoli (zone tossiche in deriva armonica). Il danno cresce dal bordo
     # (zero) al centro (hazard_drain) come profondità ** hazard_falloff.
     hazard_drain: float = 60.0  # energia/s al centro

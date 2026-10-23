@@ -123,7 +123,10 @@ def light(cfg, world, origins: np.ndarray, angles: np.ndarray, agent: np.ndarray
     attenuato dal mezzo ma non ancora moltiplicato per lo spettro dell'oggetto
     (lo fa il recettore con la sua sintonia): per gli opachi è exp(-d/L) se
     il raggio li colpisce per primi, per il veleno l'integrale della sua
-    luce lungo il tratto attraversato, per unità di luminosità."""
+    luce lungo il tratto attraversato, per unità di luminosità. Un mondo con
+    una vista sua (l'arena continua, `light_of`) la calcola da sé."""
+    if hasattr(world, "light_of"):
+        return world.light_of(origins, angles, agent)
     task = world.task
     has_target = hasattr(task, "target")
     target = np.asarray(task.target, dtype=float) if has_target else np.zeros(2)
@@ -183,7 +186,10 @@ def chemicals(cfg, world, points: np.ndarray, agent: np.ndarray | None = None) -
 
 def pressure(cfg, world, agent: np.ndarray, normals: np.ndarray) -> np.ndarray:
     """Pressione (K,) sui recettori la cui normale (K, 2), nel riferimento del
-    mondo, guarda una parete o una roccia che l'agente sta toccando."""
+    mondo, guarda una parete o una roccia che l'agente sta toccando. Un mondo
+    con un tatto suo (l'arena continua, `pressure_of`) lo calcola da sé."""
+    if hasattr(world, "pressure_of"):
+        return world.pressure_of(agent, normals)
     r = cfg.agent_radius
     pos = world.pos[agent]
     lo, hi = pos <= r, pos >= np.array([cfg.arena_w - r, cfg.arena_h - r])

@@ -35,6 +35,33 @@ Su/Giù o Tab scelgono la riga, Sinistra/Destra (o il clic) cambiano il valore,
 numeri e percorso si scrivono da tastiera. Nei numeri le cifre si aggiungono in
 coda: per scriverne uno nuovo si cancella prima con Backspace.
 
+Con **Mondo = arena continua** (docs/SPEC_ARENA.md) compare la riga
+**Tetto** (quanti esseri vivi al massimo); **Individui** è quanti ce ne sono
+all'inizio, **Generazioni** diventa **Minuti di mondo** ed **Esame ogni** si
+conta in minuti (10 di partenza). La scala e la selezione finale non ci sono.
+
+## L'arena continua
+
+Una sola schermata. A sinistra la **vista che segue un essere** (giallo,
+con la scia; gli altri esseri sono verdi, il cibo rosso, le macchie fertili
+ombre verdi più chiare quanto più sono fertili); a destra la **mappa intera**
+con il riquadro della vista, poi le misure (vivi, nati, colonizzatori, morti,
+ultimo minuto, ultimo esame) e i dati dell'essere seguito. Se l'essere
+seguito muore si passa al più anziano.
+
+| Tasto | Azione |
+|---|---|
+| `Spazio` | pausa |
+| `1` `2` `3` | velocità: tempo reale, x4, x16 |
+| `Z` | turbo: quanto più veloce si può |
+| rotella, `+` `-` | zoom |
+| `Tab` / `O` / clic | segui il prossimo (dal più anziano) / il più anziano / quello cliccato |
+| `E` | esame fisso adesso, su 20 adulti a caso |
+| `S` | salva |
+| `Esc` | torna al menu (salva se ci sono novità) |
+
+L'esploratore delle reti non c'è ancora per l'arena.
+
 ## La corsa: la pagina principale
 
 In alto la generazione, la rete, la popolazione e lo stato della generazione

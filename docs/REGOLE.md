@@ -985,3 +985,20 @@ cresce con le sue cellule). Quelli dei formati da 3 a 6 si aprono convertiti
 moltiplicatori a parità di quanti, distanze ricalcolate), con le
 costanti con cui erano nati, e il registro lo annota. Quelli precedenti avevano i
 sensi fissi e non si possono più aprire.
+
+## 22. L'arena continua
+
+Una modalità a parte (`task = "arena"`, riga "Mondo" del menu): tutti gli
+esseri vivono insieme in un mondo unico di 2000 × 1400 senza bordi, senza
+generazioni né compito. Si nasce quando un adulto (almeno 30 s) ha almeno
+300 di energia e non ha partorito negli ultimi 30 s: il figlio riceve 150, il
+genitore ne paga 200, e se un adulto compatibile (metà delle identità dei
+geni in comune) è entro 20 u, con la probabilità del gene `sex` il figlio è
+un incrocio dei due. Si muore di fame o di vecchiaia (legge di Gompertz, vita
+mediana 600 s). Il cibo ricresce (45 al secondo, al massimo 1500) a 8
+macchie fertili che si spostano piano e cambiano con le stagioni. Gli esseri
+si vedono (colore 0,25), si annusano (molecola 0,45) e si urtano; chi tocca
+per primo un cibo lo mangia. Sotto i 100 vivi arrivano colonizzatori, copie
+mutate di chi ha mangiato di più. L'esame fisso (i livelli del mondo del
+cibo) si fa ogni 10 minuti di mondo su 20 adulti presi a caso. Dettagli e
+numeri in [SPEC_ARENA.md](SPEC_ARENA.md).

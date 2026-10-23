@@ -36,6 +36,8 @@ def save_info(path) -> str:
     """Una riga che descrive un salvataggio, senza caricarlo per intero."""
     try:
         with np.load(path) as d:
+            if "kind" in d and str(d["kind"]) == "arena":
+                return summarize(path).facts
             if "pos" not in d:
                 return "versione vecchia, senza geometria del cervello: non si può aprire"
             net = str(d["net_type"]) if "net_type" in d else "rate"
@@ -106,11 +108,17 @@ def summarize(path) -> SaveSummary:
             with np.load(path) as d:
                 saved = json.loads(str(d["config"])) if "config" in d else {}
                 net = str(d["net_type"]) if "net_type" in d else saved.get("net_type", "rate")
-                facts = [f"gen. {int(d['generation'])}", f"{_rows(path)} ind."]
+                if "kind" in d and str(d["kind"]) == "arena":
+                    facts = [f"arena continua, {int(d['generation'])} min", f"{int(d['alive'].sum())} vivi su "
+                             f"{_rows(path)}"]
+                else:
+                    facts = [f"gen. {int(d['generation'])}", f"{_rows(path)} ind."]
                 facts.append("genoma " + (saved.get("genome") or "diretto"))
                 facts.append({"rate": "rete continua", "spike-ei": "a impulsi"}.get(net, net))
                 facts.append("sensi fissi" if saved.get("sim_mode") == "cervello" else "sensi che evolvono")
-                if saved.get("task") == "cibo":
+                if saved.get("task") == "arena":
+                    pass
+                elif saved.get("task") == "cibo":
                     where = " 0,00"
                     if "log" in d:
                         steps = [e for e in json.loads(str(d["log"])) if e.get("event") == "scala"]
@@ -303,9 +311,11 @@ class Launcher(Screen):
                                   "affinità (docs/SPEC_SVILUPPO.md). Ignorato se si riprende un salvataggio.")
         self.genome.select(defaults.get("genome") or "diretto")
         self.task = Choice("Mondo", [("bersaglio", "bersaglio e veleno (il mondo di prima)"),
-                                     ("cibo", "nutrirsi: cibo, prede e predatori")],
+                                     ("cibo", "nutrirsi: cibo, prede e predatori"),
+                                     ("arena", "arena continua: tutti insieme, nascite e morti")],
                            help="Il compito. Nel mondo del cibo si riproduce chi mangia almeno N cibi; il veleno "
-                                "è spento. Ignorato se si riprende un salvataggio.")
+                                "è spento. Nell'arena continua si vive insieme, senza generazioni "
+                                "(docs/SPEC_ARENA.md). Ignorato se si riprende un salvataggio.")
         self.task.select(defaults.get("task") or "bersaglio")
         self.ladder = Choice("Scala", [("scala", "adattiva: sale se va bene, scende se va male"),
                                        ("basico", "ferma al mondo basico (controllo)"),
@@ -313,6 +323,9 @@ class Launcher(Screen):
                              help="Solo nel mondo del cibo: come si muovono le manopole della difficoltà "
                                   "(docs/SPEC_MONDO.md).")
         self.ladder.select(defaults.get("ladder") or "scala")
+        self.cap = Number("Tetto", Config().arena_cap, step=500, low=10,
+                          help="Solo nell'arena continua: quanti esseri vivi al massimo (i posti). La popolazione "
+                               "la decide il cibo; il tetto evita l'esplosione. Individui = quanti all'inizio.")
         self.gens = Number("Generazioni", 0, step=50,
                            help="Dopo quante generazioni fermarsi e salvare. 0 = senza limite.")
         self.exam_every = Number("Esame ogni", Config().exam_every, step=50,
@@ -331,7 +344,9 @@ class Launcher(Screen):
         self._show_load(None)
         self.save = Text("Salva in", defaults.get("save") or self._fresh_name(),
                          help="Dove salvare: tasto S, fine delle generazioni, uscita dalla corsa.")
-        self.fields = [self.mode, self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.chance, self.seed,
+        self._task_seen = None
+        self.fields = [self.mode, self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.cap,
+                       self.chance, self.seed,
                        self.gens, self.exam_every, self.select, self.load, self.save]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
@@ -405,6 +420,10 @@ class Launcher(Screen):
             if value in [v for v, _ in field.options]:
                 field.select(value)
         self.agents.value = n
+        if saved.get("task") == "arena":
+            self.cap.value = n
+            with np.load(path) as d:
+                self.agents.value = int(d["alive"].sum()) if "alive" in d else n
         if seed is not None:
             self.chance.select("fixed")
             self.seed.value = seed
@@ -416,7 +435,37 @@ class Launcher(Screen):
         if cfg.task == "cibo":
             cfg.n_hazards = 0  # il veleno resta spento in tutta la scala
             cfg.ladder = self.ladder.value
+        if cfg.task == "arena":
+            cfg.n_hazards = 0
+            cfg.arena_cap = max(self.cap.fixed(), cfg.population)
         return cfg
+
+    def _is_arena(self) -> bool:
+        """La corsa da lanciare è nell'arena continua (nuova o ripresa)."""
+        if self.load.value:
+            try:
+                with np.load(self.load.value) as d:
+                    return "kind" in d and str(d["kind"]) == "arena"
+            except Exception:
+                return False
+        return self.task.value == "arena"
+
+    def _ecology(self):
+        from ..evo.ecology import Ecology
+
+        cfg = self._config()
+        try:
+            cfg.exam_every = self.exam_every.fixed()
+            if self.load.value:
+                eco = Ecology.load(cfg, self.load.value)
+                cfg.exam_every = self.exam_every.fixed()
+                return eco
+            if self.chance.value == "random":
+                self.seed.value = secrets.randbelow(2**31)
+            return Ecology(cfg, self.seed.fixed(), initial=self.agents.fixed())
+        except Exception as err:
+            self.message, self.error = f"non riesco ad aprire l'arena: {err}", True
+            return None
 
     def _evolution(self) -> Evolution | None:
         cfg = self._config()
@@ -434,6 +483,15 @@ class Launcher(Screen):
             return None
 
     def start(self) -> None:
+        if self._is_arena():
+            from .arena_view import ArenaScreen
+
+            eco = self._ecology()
+            if eco is not None:
+                run = ArenaScreen(self.app, eco, self.save.value.strip() or self._fresh_name(), self.gens.fixed())
+                self.app.active_run = run
+                self.app.show(run)
+            return
         evo = self._evolution()
         if evo is not None:
             from .app import (
@@ -449,6 +507,10 @@ class Launcher(Screen):
     def explore(self) -> None:
         from .inspector import Inspector
 
+        if self._is_arena():
+            self.message, self.error = ("l'esploratore delle reti non c'è ancora per l'arena continua: "
+                                        "avviala e segui un essere"), False
+            return
         evo = self._evolution()
         if evo is not None:
             self.app.show(Inspector(self.app, evo, back=self, title=Path(self.load.value).name))
@@ -499,7 +561,18 @@ class Launcher(Screen):
 
     def draw(self, s) -> None:
         app = self.app
-        self.select.enabled = self.gens.value > 0  # serve un punto in cui le generazioni finiscono
+        arena = self.task.value == "arena"
+        if arena != ((self._task_seen or "bersaglio") == "arena"):
+            # minuti invece di generazioni: l'esame ogni 10 minuti di mondo, non ogni 50
+            if arena and self.exam_every.value == Config().exam_every:
+                self.exam_every.value = 10
+            elif not arena and self.exam_every.value == 10:
+                self.exam_every.value = Config().exam_every
+        self._task_seen = self.task.value
+        self.gens.label = "Minuti di mondo" if arena else "Generazioni"
+        self.exam_every.label = "Esame ogni (min)" if arena else "Esame ogni"
+        self.cap.enabled = self.task.enabled and arena
+        self.select.enabled = self.gens.value > 0 and not arena  # serve un punto in cui le generazioni finiscono
         self.seed.enabled = self.chance.enabled and self.chance.value == "fixed"
         self.ladder.enabled = self.task.enabled and self.task.value == "cibo"
         s.fill(BG)
@@ -509,14 +582,14 @@ class Launcher(Screen):
         y = 100
         for k, f in enumerate(self.fields):
             f.draw(s, app.font, 60, y, 175, 540, k == self.focus)
-            y += ROW_H + 2
+            y += ROW_H  # righe fitte: con il tetto dell'arena sono 15
         field = self.fields[self.focus]
         help = field.help if field.enabled or field is not self.select else \
             "La selezione finale parte quando le generazioni finiscono: imposta prima Generazioni."
         s.blit(app.small.render(help, True, DIM), (235, y + 2))
         if self.load.value:
             s.blit(app.small.render(save_info(self.load.value), True, TARGET), (235, y + 20))
-        y += 56
+        y += 44
         x = 60
         self.inspect_btn.enabled = self.load.value is not None
         for b in (self.start_btn, self.inspect_btn, self.quit_btn):

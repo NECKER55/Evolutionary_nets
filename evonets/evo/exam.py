@@ -118,6 +118,14 @@ FROM_RUN = frozenset({
     "mut_weight_prob", "mut_weight_std", "mut_conn_add", "mut_conn_del", "mut_neuron_toggle",
     "mut_pos_prob", "mut_pos_std", "mut_dup", "receptor_dup_split", "fecundity_by_food", "mut_rec_drift", "mutation_floor", "exam_every", "engine",
     "ladder", "ladder_window", "ladder_up", "ladder_down", "ladder_step", "ladder_crash",
+    # L'arena continua è un modo di vivere, non una prova: l'esame non la usa.
+    "arena_size_w", "arena_size_h", "arena_cap", "arena_cell", "arena_aging_h0", "arena_aging_tau",
+    "arena_birth_energy", "arena_child_energy", "arena_birth_cost", "arena_maturity", "arena_birth_interval",
+    "arena_birth_distance", "arena_mate_range", "arena_mate_share", "arena_patches", "arena_patch_sigma",
+    "arena_patch_speed", "arena_patch_turn", "arena_season", "arena_season_low", "arena_background",
+    "arena_food_rate", "arena_food_max", "arena_food_radius", "arena_tick", "arena_stats_every",
+    "arena_min_alive", "arena_archive",
+    "being_color", "being_color_width", "being_albedo", "being_molecule", "being_smell",
 })
 
 
@@ -181,9 +189,10 @@ LESIONS = ("neuroni", "plasticità") + PHENOMENA
 
 
 def battery(run_cfg: Config) -> tuple[Test, ...]:
-    """Le prove dell'esame di una corsa: i livelli per il mondo del cibo, le
-    prove della versione 3 per il mondo del bersaglio."""
-    return LEVELS if run_cfg.task == "cibo" else TESTS
+    """Le prove dell'esame di una corsa: i livelli per il mondo del cibo e
+    per l'arena continua (che è un mondo di cibo), le prove della versione 3
+    per il mondo del bersaglio."""
+    return LEVELS if run_cfg.task in ("cibo", "arena") else TESTS
 
 
 def lesioned(run_cfg: Config, genomes: Genome, lesion: str | None) -> tuple[Config, Genome]:

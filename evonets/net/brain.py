@@ -543,6 +543,30 @@ class Brains:
         self.compile()
         self.reset_state()
 
+    # Ciò che cambia durante una vita: lo stato della rete e ciò che si è imparato.
+    LIVE = ("w_eff", "early", "bias_now", "avg", "clock", "state", "charge", "spikes")
+
+    def replace(self, rows: np.ndarray, genome: Genome) -> None:
+        """Gli individui `rows` diventano `genome` (una riga per ciascuno, con
+        gli stessi posti): nascono, con lo stato e i pesi della nascita. Tutti
+        gli altri continuano la loro vita da dove erano, con ciò che hanno
+        imparato (serve all'arena continua, dove si nasce uno alla volta)."""
+        rows = np.asarray(rows)
+        kept = {k: getattr(self, k).copy() for k in self.LIVE if hasattr(self, k)}
+        g = self._genome
+        for f in Genome.FIELDS:
+            getattr(g, f)[rows] = getattr(genome, f)
+        self.compile()
+        others = np.ones(self.n, dtype=bool)
+        others[rows] = False
+        for k, v in kept.items():
+            now = getattr(self, k)
+            now[others] = v[others]
+            if k in ("state", "charge", "spikes"):
+                now[rows] = 0.0
+        self.learned = True
+        self._subset = None
+
     @property
     def receptors(self) -> ReceptorGenes:
         return self._genome.receptors

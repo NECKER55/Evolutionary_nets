@@ -22,6 +22,7 @@ mutazione sono geni.
 | [docs/INTERFACCIA.md](docs/INTERFACCIA.md) | il manuale dell'interfaccia grafica, schermata per schermata |
 | [docs/SPEC_MONDO.md](docs/SPEC_MONDO.md) | il mondo del cibo (prede, predatori, scala di difficoltà) e lo stato dei lavori |
 | [docs/SPEC_FASE_C.md](docs/SPEC_FASE_C.md), [SPEC_FASE_E.md](docs/SPEC_FASE_E.md), [SPEC_SVILUPPO.md](docs/SPEC_SVILUPPO.md) | specifiche di recettori, plasticità e sviluppo |
+| [docs/SPEC_ARENA.md](docs/SPEC_ARENA.md) | l'arena continua: tutti insieme, nascite e morti, senza generazioni |
 | [docs/NOTE.md](docs/NOTE.md) | idee future ed esperimenti fatti |
 
 ## Avvio
@@ -36,6 +37,7 @@ uv run main.py --task cibo              # interfaccia, già impostata sul mondo 
 uv run main.py --task cibo --mode cervello --ladder --evolve 2000  # sensi fissi, evolve solo il cervello
 uv run main.py --evolve 300             # 300 generazioni nel terminale, poi salva
 uv run main.py --task cibo --ladder --evolve 2000                  # mondo del cibo con scala adattiva
+uv run main.py --task arena --agents 750 --evolve 60               # arena continua: 60 minuti di mondo
 uv run main.py --task cibo --ladder --controls --seeds 4 --evolve 2000  # più i due controlli, 4 semi
 uv run main.py --exam runs/pop.npz      # esame fisso dei più anziani di un salvataggio
 uv run main.py --exam runs/pop.npz --lesion neuroni  # lo stesso, senza neuroni interni
