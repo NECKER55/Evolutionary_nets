@@ -629,10 +629,14 @@ cervello, come in natura (chemoaffinità di Sperry):
   **canalizzazione**: le vie attratte con forza nascono quasi sempre, le deboli
   quasi mai. k, la **precisione dello sviluppo**, è un gene dell'individuo
   (`canal`, partenza `develop_precision` 8). Un neurone con se stesso nasce
-  con probabilità `net_self_prob` · (1 − e^(−|affinità|)). Il
-  peso è affinità · e^guadagno, con il **guadagno** gene del neurone che
-  riceve (quanti recettori postsinaptici ha), al più ±`synapse_max`. Nelle
-  reti a impulsi il segno viene dal tipo di chi trasmette.
+  con probabilità `net_self_prob` · (1 − e^(−|affinità|)). La sinapsi nasce
+  **giovane, cioè debole**, come in natura: la sua forza cresce da zero con
+  quanto l'attrazione supera la soglia (più contatti dove l'assone è attratto
+  di più), `synapse_young` (1) · (attrazione − 1) · e^guadagno, con il
+  **guadagno** gene del neurone che riceve (quanti recettori postsinaptici
+  ha), al più ±`synapse_max`; il segno è quello dell'affinità, e nelle reti a
+  impulsi viene dal tipo di chi trasmette. La guida decide con chi ci si
+  collega; la forza la costruiscono poi il grembo, Hebb e l'omeostasi.
 - Lo sviluppo è in parte **casuale**, ma solo vicino alla soglia: fratelli con
   lo stesso genoma hanno le stesse vie principali (alla partenza un clone
   ritrova l'88% dei collegamenti del genitore) e differiscono in quelle al

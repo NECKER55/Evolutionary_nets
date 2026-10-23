@@ -162,6 +162,10 @@ class Config:
     # dell'individuo ("canal"); questo è il suo valore di partenza.
     develop_threshold: float = 1.0
     develop_precision: float = 8.0
+    # Sinapsi giovani (docs/SPEC_SVILUPPO.md, sezione 15): una sinapsi nasce
+    # debole, con forza synapse_young · (attrazione − develop_threshold) per il
+    # guadagno di chi la riceve; la rinforzano poi l'attività e Hebb.
+    synapse_young: float = 1.0
     # Il grembo (net/womb.py, solo con lo sviluppo): secondi di attività
     # spontanea prima della nascita. I sensi ricevono onde che scorrono lungo
     # l'ordine dei nervi (come le onde della retina): velocità (lati del

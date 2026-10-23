@@ -218,6 +218,9 @@ def main() -> None:
     ap.add_argument("--mode", choices=("evoluzione", "cervello"), default="evoluzione",
                     help="evoluzione = evolvono sensi e cervello; cervello = sensi fissi (net/senses.py), "
                          "evolve solo il cervello")
+    ap.add_argument("--genome", choices=("diretto", "sviluppo"), default="diretto",
+                    help="diretto = il genoma scrive ogni sinapsi; sviluppo = il cervello nasce da marcatori e "
+                         "gradienti (net/development.py)")
     ap.add_argument("--ladder", action="store_true",
                     help="con --task cibo: la scala di difficoltà adattiva (evo/ladder.py)")
     ap.add_argument("--controls", action="store_true",
@@ -230,7 +233,7 @@ def main() -> None:
     ap.add_argument("--bench", action="store_true", help="misura il throughput senza grafica")
     ap.add_argument("--steps", type=int, default=5000, help="step per --bench")
     args = ap.parse_args()
-    cfg = Config(net_type=args.net, engine=args.engine, task=args.task, sim_mode=args.mode)
+    cfg = Config(net_type=args.net, engine=args.engine, task=args.task, sim_mode=args.mode, genome=args.genome)
     if args.task == "cibo":
         cfg.n_hazards = 0  # il veleno resta spento in tutta la scala
     if args.ladder or args.controls:

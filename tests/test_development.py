@@ -40,8 +40,22 @@ def test_connection_probability_is_canalized_and_weight_is_affinity_times_gain()
     dev.develop(many, cfg, np.random.default_rng(1), Brains.GAIN)
     assert np.allclose(many.conn.mean(axis=0), expected[0], atol=0.03)
     gain = np.exp(g.traits[0, :, Brains.GAIN])
-    w = np.clip(a[0] * gain[:, None], -cfg.synapse_max, cfg.synapse_max)
+    young = dev.young_strength(cfg, a, dist, g.n_rec, g.rate("conn_range"))[0]
+    w = np.clip(young * gain[:, None], -cfg.synapse_max, cfg.synapse_max)
     assert np.allclose(many.weights[many.conn], np.broadcast_to(w, many.conn.shape)[many.conn])
+
+
+def test_young_synapses_are_born_weak_and_the_wiring_does_not_change():
+    """Una sinapsi nasce con forza che cresce da zero oltre la soglia, con il
+    segno dell'affinità; quali collegamenti nascono non dipende da quanto sono
+    forti (la canalizzazione resta la stessa)."""
+    cfg = Config(genome="sviluppo")
+    a = np.array([[[0.5, 1.1, 2.0, -3.0, 0.8]]])  # l'ultima sorgente è il bersaglio stesso
+    near = np.zeros((1, 1, 5))
+    w = dev.young_strength(cfg, a, near, 4, np.array([1e9]))[0, 0]
+    assert np.allclose(w[:4], [0.0, 0.1, 1.0, -2.0]) and np.isclose(w[4], 0.8 * cfg.synapse_young)
+    brains = [Brains(Config(genome="sviluppo", synapse_young=y), 50, 2, 4) for y in (0.5, 2.0)]
+    assert np.array_equal(brains[0].genome.conn, brains[1].genome.conn)
 
 
 def test_strong_attraction_always_grows_a_connection_and_weak_almost_never():

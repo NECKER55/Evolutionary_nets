@@ -19,9 +19,14 @@ a un marcatore sul bersaglio, con il segno. Alla nascita:
    Waddington: le vie attratte con forza nascono quasi sempre, le deboli quasi
    mai, e il caso decide solo vicino alla soglia. Un neurone con se stesso fa
    eccezione, come nella geometria: `net_self_prob` · (1 − e^(−|affinità|));
-3. il peso iniziale è affinità · e^guadagno, con il guadagno gene del neurone
-   che riceve, limitato a ±`synapse_max`. Nelle reti a impulsi il segno viene
-   dal tipo del neurone che trasmette (legge di Dale): l'affinità dà la forza.
+3. la sinapsi nasce **giovane, cioè debole** (`young_strength`): la sua forza
+   cresce da zero con quanto l'attrazione supera la soglia, come i contatti in
+   più dove l'assone è attratto di più: segno(affinità) · `synapse_young` ·
+   (attrazione − soglia) · e^guadagno, con il guadagno gene del neurone che
+   riceve, limitata a ±`synapse_max`. Nelle reti a impulsi il segno viene dal
+   tipo del neurone che trasmette (legge di Dale). La guida decide con chi, la
+   forza la costruiscono dopo l'attività del grembo, Hebb nel periodo critico
+   e l'omeostasi, come in natura.
 
 Lo sviluppo è in parte casuale, come in natura: fratelli identici hanno le
 stesse vie principali e differiscono nei collegamenti al limite. Il
@@ -88,13 +93,28 @@ def develop(g, cfg, rng: np.random.Generator, gain_index: int) -> None:
     a = affinity(g)
     side = brain_side(cfg, g.r_active, g.active, g.n_out)
     dist = distances(cfg, g.pos, g.r_y, g.n_out, side)
-    p = connect_prob(cfg, np.abs(a), dist, g.n_rec, np.exp(g.meta[:, _meta_index("conn_range")]),
-                     np.exp(g.meta[:, _meta_index("canal")]))
+    reach = np.exp(g.meta[:, _meta_index("conn_range")])
+    p = connect_prob(cfg, np.abs(a), dist, g.n_rec, reach, np.exp(g.meta[:, _meta_index("canal")]))
     g.conn = rng.random(p.shape) < p
     from .brain import scale_gene
 
     gain = scale_gene(g.traits[:, :, gain_index])  # (N, T)
-    g.weights = np.clip(a * gain[:, :, None], -cfg.synapse_max, cfg.synapse_max) * g.conn
+    w = young_strength(cfg, a, dist, g.n_rec, reach) * gain[:, :, None]
+    g.weights = np.clip(w, -cfg.synapse_max, cfg.synapse_max) * g.conn
+
+
+def young_strength(cfg, a: np.ndarray, dist: np.ndarray, n_rec: int, reach: np.ndarray) -> np.ndarray:
+    """(N, T, S): la forza con cui nasce ogni sinapsi, prima del guadagno di
+    chi la riceve. Come in natura una sinapsi giovane è debole: cresce con
+    continuità da zero con quanto l'attrazione supera la soglia (più contatti
+    dove l'assone è attratto di più), `synapse_young` per unità. Il segno è
+    quello dell'affinità. Il neurone con se stesso, che non ha soglia, nasce
+    con `synapse_young` · affinità."""
+    arriving = np.abs(a) * np.exp(-dist / reach[:, None, None])
+    w = np.sign(a) * cfg.synapse_young * np.maximum(arriving - cfg.develop_threshold, 0.0)
+    t = np.arange(dist.shape[1])
+    w[:, t, n_rec + t] = cfg.synapse_young * a[:, t, n_rec + t]
+    return w
 
 
 def connect_prob(cfg, attraction: np.ndarray, dist: np.ndarray, n_rec: int, reach: np.ndarray,
