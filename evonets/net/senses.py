@@ -51,6 +51,10 @@ SETS = {
         Sense("occhio rosso sinistro", LIGHT, 0.85, 0.08, 10.0, body=-15, look=-25, aperture=60, adapt=EYE,
               nerve=0.4),
         Sense("occhio rosso destro", LIGHT, 0.85, 0.08, 10.0, body=15, look=25, aperture=60, adapt=EYE, nerve=0.6),
+        Sense("occhio giallo sinistro", LIGHT, 0.65, 0.08, 10.0, body=-15, look=-25, aperture=60, adapt=EYE,
+              nerve=0.45),
+        Sense("occhio giallo destro", LIGHT, 0.65, 0.08, 10.0, body=15, look=25, aperture=60, adapt=EYE,
+              nerve=0.55),
         Sense("occhio blu sinistro", LIGHT, 0.05, 0.08, 6.0, body=-90, look=-90, aperture=120, adapt=EYE,
               nerve=0.2),
         Sense("occhio blu destro", LIGHT, 0.05, 0.08, 6.0, body=90, look=90, aperture=120, adapt=EYE, nerve=0.8),
@@ -69,6 +73,23 @@ def senses(cfg) -> tuple[Sense, ...]:
     if cfg.sensor_set not in SETS:
         raise ValueError(f"set di sensi sconosciuto: {cfg.sensor_set!r} (validi: {', '.join(SETS)})")
     return SETS[cfg.sensor_set]
+
+
+SIDES = (" sinistro", " destro")
+
+
+def organs(cfg) -> np.ndarray:
+    """(R,) a quale organo appartiene ogni senso del set: i due sensi di una
+    coppia (stesso nome, "sinistro" e "destro") sono lo stesso organo, come
+    gli organi pari di un corpo bilaterale, fatti dagli stessi geni."""
+    names = []
+    for x in senses(cfg):
+        name = x.name
+        for side in SIDES:
+            name = name.replace(side, "")
+        names.append(name)
+    kinds = list(dict.fromkeys(names))
+    return np.array([kinds.index(name) for name in names])
 
 
 def genes(cfg, n: int) -> dict[str, np.ndarray]:

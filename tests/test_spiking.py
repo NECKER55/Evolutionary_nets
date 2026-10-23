@@ -159,9 +159,9 @@ def test_every_neuron_is_all_excitatory_or_all_inhibitory():
     assert (out[np.broadcast_to(inh, out.shape)] <= 0.0).all()
     assert (out[np.broadcast_to(~inh, out.shape)] >= 0.0).all()
     assert (out < 0.0).any() and (out > 0.0).any()
-    # La forza è il valore assoluto del peso scritto nel genoma.
-    raw = b.weights[:, :, N_IN : N_IN + b.n_hidden]
-    assert np.array_equal(np.abs(out), np.abs(raw) * b.links[:, :, N_IN : N_IN + b.n_hidden])
+    # La forza è il valore assoluto del peso scritto nel genoma, al più il massimo fisico.
+    raw = np.clip(np.abs(b.weights[:, :, N_IN : N_IN + b.n_hidden]), 0.0, b.cfg.synapse_max)
+    assert np.array_equal(np.abs(out), raw * b.links[:, :, N_IN : N_IN + b.n_hidden])
 
 
 def test_motors_only_excite_and_senses_are_free_unless_restricted():
@@ -188,13 +188,15 @@ def test_flipping_the_type_gene_flips_all_outgoing_links_and_nothing_else():
 def downstream_spikes(sender_inhibitory: bool) -> float:
     """Il neurone 0 scatta di continuo ed è collegato al neurone 1, che riceve
     anche uno stimolo proprio. Conta gli impulsi del neurone 1."""
-    b = SpikingBrains(Config(net_hidden_slots=2, receptor_slots=1, receptor_initial=1, spike_gain=1.0), 1, 4, 0)
+    # Un sotto-passo per passo: si contano tutti gli impulsi.
+    b = SpikingBrains(Config(net_hidden_slots=2, receptor_slots=1, receptor_initial=1, spike_gain=1.0,
+                             spike_substeps=1), 1, 4, 0)
     b.weights[:] = 0.0
     b.traits[:] = 0.0
     b.conn[:] = False
     b.active[:] = True
     b.conn[0, 0, 0] = b.conn[0, 1, 0] = b.conn[0, 1, 1] = True  # ingresso->0, ingresso->1, 0->1
-    b.weights[0, 0, 0] = 8.0
+    b.weights[0, 0, 0] = 4.0  # il massimo fisico di una sinapsi
     b.weights[0, 1, 0] = 2.0
     b.weights[0, 1, 1] = 3.0  # sorgente 1 = neurone interno 0 (dopo l'unico ingresso)
     b.traits[0, 0, 2] = -1.0 if sender_inhibitory else 1.0

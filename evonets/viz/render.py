@@ -19,6 +19,8 @@ RAY = (60, 66, 84)
 WALL = (200, 204, 215)
 FOOD = (235, 80, 70)  # il cibo è rosso anche per gli agenti (0,85 sull'asse della luce)
 PREDATOR = (90, 110, 255)  # i predatori quasi blu (0,05)
+ROCK = (120, 128, 112)  # le rocce grigie (0,45, colore spento)
+FRUIT = (235, 200, 60)  # il frutto giallo (0,65)
 TRAIL = 240  # punti della scia dell'agente seguito (uno per fotogramma)
 # Colore di un recettore secondo il fenomeno a cui è più sensibile (bianco se
 # generalista): luce, sostanze, meccanica, temperatura, magnetismo, interno.
@@ -120,31 +122,49 @@ class Renderer:
             self._draw_forage(task, focus)
 
     def _draw_forage(self, task, i: int) -> None:
-        """Cibo e predatori nella copia di mondo dell'agente i (ognuno ha la
-        sua). Un anello sottile mostra fin dove una preda si accorge
-        dell'agente e fin dove un predatore lo insegue."""
+        """Cibo, rocce e predatori nella copia di mondo dell'agente i (ognuno
+        ha la sua). Prima le aree (nubi d'odore, fin dove una preda si accorge
+        dell'agente, fin dove un predatore lo insegue), poi sopra tutti i
+        corpi: un'area non copre mai un oggetto. (Su uno strato trasparente
+        pygame sostituisce i pixel invece di mescolarli: per questo aree e
+        corpi vanno in due passate.)"""
         cfg, s = self.world.cfg, self.scale
+        food = np.flatnonzero(task.food_on[i])
+        colors = [FOOD if task.color[i, k] == 0 else FRUIT for k in food]
+        # 1. Le aree.
         self.overlay.fill((0, 0, 0, 0))
         if cfg.food_smell > 0:  # la nube d'odore: alone fino a una portata; la traccia del cibo mangiato
             on, trace = task.scent()
             reach = int(cfg.odor_range * s)
-            for k in np.flatnonzero(task.food_on[i]):
-                pygame.draw.circle(self.overlay, (*FOOD, int(18 * on[i, k])), self._px(task.food[i, k]), reach)
+            for k, color in zip(food, colors):
+                pygame.draw.circle(self.overlay, (*color, int(18 * on[i, k])), self._px(task.food[i, k]), reach)
                 if trace[i, k] > 0.02:
-                    pygame.draw.circle(self.overlay, (*FOOD, int(18 * trace[i, k])), self._px(task.ghost[i, k]),
+                    pygame.draw.circle(self.overlay, (*color, int(18 * trace[i, k])), self._px(task.ghost[i, k]),
                                        reach)
-                    pygame.draw.circle(self.overlay, (*FOOD, int(160 * trace[i, k])), self._px(task.ghost[i, k]),
-                                       max(2, int(task.food_r * s)), 1)
-        for k in np.flatnonzero(task.food_on[i]):
-            c = self._px(task.food[i, k])
-            if task.prey_speed > 0:
-                pygame.draw.circle(self.overlay, (*FOOD, 40), c, int(cfg.prey_flee_range * s), 1)
-            pygame.draw.circle(self.overlay, (*FOOD, 255), c, max(2, int(task.food_r * s)))
         for k in np.flatnonzero(task.pred_on[i]):
-            c = self._px(task.pred[i, k])
-            pygame.draw.circle(self.overlay, (*PREDATOR, 22), c, int(cfg.predator_range * s))
-            pygame.draw.circle(self.overlay, (*PREDATOR, 90), c, int(cfg.predator_range * s), 1)
-            pygame.draw.circle(self.overlay, (*PREDATOR, 255), c, max(3, int(cfg.predator_radius * s)))
+            pygame.draw.circle(self.overlay, (*PREDATOR, 14), self._px(task.pred[i, k]), int(cfg.predator_range * s))
+        self.screen.blit(self.overlay, (0, 0))
+        # 2. I contorni delle aree e i corpi, sopra.
+        self.overlay.fill((0, 0, 0, 0))
+        for k in np.flatnonzero(task.pred_on[i]):
+            pygame.draw.circle(self.overlay, (*PREDATOR, 90), self._px(task.pred[i, k]), int(cfg.predator_range * s), 1)
+        if cfg.food_smell > 0:
+            for k, color in zip(food, colors):
+                if trace[i, k] > 0.02:
+                    pygame.draw.circle(self.overlay, (*color, int(160 * trace[i, k])), self._px(task.ghost[i, k]),
+                                       max(2, int(task.food_r * s)), 1)
+        if task.prey_speed > 0:
+            for k, color in zip(food, colors):
+                pygame.draw.circle(self.overlay, (*color, 40), self._px(task.food[i, k]), int(cfg.prey_flee_range * s), 1)
+        for k in np.flatnonzero(task.rock_r[i] > 0):
+            pygame.draw.circle(self.overlay, (*ROCK, 255), self._px(task.rock[i, k]), max(2, int(task.rock_r[i, k] * s)))
+        for k, color in zip(food, colors):
+            c = self._px(task.food[i, k])
+            pygame.draw.circle(self.overlay, (*color, 255), c, max(2, int(task.food_r * s)))
+            if task.bad[i, k]:  # per chi guarda: questo, in questa vita, è cattivo
+                pygame.draw.circle(self.overlay, (40, 20, 20, 255), c, max(3, int(task.food_r * s) + 2), 2)
+        for k in np.flatnonzero(task.pred_on[i]):
+            pygame.draw.circle(self.overlay, (*PREDATOR, 255), self._px(task.pred[i, k]), max(3, int(cfg.predator_radius * s)))
         self.screen.blit(self.overlay, (0, 0))
 
     def task_line(self, i: int) -> str:

@@ -189,6 +189,31 @@ Il progetto completo è in [SPEC_MONDO.md](SPEC_MONDO.md).
 | prede (`forage_prey`) | il cibo sta fermo | il cibo fugge a 12 u/s dall'agente entro 15 u |
 | nube d'odore (`forage_scent`) | sempre formata | si forma in 3 s quando il cibo compare; quella di un cibo mangiato resta dov'era e svanisce in 3 s |
 | predatori (`forage_predators`) | nessuno | 3 predatori (quasi blu, vibrano) che inseguono entro 40 u a 15 u/s e a contatto tolgono 60 di energia al secondo |
+| rocce (`forage_obstacles`) | nessuna | 8 rocce grigie di raggio 6–16, ferme, che non si toccano (tra due c'è sempre un passaggio di almeno 10 u) |
+| frutti (`forage_variety`) | un frutto solo, rosso e buono | metà dei frutti cattivi: in ogni vita un colore (rosso o giallo) è buono e l'altro cattivo, a caso |
+
+- **I frutti** (quinto stadio): un mondo in cui imparare conviene, perché
+  cambia da una vita all'altra ma resta stabile dentro una vita. Ci sono due
+  frutti: rosso (0,85 sulla luce, molecola 0,6) e giallo (0,65, molecola
+  0,5). In ogni vita, per ogni agente, uno dei due colori è buono e l'altro
+  cattivo, scelto a caso; una quota dei posti (fino a metà, con la manopola)
+  ha il frutto cattivo, e ogni posto tiene il suo tipo quando il frutto
+  ricompare. Il frutto buono nutre (100), dà gusto e conta per riprodursi;
+  quello cattivo non nutre, dà dolore e toglie 30 di energia
+  (`bad_fruit_damage`): uno sbaglio insegna, non uccide. Con gusto, dolore e
+  il sistema di valore il cervello può imparare in pochi bocconi quale
+  colore mangiare in questa vita; nessun riflesso fisso può saperlo prima.
+  Il set di sensi "naturale" ha due occhi gialli (14 sensi).
+
+- **Le rocce** (quarto stadio): sono opache e solide. Fermano l'agente come
+  una parete (rimbalzo anelastico, e il lato che le tocca sente la
+  pressione), le prede e i predatori: un predatore che insegue dritto si
+  blocca contro una roccia, che diventa un **rifugio**. Nascondono alla vista
+  ciò che sta dietro (anche il cibo); si vedono grigie e spente (0,45
+  sull'asse della luce, albedo 0,4). Odori e vibrazioni le scavalcano: dietro
+  una roccia il cibo si sente ma non si vede. Il cibo non nasce e non ricompare
+  mai dentro una roccia, e nessuno nasce dentro una roccia. Ogni agente ha le
+  sue rocce, come il suo cibo.
 
 - **Gli odori**: il cibo rilascia la sua molecola (0,6 sull'asse delle
   molecole), i predatori un'altra (0,35). Diffusione e degradazione fanno
@@ -199,7 +224,7 @@ Il progetto completo è in [SPEC_MONDO.md](SPEC_MONDO.md).
   anche tra un lato e l'altro del corpo.
 - **La scala** (`ladder`): con `scala` le manopole salgono una alla volta
   (abbondanza e cibi necessari insieme, poi prede e nube d'odore insieme,
-  poi predatori) se negli
+  poi predatori, poi rocce, poi frutti) se negli
   ultime 10 generazioni completa più del 50%, scendono sotto il 30%, e
   scendono di più se in una generazione non completa nessuno. Con `basico` o
   `complesso` restano ferme a 0 o a 1: sono le popolazioni di controllo. Ogni
@@ -323,7 +348,11 @@ pezzo di corteccia:
 - i **recettori** entrano dal bordo sinistro, all'altezza data da un loro gene:
   alla nascita segue la direzione in cui guardano (una mappa topografica, come
   la retina), poi deriva con le mutazioni;
-- i **motori** stanno in posizioni fisse sul bordo destro;
+- i **motori** stanno in posizioni fisse sul bordo destro. Con i quattro motori
+  della rete a impulsi il cervello è **bilaterale** come il corpo: lo sterzo
+  verso sinistra nella metà sinistra (y = 0,125, dove entrano i nervi dei
+  recettori che guardano a sinistra), quello verso destra nella metà destra
+  (y = 0,875), avanti e indietro vicino alla linea mediana (0,45 e 0,55);
 - ogni **neurone interno** sta dove dice il suo gene di posizione. Alla nascita
   di una popolazione casuale le posizioni sono sparse a caso; poi si ereditano
   e si spostano di poco con le mutazioni.
@@ -554,8 +583,9 @@ sensoriale e la sua rete:
 - per ciascun collegamento possibile, se **esiste** e il suo **peso**;
 - per ciascun neurone interno o motore, i suoi **geni propri**;
 - il **meccanismo di mutazione e di riproduzione**: i tassi di mutazione, la
-  portata λ dei collegamenti e quanto spesso l'individuo, come madre, fa figli
-  con un partner (gene `sex`, punto 14);
+  portata λ dei collegamenti, quanto spesso l'individuo, come madre, fa figli
+  con un partner (gene `sex`, punto 14) e, con lo sviluppo, la precisione con
+  cui il cervello si costruisce (gene `canal`);
 - per ogni gene di recettore e di neurone interno, la sua **discendenza**:
   un'identità (quale gene è) e una famiglia (da quale gene antenato discendono
   lui e le sue copie). I geni dei primi individui hanno l'identità del loro
@@ -579,25 +609,43 @@ cervello, come in natura (chemoaffinità di Sperry):
   motore esprime ciascun marcatore in una quantità tra 0 e 1, che dipende da
   un gene della cellula e, per i marcatori a **gradiente**, dalla sua
   posizione nel cervello (come Eph ed efrine, che costruiscono le mappe
-  topografiche: due geni per marcatore, lungo x e lungo y). Si parte con 2
-  marcatori; i posti crescono come quelli dei neuroni.
+  topografiche: due geni per marcatore, lungo x e lungo y). Si parte con 4
+  marcatori su 6 posti; i posti crescono come quelli dei neuroni.
+- **Asse sinistra-destra del fondatore**: i primi 2 marcatori di partenza sono una
+  coppia di gradienti opposti lungo y (pendenza `marker_map_gradient` 12),
+  ciascuno legato a se stesso (`marker_map_affinity` 2), con un po' di
+  variazione tra individui (`marker_map_std` 0,3). Ogni cellula si collega
+  soprattutto alla sua stessa metà: il recettore che guarda a destra allo
+  sterzo verso destra, come la mappa del tetto ottico. Gli altri 2 marcatori
+  partono a caso. Alla partenza il 52% degli individui nasce con un riflesso
+  "gira verso ciò che vedi", il 13% con quello opposto, gli altri senza.
 - **Tabella di affinità** (gene dell'individuo): quanto un marcatore
   sull'assone si lega a un marcatore sul bersaglio, con il segno.
 - **Alla nascita**: affinità(s → t) = Σ espressione_s[a] · tabella[a, b] ·
-  espressione_t[b]; il collegamento nasce con probabilità
-  p_geometria(d) · (1 − e^(−|affinità|)) (senza affinità non nasce nulla); il
+  espressione_t[b]. L'attrazione che arriva al bersaglio si attenua con la
+  distanza: |affinità| · e^(−d/λ), con λ la portata dell'individuo. Il
+  collegamento nasce con probabilità sigmoide(k · (attrazione − 1)), spostata
+  perché senza attrazione sia 0 (`develop_threshold` 1). È la
+  **canalizzazione**: le vie attratte con forza nascono quasi sempre, le deboli
+  quasi mai. k, la **precisione dello sviluppo**, è un gene dell'individuo
+  (`canal`, partenza `develop_precision` 8). Un neurone con se stesso nasce
+  con probabilità `net_self_prob` · (1 − e^(−|affinità|)). Il
   peso è affinità · e^guadagno, con il **guadagno** gene del neurone che
   riceve (quanti recettori postsinaptici ha), al più ±`synapse_max`. Nelle
   reti a impulsi il segno viene dal tipo di chi trasmette.
-- Lo sviluppo è in parte **casuale**: fratelli con lo stesso genoma hanno
-  cervelli simili ma non uguali. Il cervello sviluppato appartiene
+- Lo sviluppo è in parte **casuale**, ma solo vicino alla soglia: fratelli con
+  lo stesso genoma hanno le stesse vie principali (alla partenza un clone
+  ritrova l'88% dei collegamenti del genitore) e differiscono in quelle al
+  limite. Il cervello sviluppato appartiene
   all'individuo: un genitore che sopravvive tiene il suo, ogni figlio sviluppa
   il proprio.
 - **Mutazioni**: i pesi e i collegamenti non sono geni e non mutano; mutano le
   espressioni, i gradienti, la tabella e il guadagno (come gli altri geni). Un
   marcatore si **duplica** (la copia è espressa uguale ovunque e riga e
   colonna della tabella si dividono a metà: nessun cambiamento finché non
-  diverge), si rompe (più facilmente se lega molti marcatori) o si ripara;
+  diverge), si rompe o si ripara. Il gene di un marcatore ha lunghezza fissa
+  7 (esistenza, gradiente, dominio di legame): come in natura non diventa più
+  fragile perché esistono altri marcatori;
   tra copie della stessa famiglia vale lo scambio ineguale. Un neurone
   duplicato porta con sé i suoi marcatori: i suoi collegamenti nascono dallo
   sviluppo.
@@ -605,8 +653,14 @@ cervello, come in natura (chemoaffinità di Sperry):
   passa intero da un genitore, abbinato per identità; quello di un solo
   genitore passa con probabilità 1/2. Una cellula esprime ogni marcatore come
   nel genitore da cui viene (o, se lui non lo ha, come nell'altro).
-- **Solo cervello**: anche i marcatori dei sensi sono fissi, uguali per tutti,
-  senza gradiente, mai mutati.
+- **Solo cervello**: anche i geni dei marcatori dei sensi sono fissi, uguali
+  per tutti, mai mutati. Come le cellule della retina, però, i sensi seguono i
+  gradienti secondo l'altezza a cui entra il loro nervo: l'occhio sinistro e
+  il destro hanno un'etichetta di lato e l'asse sinistra-destra vale anche per
+  loro (per i due marcatori dell'asse la parte propria dei sensi è nulla: il
+  lato lo dice solo la posizione). I due sensi di una coppia (sinistro e
+  destro) sono lo stesso organo: hanno gli stessi marcatori propri e
+  differiscono solo per la posizione del nervo.
 - **Il grembo** (net/womb.py): ogni neonato, prima di entrare nell'arena,
   vive `prenatal_time` (5 s) di **attività spontanea**. I sensi ricevono onde
   che scorrono lungo l'ordine dei nervi, come le onde della retina: sensi
@@ -693,6 +747,19 @@ ritocco cambia un tasso di un fattore, per esempio del ±30%). Non esiste una
 ereditati; quelli eventualmente ritoccati valgono per i figli del figlio.
 Nessun tasso scende sotto 1e-5 (`mutation_floor`): la copiatura perfetta non
 esiste.
+
+**Le ampiezze hanno un tetto naturale.** In natura gli effetti delle
+mutazioni sono per lo più piccoli (la varianza che aggiungono in una
+generazione è circa un millesimo di quella dovuta all'ambiente) e i mutatori
+cambiano i tassi di un fattore. Un ritocco sposta quindi un gene al più di
+circa 1 (quanto differiscono due individui alla partenza), una posizione di
+0,3 lati del cervello, un gene di recettore di 0,2 volte la sua scala; la
+portata dei collegamenti λ arriva al più a 3. Senza tetto l'ampiezza, che
+muta con se stessa, si autoalimentava: senza selezione in 60 generazioni
+arrivava a 100 e i geni a ±170 (corretto il 2026-10-21). Una sinapsi, anche
+nel genoma diretto, non supera mai il suo massimo fisico (`synapse_max`), né
+nel genoma né alla nascita; una velocità della plasticità (e^gene) non sale
+oltre e^12 volte quella di partenza (ma può spegnersi del tutto).
 
 | Mutazione | Valore di partenza del tasso | Costante iniziale |
 |---|---|---|

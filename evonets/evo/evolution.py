@@ -273,6 +273,7 @@ class Evolution:
             stats["dials"] = ladder.dials(cfg)  # le manopole con cui ha vissuto
             stats["position"] = ladder.position(cfg)
             stats["eaten"] = float(world.task.eaten.mean())
+            stats["bad_eaten"] = float(world.task.bad_eaten.mean())  # frutti cattivi mangiati (errori)
             if world.n == len(getattr(world.task, "start_dist", ())):
                 stats["luck"] = ladder.luck(world.task.start_dist, world.done)
         moved = ladder.update(cfg, self.history + [stats])

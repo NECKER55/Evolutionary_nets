@@ -187,3 +187,120 @@ def test_without_keep_living_a_mature_agent_stops_as_before():
     w.pos[0] = w.task.food[0, 0]
     w.step(np.zeros((w.n, 2)))
     assert w.done[0] and not w.racing[0]
+
+
+# --- Le rocce (quarto stadio) --------------------------------------------------
+
+def rocky(n=4, **kw):
+    cfg, w = forage(n, forage_obstacles=1.0, **kw)
+    return cfg, w, w.task
+
+
+def test_rocks_appear_with_the_fourth_dial_and_nothing_starts_inside_them():
+    cfg, w, t = rocky(n=20)
+    assert t.n_rock == cfg.rock_count_max and (t.rock_r > 0).all()
+    edge = lambda p, body: (np.linalg.norm(p[:, :, None, :] - t.rock[:, None], axis=3) - t.rock_r[:, None]
+                            - body).min(axis=2)
+    assert (edge(t.food, t.food_r) >= -1e-6).all() and (edge(t.pred, cfg.predator_radius) >= -1e-6).all()
+    assert (edge(w.pos[:, None, :], cfg.agent_radius) > 0).all()
+    _, plain = forage(n=4)
+    assert plain.task.n_rock == 0 and not (plain.task.rock_r > 0).any()
+
+
+def test_a_rock_stops_the_agent_and_presses_on_the_side_that_touches_it():
+    cfg, w, t = rocky(n=1)
+    w.pos[0] = [100.0, 100.0]
+    t.rock[0, 0], t.rock_r[0, 0] = [100.0 + 10.0 + cfg.agent_radius + 0.2, 100.0], 10.0
+    w.heading[0] = 0.0
+    t.rock_r[0, 1:] = 0.0  # una roccia sola
+    for _ in range(20):
+        w.step(np.array([[1.0, 0.0]]))
+    gap = np.linalg.norm(w.pos[0] - t.rock[0, 0]) - t.rock_r[0, 0] - cfg.agent_radius
+    assert abs(gap) < 1e-6 and w.bump[0]
+    toward = (t.rock[0, 0] - w.pos[0]) / np.linalg.norm(t.rock[0, 0] - w.pos[0])
+    normals = np.array([toward, -toward])  # verso la roccia e dalla parte opposta
+    press = signals.pressure(cfg, w, np.array([0, 0]), normals)
+    assert press[0] > 0.99 and press[1] == 0.0
+
+
+def test_a_rock_hides_what_is_behind_it_and_is_seen_grey():
+    cfg, w, t = rocky(n=1)
+    w.pos[0] = [100.0, 100.0]
+    t.rock_r[0] = 0.0
+    t.food[0, 0] = [130.0, 100.0]
+    look = lambda: signals.light(cfg, w, w.pos[:1], np.zeros((1, 1)), np.array([0]))
+    assert look()["cibo"][0] > 0
+    t.rock[0, 0], t.rock_r[0, 0] = [115.0, 100.0], 5.0
+    seen = look()
+    assert seen["cibo"][0] == 0.0 and seen["roccia"][0] > 0.4
+
+
+def test_food_never_comes_back_inside_a_rock():
+    cfg, w, t = rocky(n=6, forage_abundance=0.0, mature_keep_living=True)
+    inside = 0
+    for _ in range(300):
+        w.pos[:] = t.food[:, 0]  # ognuno sopra il suo primo cibo: lo mangia, e il cibo ricompare
+        w.energy[:] = 100.0
+        w.step(np.zeros((w.n, 2)))
+        d = np.linalg.norm(t.food[:, :, None, :] - t.rock[:, None], axis=3) - t.rock_r[:, None]
+        inside += int((d < t.food_r - 1e-6).sum())
+    assert t.eaten.sum() > 200 and inside == 0
+
+
+def test_the_ladder_has_a_fourth_stage_and_old_runs_open_without_rocks():
+    from evonets.evo import ladder
+
+    assert ladder.TOP == 5.0 and ladder.STAGE_NAMES[3] == "rocce"
+    assert ladder.at(3.5)["forage_obstacles"] == 0.5 and ladder.at(3.5)["forage_predators"] == 1.0
+    assert ladder.at(2.5)["forage_obstacles"] == 0.0
+
+
+# --- I frutti (quinto stadio) --------------------------------------------------
+
+def test_without_the_fruit_dial_every_fruit_is_red_and_good():
+    cfg, w = forage(n=10)
+    t = w.task
+    assert not t.bad.any() and (t.color == 0).all() and (t.good == 0).all()
+
+
+def test_with_the_fruit_dial_half_the_fruits_are_bad_and_the_good_colour_changes_with_the_life():
+    cfg, w = forage(n=40, forage_variety=1.0)
+    t = w.task
+    assert (t.bad[:, : t.n_food].sum(axis=1) == t.n_food // 2).all()
+    assert (t.color == np.where(t.bad, 1 - t.good[:, None], t.good[:, None])).all()
+    assert set(t.good.tolist()) == {0, 1}  # per alcuni il buono è il rosso, per altri il giallo
+
+
+def test_a_good_fruit_feeds_and_tastes_a_bad_one_hurts():
+    cfg, w = forage(n=2, forage_variety=1.0)
+    t = w.task
+    good = int(np.flatnonzero(~t.bad[0] & t.food_on[0])[0])
+    bad = int(np.flatnonzero(t.bad[1] & t.food_on[1])[0])
+    w.pos[0], w.pos[1] = t.food[0, good], t.food[1, bad]
+    w.energy[:] = 100.0
+    w.step(np.zeros((2, 2)))
+    assert t.eaten.tolist() == [1, 0] and t.bad_eaten.tolist() == [0, 1]
+    assert w.taste[0] == 1.0 and w.pain[1] == 1.0 and w.taste[1] == 0.0
+    assert w.energy[0] > 150.0 and w.energy[1] < 100.0 - cfg.bad_fruit_damage + 1.0
+
+
+def test_the_yellow_fruit_is_seen_yellow_and_smells_of_its_own_molecule():
+    cfg, w = forage(n=1, forage_variety=1.0, food_smell=1.0)
+    t = w.task
+    w.pos[0] = [100.0, 70.0]
+    t.food_on[0] = False
+    t.food_on[0, 0] = True
+    t.color[0, 0] = 1
+    t.food[0, 0] = [110.0, 70.0]
+    seen = signals.light(cfg, w, w.pos[:1], np.zeros((1, 1)), np.array([0]))
+    assert seen["frutto"][0] > 0.4 and seen["cibo"][0] == 0.0
+    smells = dict(t.odors(w, w.pos[:1], np.array([0])))
+    assert smells[cfg.fruit_molecule][0] > 0 and smells[cfg.food_molecule][0] == 0.0
+
+
+def test_brain_mode_sees_yellow():
+    from evonets.net.senses import senses
+
+    names = {s.name for s in senses(Config(sim_mode="cervello"))}
+    assert {"occhio giallo sinistro", "occhio giallo destro"} <= names
+

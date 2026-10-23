@@ -45,7 +45,8 @@ Scelte dell'utente (2026-10-14):
 | meccanismo di mutazione | come oggi, più il tasso di duplicazione dei marcatori; tolti comparsa e scomparsa dei collegamenti | geni dell'individuo |
 | **pesi e collegamenti** | **non ci sono più**: nascono con lo sviluppo | — |
 
-I marcatori sono quantità di espressione tra 0 e 1. All'inizio ce ne sono 2.
+I marcatori sono quantità di espressione tra 0 e 1. All'inizio ce ne sono 4
+(sezione 13).
 
 ## 3. Lo sviluppo: come nasce un cervello
 
@@ -59,15 +60,18 @@ Per ogni individuo, alla nascita:
    affinità(s, t) = Σ_a Σ_b  marcatore_s[a] · tabella[a, b] · marcatore_t[b]
    ```
 
-3. **Crescita degli assoni.** Il collegamento nasce con probabilità
+3. **Crescita degli assoni** (canalizzata, sezione 13). Il collegamento nasce
+   con probabilità
 
    ```
-   p = net_conn_prob · (1 − e^(−|affinità|)) · e^(−distanza / λ)
+   attrazione = |affinità| · e^(−distanza / λ)
+   p = sigmoide(k · (attrazione − develop_threshold)), spostata perché p(0) = 0
    ```
 
-   Senza affinità non nasce nulla; con affinità forte la probabilità satura; la
-   distanza conta come oggi. λ è il gene di oggi. Un neurone con se stesso usa
-   `net_self_prob` al posto della parte con la distanza.
+   Senza affinità non nasce nulla; con attrazione ben sopra la soglia nasce
+   quasi sempre, ben sotto quasi mai. λ è il gene di oggi, k (precisione dello
+   sviluppo) un gene nuovo dell'individuo. Un neurone con se stesso nasce con
+   probabilità `net_self_prob` · (1 − e^(−|affinità|)).
 4. **Forza iniziale.** Il peso iniziale è l'affinità, limitata a ±`synapse_max`.
    Nelle reti a impulsi il segno viene dal tipo del neurone che trasmette
    (legge di Dale) e l'affinità dà la forza.
@@ -125,8 +129,8 @@ posizione, come i posti dei neuroni.
 
 ## 6. Partenza
 
-- 2 marcatori; la tabella di affinità e i marcatori di ogni neurone, recettore
-  e motore partono a caso.
+- 4 marcatori su 6 posti: i primi 2 sono l'asse sinistra-destra (sezione 12),
+  gli altri 2 partono a caso. I posti spenti hanno geni a caso.
 - Corpo e cervello primordiali come oggi: 2 recettori generalisti, nessun
   neurone interno acceso.
 - Omeostasi debole e casuale (come l'adattamento sensoriale).
@@ -160,8 +164,8 @@ posizione, come i posti dei neuroni.
 
 ## 9. Limiti noti
 
-- La forma delle formule (affinità come somma di prodotti, probabilità che
-  satura) è una scelta nostra: è la "chimica" del simulatore.
+- La forma delle formule (affinità come somma di prodotti, soglia della
+  canalizzazione) è una scelta nostra: è la "chimica" del simulatore.
 - Il cervello sviluppato e la sua plasticità costano calcolo: lo sviluppo si fa
   a ogni nascita, l'attività spontanea aggiunge circa il 10% di una vita per
   ogni nato.
@@ -209,9 +213,10 @@ all'apprendimento.
    recettori postsinaptici, in scala logaritmica). Il peso iniziale di s → t è
    affinità(s, t) · guadagno_t, limitato a ±`synapse_max`. Più gradi di libertà
    restando indiretto: il genoma descrive i neuroni, non le sinapsi.
-3. **Sensi fissi** (`sim_mode = "cervello"`): anche i marcatori dei sensi sono
-   fissi (uguali per tutti, mai mutati): il cervello deve adattarsi a sensi del
-   tutto dati. Si estraggono una volta, con un seme fisso del set di sensi.
+3. **Sensi fissi** (`sim_mode = "cervello"`): anche i geni dei marcatori dei
+   sensi sono fissi (uguali per tutti, mai mutati): il cervello deve adattarsi
+   a sensi dati. Dal 2026-10-23 seguono però i gradienti secondo l'altezza del
+   loro nervo, come la retina (sezione 14). Si estraggono una volta, con un seme fisso del set di sensi.
    Quando un marcatore si duplica, la copia nei sensi vale quanto l'originale e
    poi non deriva. Nella simulazione completa i marcatori dei recettori
    evolvono come quelli dei neuroni.
@@ -441,3 +446,174 @@ Fase 0 ──► Fase 1 ──► Fase 2 ──► Fase 3
              └──► Fase 5           ▼
 Fase 4 (in parallelo) ──────► Fase 6 ──► Mondo
 ```
+
+## 12. Partenza ordinata: asse sinistra-destra e sintonia neutra (2026-10-22)
+
+### Il problema
+
+Nelle tre corse con lo sviluppo del 21 ottobre la popolazione ha perso gli
+occhi in 8–70 generazioni ed è rimasta cieca (corsa delle 22:34: 1506
+generazioni, 96% senza recettori, scala ferma a 0,18 dalla generazione 112).
+Le cause, misurate:
+
+1. **Cablaggio a caso**: con i marcatori a caso un occhio raggiunge i motori
+   senza ordine; spesso fa girare via dal cibo o fermare.
+2. **Sintonia sulle pareti**: tutti i recettori nascevano con μ = 0,5, il
+   colore delle pareti, non del cibo (0,85).
+3. **Recettori daltonici e generalisti** (non ancora cambiato, vedi sotto):
+   con σ = 0,4 e la stessa sensibilità a tutti i fenomeni, la differenza tra
+   i due occhi segue la direzione del cibo appena (correlazione 0,09).
+
+Ai ciechi evoluti di quella corsa (riuscita 0,465) abbiamo dato due occhi
+cablati verso il cibo, a mano, per una vita:
+
+| occhi | riuscita |
+|---|---|
+| nessuno | 0,465 |
+| generalisti, σ 0,4, apertura 120° (come la partenza) | 0,007 |
+| solo luce, σ 0,4, apertura 120° | 0,05–0,08 |
+| solo luce, σ 0,15, apertura 90° | 0,54 |
+| solo luce, σ 0,1, apertura 60° | 0,70 |
+| solo luce, σ 0,05, apertura 60° | 0,75–0,80 |
+| come sopra ma cablati al contrario | 0,12 |
+| generalisti, σ 0,15, apertura 90° | 0,175 |
+
+La vista renderebbe molto, ma la partenza è lontana dalla strada che ci
+porta: è la valle che la selezione non attraversa.
+
+### Cosa cambia
+
+- **Asse sinistra-destra** (`marker_map_*`): i 2 marcatori del fondatore sono
+  gradienti opposti lungo y, ognuno legato a se stesso. Le cellule si
+  collegano soprattutto alla propria metà del cervello. In natura: le mappe
+  topografiche di Eph ed efrine, la mappa del tetto ottico allineata con
+  quella motoria dell'orientamento. Senza variazione tra individui
+  (`marker_map_std` 0,3) la selezione non avrebbe da scegliere: 42% nasce con
+  il riflesso verso, 13% con quello opposto, il resto senza.
+- **Cervello bilaterale** (`geometry.BILATERAL`, solo con 4 motori): sterzo
+  sinistro nella metà sinistra, destro nella destra, avanti e indietro
+  vicino alla linea mediana (in una metà sola un occhio spingerebbe avanti e
+  l'altro indietro). Vale anche per le popolazioni salvate: cambia la
+  lunghezza (e il costo) dei loro collegamenti verso i motori.
+- **Sintonia neutra**: μ a caso su tutto l'asse, una per individuo e per
+  fenomeno; i recettori dello stesso individuo sono copie dello stesso gene
+  (come gli organi pari) e differiscono di 0,05.
+- L'odore del cibo c'era già dal primo stadio (`food_smell` 1).
+
+### Effetto misurato
+
+Generazione 0, 750 agenti, primo stadio, 3 semi: riusciti 50 → 55. Corsa di
+40 generazioni, 2 semi: l'uso dei recettori scende ancora (34–43% alla 40,
+contro il 38% alla 24 di prima). Le tre modifiche da sole non bastano: resta
+il punto 3, i recettori generalisti e daltonici.
+
+## 13. Canalizzazione dello sviluppo e 4 marcatori (2026-10-23)
+
+### Il problema: il genoma si ereditava, il cervello no
+
+La causa principale della cecità della sezione 12 non era la vista, ma
+l'eredità. Con p = p_geometria(d) · (1 − e^(−|affinità|)) la geometria faceva
+da tetto (in media 0,32): anche un'affinità fortissima faceva nascere una via
+una volta su tre. Misurato alla partenza: un **clone identico, senza
+mutazioni, ritrovava il 30% dei collegamenti del genitore** (29% di quelli dai
+recettori), nessun collegamento aveva p > 0,9, la media era 0,15. Un genitore
+che riusciva grazie a un occhio collegato allo sterzo giusto lo passava a meno
+di un figlio su tre: la selezione non poteva accumulare un cablaggio. In
+più ogni mutazione dei 2 marcatori spostava tutte le sinapsi insieme e la
+popolazione si difendeva abbassando i tassi di mutazione (`weight_prob` da 0,1
+a 0,0024 nella corsa delle 22:34), cioè smettendo di evolvere. Le corse con il
+genoma diretto, con gli stessi recettori generalisti di partenza, la vista se
+la costruivano: i recettori generalisti allungano la strada, non la chiudono.
+
+### Cosa cambia
+
+- **Canalizzazione** (Waddington; in natura un assone guidato da segnali forti
+  trova il bersaglio in modo affidabile, i gemelli identici hanno le stesse
+  vie principali): attrazione = |affinità| · e^(−d/λ); p = sigmoide(k ·
+  (attrazione − `develop_threshold`)), spostata perché p(0) = 0. La distanza
+  decide fin dove un assone arriva, non più se nasce quando è attratto con
+  forza. `develop_threshold` 1.
+- **Precisione dello sviluppo** come gene dell'individuo (`canal`, partenza
+  `develop_precision` 8): la selezione può rendere lo sviluppo più preciso o
+  più rumoroso (come i geni della canalizzazione, per esempio Hsp90).
+- **4 marcatori su 6 posti** alla partenza (i primi 2 sono l'asse
+  sinistra-destra): mutazioni con effetti più locali, pesi iniziali con più
+  gradi di libertà.
+- Salvataggi: formato 17; i file precedenti ricevono il gene col valore di
+  partenza, il cervello di chi è già nato non cambia.
+
+### Effetto misurato
+
+Generazione 0 (750 agenti, reti a impulsi):
+
+| | prima | ora |
+|---|---|---|
+| collegamenti alla nascita | 4,5 | 9,6 (diretto: 9,2) |
+| recettori usati | 0,92 | 1,23 |
+| collegamenti ritrovati da un clone | 30% | 88% (83% dai recettori) |
+| riflesso verso / opposto | — | 52% / 13% |
+
+Calibrazione: soglia 0,5 → 14 collegamenti; 1,5 → 6; 2 → 3,9. Precisione 4 →
+clone 78%; 16 → 93%. Con 2 marcatori e la canalizzazione: 3 collegamenti,
+0,21 recettori usati (troppo pochi); con 3: 6,9 e 0,86.
+
+Evoluzione, 3 semi, semi diversi dalle corse di confronto (indicativo):
+
+| | recettori usati | collegamenti | risultato |
+|---|---|---|---|
+| bersaglio, 100 gen., sviluppo prima | 0,12 | 0,7 | riuscita 8,4% |
+| bersaglio, 100 gen., sviluppo ora | 0,77 | 9,2 | riuscita 7,4% |
+| bersaglio, 100 gen., diretto | 0,89 | 6,4 | riuscita 10,7% |
+| cibo con la scala, gen. 150, corsa delle 22:34 | 0,07 | 3,8 | scala 0,18, ferma per 1400 gen. |
+| cibo con la scala, gen. 150, sviluppo ora | 0,69 | 12,6 | scala 0,29, in salita |
+| cibo con la scala, gen. 150, diretto (`010003`) | 1,10 | 7,8 | scala 0,28 |
+
+I sensi restano e la scala sale come con il genoma diretto; i tassi di
+mutazione non si congelano (`weight_prob` 0,09 alla 150). Restano aperti: la
+riuscita sul bersaglio non è ancora migliore in 100 generazioni, e gli
+individui tengono in media 0,7 recettori su 2 (l'asse sinistra-destra rende
+con due occhi).
+
+## 14. Sensi con il lato, organi pari, marcatori a lunghezza fissa (2026-10-23)
+
+### Il problema
+
+Corsa `corsa-20261023-134433` (solo cervello, sviluppo canalizzato): tutta la
+popolazione usava un solo occhio, il rosso destro (97%), e la scala si è
+fermata tra 0,82 e 0,94 dalla generazione 100 (esame 0,18). Il secondo occhio
+non arrivava perché ogni passo per aggiungerlo peggiorava:
+1. i sensi fissi non seguivano i gradienti: occhio sinistro e destro erano
+   chimicamente indistinguibili e l'asse sinistra-destra valeva solo per i
+   neuroni;
+2. i marcatori si perdevano (da 4 a 2,1): la lunghezza del gene, 3 + 2 per
+   marcatore acceso, rendeva ognuno più fragile quanti più ce n'erano, e le
+   rotture superavano sempre le duplicazioni.
+
+Dopo le prime due correzioni, la corsa `corsa-20261023-151336` usava 7,4
+recettori (contro 1,7) con i marcatori stabili, ma quasi solo quelli di
+sinistra (occhi 88–95% contro 8–19%): i marcatori propri dei sensi fissi erano
+estratti per ogni senso, e i due lati di una coppia erano diversi (per esempio
+1,18 contro 2,55 sul marcatore 2 dell'occhio rosso), con lo stesso pregiudizio
+in tutta la popolazione.
+
+### Cosa cambia
+
+- **I sensi seguono i gradienti** secondo l'altezza del loro nervo, come le
+  cellule della retina (Eph/efrine): anche i sensi fissi hanno un'etichetta
+  di lato. Per i due marcatori dell'asse la parte propria dei sensi fissi è
+  nulla: il lato lo dice solo la posizione.
+- **Organi pari** (`senses.organs`): i due sensi di una coppia (sinistro e
+  destro) sono lo stesso organo, con gli stessi marcatori propri.
+- **Gene di un marcatore a lunghezza fissa** (7: esistenza, gradiente, dominio
+  di legame), come in natura: non si allunga con il numero dei partner.
+
+### Effetto misurato alla nascita (solo cervello, 3000 individui)
+
+| coppia | prima: riflesso verso / opposto | ora: usato sinistro / destro | ora: riflesso verso / opposto |
+|---|---|---|---|
+| nasi | 7% / 4% | 26% / 25% | 23% / 5% |
+| occhi rossi | 13% / 6% | 19% / 19% | 16% / 4% |
+| occhi gialli | 11% / 10% | 32% / 31% | 17% / 8% |
+| occhi blu | 19% / 3% | 41% / 39% | 37% / 7% |
+
+Non ancora verificato in evoluzione con la versione completa.

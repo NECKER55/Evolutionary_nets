@@ -458,3 +458,47 @@ Scelte dell'utente, dopo la revisione di cosa restava innaturale:
 - **Sesso come gene della madre** (`sex`, partenza 0,5), senza costi per ora.
 
 Sulla popolazione di `corsa-20261020-200723`: 400 figli in 0,04 s.
+
+## 14. Quarto stadio: le rocce (2026-10-21)
+
+Richiesta dell'utente: aggiungere ostacoli al mondo incrementale, nello
+stadio ritenuto migliore. Scelta: **un quarto stadio dopo i predatori**
+(`forage_obstacles`, posizione della scala da 0 a 4).
+
+- Perché dopo i predatori: le corse in corso (al più allo stadio dei
+  predatori) si riaprono senza cambi improvvisi (con la scala da 0 a 3 le
+  loro posizioni restano le stesse); in natura le rocce danno senso ai
+  predatori (rifugi: un predatore che insegue dritto ci si blocca contro);
+  nascondono il cibo alla vista, quindi l'olfatto (che le scavalca) e la
+  memoria diventano utili; un mondo con punti di riferimento fissi per
+  tutta la vita è il primo passo verso un mondo in cui imparare conviene.
+- Fisica: dischi fermi, 8 al massimo, raggio 6–16, che non si sovrappongono
+  e lasciano un passaggio di almeno 10 u (`rock_gap`); bloccano agenti, prede
+  e predatori (spinta sul bordo, rimbalzo come le pareti), premono sul lato
+  che le tocca, sono opache alla luce (grigie, 0,45, albedo 0,4). Il cibo non
+  nasce né ricompare dentro una roccia. Estratte solo quando ci sono: senza
+  rocce il mondo è identico a prima.
+- Nei due motori (NumPy e GPU), con il confronto passo per passo nei test.
+- Esame a livelli: versione 7 (i livelli coprono la scala da 0 a 4).
+
+## 15. Quinto stadio: i frutti che cambiano da una vita all'altra (2026-10-21)
+
+Proposta dell'assistente, scelte dell'utente: due frutti che si distinguono
+per colore e odore; il cattivo dà dolore e toglie poca energia.
+
+- Perché: in natura l'apprendimento si evolve dove c'è qualcosa di stabile
+  dentro una vita ma diverso tra una vita e l'altra (Stephens 1991, effetto
+  Baldwin). Con un mondo sempre uguale basta un riflesso, e così era finora.
+  Qui nessun riflesso fisso può sapere quale colore mangiare: va imparato
+  ogni volta, dal gusto e dal dolore attraverso il sistema di valore, come le
+  api imparano il colore dei fiori che danno nettare.
+- Fisica: rosso (0,85, molecola 0,6) e giallo (0,65, molecola 0,5), stessa
+  forma; in ogni vita, per ogni agente, il colore buono è scelto a caso
+  (`good`), e una quota dei posti (0,5 · manopola) ha il frutto cattivo, di
+  colore opposto. Il buono nutre (100), dà gusto, conta per riprodursi; il
+  cattivo non nutre, dà dolore, toglie 30 di energia. Due occhi gialli nel
+  set di sensi fisso. Nei due motori, con il confronto passo per passo.
+- Statistica nuova: frutti cattivi mangiati (`bad_eaten`): se gli agenti
+  imparano, a parità di frutti buoni gli errori calano.
+- Esame a livelli: versione 8 (scala da 0 a 5).
+

@@ -141,11 +141,27 @@ class Config:
     # Sviluppo: posti e marcatori accesi alla partenza (i posti crescono come
     # quelli dei neuroni), dispersione delle espressioni (scala logistica), dei
     # gradienti e della tabella di affinità alla partenza.
-    marker_slots: int = 4
-    marker_initial: int = 2
+    marker_slots: int = 6
+    marker_initial: int = 4
     marker_initial_std: float = 1.5
     marker_gradient_std: float = 2.0
     marker_table_std: float = 2.0
+    # Asse sinistra-destra (docs/SPEC_SVILUPPO.md, sezione 12): i primi due
+    # marcatori del fondatore sono una coppia di gradienti opposti lungo
+    # l'altezza del cervello, che si legano ciascuno a se stesso. Ne nasce una
+    # mappa ordinata: i nervi dei recettori che guardano a sinistra raggiungono
+    # soprattutto lo sterzo verso sinistra, come la mappa del tetto ottico.
+    # 0 = nessuna mappa (marcatori tutti a caso). Varietà tra individui: std.
+    marker_map_gradient: float = 12.0  # pendenza in scala logistica per unità di cervello
+    marker_map_affinity: float = 2.0  # legame di ogni marcatore della coppia con se stesso
+    marker_map_std: float = 0.3
+    # Canalizzazione (docs/SPEC_SVILUPPO.md, sezione 13): un collegamento nasce
+    # con p = sigmoide(k · (|affinità| · e^(−d/λ) − develop_threshold)): le vie
+    # attratte con forza nascono quasi sempre, le deboli quasi mai, il caso
+    # conta solo vicino alla soglia. k, la precisione dello sviluppo, è un gene
+    # dell'individuo ("canal"); questo è il suo valore di partenza.
+    develop_threshold: float = 1.0
+    develop_precision: float = 8.0
     # Il grembo (net/womb.py, solo con lo sviluppo): secondi di attività
     # spontanea prima della nascita. I sensi ricevono onde che scorrono lungo
     # l'ordine dei nervi (come le onde della retina): velocità (lati del
@@ -297,6 +313,8 @@ class Config:
     forage_prey: float = 0.0  # da cibo fermo a prede che fuggono a 12 u/s
     forage_scent: float = 0.0  # da nube d'odore istantanea a nube che si forma e svanisce in scent_time_max
     forage_predators: float = 0.0  # da nessuno a 3 predatori a 15 u/s
+    forage_obstacles: float = 0.0  # da nessuna roccia a rock_count_max rocce
+    forage_variety: float = 0.0  # da un frutto solo a metà dei frutti cattivi (quale colore lo è cambia ogni vita)
     # Estremi delle manopole.
     food_count_easy: int = 12
     forage_own_arena: bool = True  # ogni agente in un'arena sua (cibo e predatori in posti diversi)
@@ -326,6 +344,24 @@ class Config:
     predator_albedo: float = 0.8
     predator_vibration: float = 0.5
     predator_vibration_freq: float = 0.4
+    # Rocce (quarto stadio della scala): dischi fermi e opachi. Bloccano il
+    # passaggio (all'agente, alle prede e ai predatori: un rifugio) e la vista
+    # (nascondono il cibo); gli odori e le vibrazioni le scavalcano. Grigie
+    # e opache sull'asse della luce. Il cibo non nasce mai dentro una roccia.
+    rock_count_max: int = 8
+    rock_radius_min: float = 6.0
+    rock_radius_max: float = 16.0
+    rock_gap: float = 10.0  # passaggio minimo tra due rocce (non si sovrappongono)
+    rock_color: float = 0.45
+    rock_color_width: float = 0.2
+    rock_albedo: float = 0.4
+    # Frutti (quinto stadio): due tipi, rosso (food_color, food_molecule) e
+    # giallo (questi). In ogni vita, per ogni agente, uno dei due colori è
+    # buono e l'altro cattivo, a caso: si impara quale mangiare. Il cattivo
+    # non nutre, fa male (dolore) e toglie bad_fruit_damage di energia.
+    fruit_color: float = 0.65
+    fruit_molecule: float = 0.5
+    bad_fruit_damage: float = 30.0
     # Odori (docs/SPEC_MONDO.md, sezione 9): il cibo e i predatori rilasciano
     # una molecola loro; diffusione e degradazione fanno una nube stabile
     # forza · exp(-d / odor_range), d dal bordo. Con forage_scent > 0 la nube

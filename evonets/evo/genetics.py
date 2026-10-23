@@ -394,6 +394,7 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     for values in genes:
         values += chance(values.shape, p_w) * noise(values.shape, std_w)
     clamp_meta(g.meta, cfg)
+    np.clip(g.weights, -cfg.synapse_max, cfg.synapse_max, out=g.weights)  # una sinapsi ha un massimo fisico
 
     # 2. Posizioni nel cervello: interni e ingressi dei recettori.
     p_pos, std_pos = rate("pos_prob"), base("pos_std")
@@ -426,9 +427,8 @@ def mutate(genome: Genome, cfg: Config, rng: np.random.Generator) -> None:
     if not fixed:
         g.r_active = np.where(g.r_active, rng.random(g.r_active.shape) >= on,
                               rng.random(g.r_active.shape) < np.minimum(1.0, mu)[:, None])
-    if developed:  # anche un marcatore si rompe (più facilmente se lega molti altri) o si ripara
-        length = development.MARKER_BASE_LENGTH + 2 * g.m_active.sum(axis=1)
-        broken = 1.0 - (1.0 - np.minimum(1.0, mu)) ** length
+    if developed:  # anche un marcatore si rompe o (raramente) si ripara
+        broken = 1.0 - (1.0 - np.minimum(1.0, mu)) ** development.MARKER_GENE_LENGTH
         g.m_active = np.where(g.m_active, rng.random(g.m_active.shape) >= broken[:, None],
                               rng.random(g.m_active.shape) < np.minimum(1.0, mu)[:, None])
     _duplicate(g, rng, np.minimum(1.0, rate("dup")), cfg.receptor_dup_split, receptors=not fixed)

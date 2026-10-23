@@ -10,9 +10,12 @@ from .receptors import P, Prepared, ReceptorGenes
 # Geni del meccanismo di mutazione, uno per individuo (vedi genetics.mutate e
 # docs/SPEC_FASE_C.md, sezione 5). Nel genoma stanno come logaritmi.
 META = ("weight_prob", "weight_std", "conn_add", "conn_del", "toggle", "dup", "pos_prob", "pos_std",
-        "rec_drift", "conn_range", "sex")
+        "rec_drift", "conn_range", "sex", "canal")
 # "sex": probabilità che un figlio di questo individuo (come madre) nasca con
 # un partner invece che come sua copia. Come i tassi, evolve.
+# "canal": precisione dello sviluppo (development.py), la pendenza della soglia
+# con cui l'attrazione tra due cellule diventa un collegamento. Alta: fratelli
+# identici hanno lo stesso cervello; bassa: lo sviluppo tira a sorte.
 META_INDEX = {name: k for k, name in enumerate(META)}
 
 
@@ -20,10 +23,21 @@ def meta_start(cfg: Config) -> np.ndarray:
     """I valori di partenza dei geni delle mutazioni (dalla configurazione)."""
     return np.array([cfg.mut_weight_prob, cfg.mut_weight_std, cfg.mut_conn_add, cfg.mut_conn_del,
                      cfg.mut_neuron_toggle, cfg.mut_dup, cfg.mut_pos_prob, cfg.mut_pos_std,
-                     cfg.mut_rec_drift, cfg.net_conn_range, cfg.crossover_rate])
+                     cfg.mut_rec_drift, cfg.net_conn_range, cfg.crossover_rate, cfg.develop_precision])
 
 
 PROBABILITIES = [META_INDEX[k] for k in ("weight_prob", "conn_add", "conn_del", "toggle", "dup", "pos_prob", "sex")]
+# Come in natura gli effetti delle mutazioni sono per lo più piccoli (la
+# varianza che le mutazioni aggiungono in una generazione è circa un
+# millesimo di quella dovuta all'ambiente; Lynch e Walsh) e i mutatori
+# cambiano i tassi di un fattore, non di miliardi di volte. Le ampiezze hanno
+# quindi un tetto: un ritocco sposta un gene al più di circa quanto
+# differiscono due individui alla partenza (1), una posizione di 0,3 lati del
+# cervello, un gene di recettore di 0,2 volte la sua scala. Senza tetto
+# l'ampiezza, che muta con se stessa, si autoalimentava: in 60 generazioni
+# senza selezione arrivava a 100 e i geni a ±170. La portata dei collegamenti
+# al più 3 lati del cervello (oltre è già uniforme).
+CEILING = {"weight_std": 1.0, "pos_std": 0.3, "rec_drift": 0.2, "conn_range": 3.0}
 
 
 # Geni della plasticità, in coda ai geni propri di ogni neurone interno o
@@ -54,6 +68,19 @@ PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist
 # τ_c = critical_initial_tau · e^closure (s di età, dal grembo):
 # η_h(età) = η_h · (1 + (B − 1) · e^(−età/τ_c)).
 GENES = PLASTIC + ("gain", "boost", "closure")
+
+
+# Un gene alza una velocità o una forza al più di e^12 volte (circa 160.000)
+# rispetto al suo valore di partenza: oltre non ha più significato fisico, e i
+# numeri a 32 bit della GPU traboccherebbero (l'ampiezza delle mutazioni è un
+# gene e può arrivare a 100). Verso il basso nessun limite: un gene può
+# spegnersi del tutto, come un gene rotto.
+GENE_SPAN = 12.0
+
+
+def scale_gene(gene):
+    """e^gene, con il gene limitato in alto a GENE_SPAN."""
+    return np.exp(np.minimum(gene, GENE_SPAN))
 
 
 def sigmoid(x):
@@ -119,10 +146,12 @@ def plasticity(cfg, xp, p, pre, post, m, n_in: int, centred: bool):
 
 def clamp_meta(meta: np.ndarray, cfg: Config) -> None:
     """Sul posto: nessun tasso sotto l'errore minimo di copiatura, nessuna
-    probabilità sopra 1 e nessuna ampiezza sopra 100 (oltre non ha più
-    significato: il cervello ha lato 1, i pesi stanno per lo più entro ±3)."""
-    np.clip(meta, np.log(cfg.mutation_floor), np.log(100.0), out=meta)
+    probabilità sopra 1 e nessuna ampiezza sopra il suo tetto (`CEILING`)."""
+    np.maximum(meta, np.log(cfg.mutation_floor), out=meta)
     meta[:, PROBABILITIES] = np.minimum(meta[:, PROBABILITIES], 0.0)
+    for name, top in CEILING.items():
+        k = META_INDEX[name]
+        meta[:, k] = np.minimum(meta[:, k], np.log(top))
 
 
 def live_links(conn: np.ndarray, active: np.ndarray, r_active: np.ndarray) -> np.ndarray:
@@ -370,7 +399,11 @@ def primordial(cfg: Config, n: int, n_out: int, n_traits: int, rng: np.random.Ge
     r_active = np.zeros((n, R), dtype=bool)
     r_active[:, :on] = True
     r_sens = np.log(cfg.receptor_initial_gain) + rng.normal(0.0, 0.2, (n, R, P))
-    r_mu = np.clip(0.5 + rng.normal(0.0, 0.05, (n, R, P)), 0.0, 1.0)
+    # Sintonia: nessun colore, odore o grandezza è privilegiato. Ogni individuo
+    # ha la sua, a caso su tutto l'asse; i suoi recettori sono copie dello
+    # stesso gene (come gli organi pari di un corpo bilaterale) e differiscono
+    # appena.
+    r_mu = np.clip(rng.random((n, 1, P)) + rng.normal(0.0, 0.05, (n, R, P)), 0.0, 1.0)
     r_width = np.log(cfg.receptor_initial_width) + rng.normal(0.0, 0.1, (n, R, P))
     r_aperture = np.full((n, R), np.log(np.radians(cfg.receptor_initial_aperture_deg)))
     # Mappa topografica: il nervo entra nel cervello a un'altezza che segue la
@@ -530,17 +563,17 @@ class Brains:
         # Plasticità: M arriva a ogni neurone dai modulatori, per diffusione,
         # calando con la distanza (trasmissione di volume).
         p = self.traits[:, :, self.BASE_TRAITS :]
-        self.eta, self.rule = cfg.plasticity_initial_rate * np.exp(p[..., 0]), p[..., 1:5]
-        self.hebb = cfg.hebb_initial_rate * np.exp(p[..., 6])  # (N, T), del neurone che riceve
+        self.eta, self.rule = cfg.plasticity_initial_rate * scale_gene(p[..., 0]), p[..., 1:5]
+        self.hebb = cfg.hebb_initial_rate * scale_gene(p[..., 6])  # (N, T), del neurone che riceve
         d = self.traits[:, :, self.GAIN + 1 :]
-        self.boost = cfg.critical_initial_boost * np.exp(d[..., 0])  # (N, T): B
-        self.closure = cfg.critical_initial_tau * np.exp(d[..., 1])  # (N, T): τ_c, s
+        self.boost = cfg.critical_initial_boost * scale_gene(d[..., 0])  # (N, T): B
+        self.closure = cfg.critical_initial_tau * scale_gene(d[..., 1])  # (N, T): τ_c, s
         self.lived = np.zeros(self.n)  # secondi già vissuti in vite precedenti (li dà l'evoluzione)
-        self.value = cfg.value_initial * np.exp(g.value)  # (N, 2): forza dei nuclei di gusto e dolore
+        self.value = cfg.value_initial * scale_gene(g.value)  # (N, 2): forza dei nuclei di gusto e dolore
         self.target_act = sigmoid(p[..., 7])  # (N, T): a*
-        self.homeo = cfg.homeo_initial_rate * np.exp(p[..., 8])  # (N, T): h, per secondo
-        self.intrinsic = cfg.homeo_initial_rate * np.exp(p[..., 10])  # (N, T), per secondo
-        self.early_keep = np.exp(-cfg.dt / (cfg.early_initial_tau * np.exp(p[..., 9])))  # (N, T), per passo
+        self.homeo = cfg.homeo_initial_rate * scale_gene(p[..., 8])  # (N, T): h, per secondo
+        self.intrinsic = cfg.homeo_initial_rate * scale_gene(p[..., 10])  # (N, T), per secondo
+        self.early_keep = np.exp(-cfg.dt / (cfg.early_initial_tau * scale_gene(p[..., 9])))  # (N, T), per passo
         self.kmod = np.exp(-self.dist[:, :, R : R + H] / cfg.modulation_range) * mod[:, None, :]
         # Chi impara: con l'hebbiano di base e l'omeostasi, tutti (salvo plasticità spenta).
         self.learns = np.full(self.n, cfg.plasticity) & (
@@ -572,8 +605,10 @@ class Brains:
         """Per i tipi di rete con geni compilati propri (prima dei pesi)."""
 
     def _born_weights(self) -> np.ndarray:
-        """I pesi effettivi alla nascita, dal genoma."""
-        return self.weights * self.links
+        """I pesi effettivi alla nascita, dal genoma: nessuna sinapsi oltre il
+        suo massimo fisico (`synapse_max`)."""
+        top = self.cfg.synapse_max
+        return np.clip(self.weights, -top, top) * self.links
 
     # Segno obbligato dei pesi (legge di Dale): None = libero.
     dale = None
@@ -781,7 +816,9 @@ class SpikingBrains(Brains):
         self._mod_sign = np.where(self.inhibitory, -1.0, 1.0) * self.modulatory
 
     def _born_weights(self) -> np.ndarray:
-        w = np.where(self.dale[:, None, :] == 0.0, self.weights, np.abs(self.weights) * self.dale[:, None, :])
+        top = self.cfg.synapse_max
+        strength = np.clip(self.weights, -top, top)
+        w = np.where(self.dale[:, None, :] == 0.0, strength, np.abs(strength) * self.dale[:, None, :])
         return w * self.links
 
     def _pre(self, obs, before, after) -> np.ndarray:
