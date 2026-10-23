@@ -38,9 +38,20 @@ import numpy as np
 BILATERAL = np.array([0.45, 0.55, 0.875, 0.125])
 
 
+# Nell'arena continua le reti a impulsi hanno 4 motori in più (mordere, luce,
+# odore, nutrire): stanno tra lo sterzo e i motori assiali, lontani dalla
+# linea mediana quanto basta per non confondersi con avanti e indietro.
+ARENA_EXTRA = np.array([0.3, 0.37, 0.63, 0.7])
+
+
 def motor_anchors(n_out: int) -> np.ndarray:
     """Posizioni fisse (n_out, 2) dei motori, sul bordo destro."""
-    y = BILATERAL if n_out == 4 else (np.arange(n_out) + 0.5) / n_out
+    if n_out == 4:
+        y = BILATERAL
+    elif n_out == 8:  # rete a impulsi dell'arena: i 4 di sempre più le azioni
+        y = np.concatenate([BILATERAL, ARENA_EXTRA])
+    else:
+        y = (np.arange(n_out) + 0.5) / n_out
     return np.stack([np.ones(n_out), y], axis=1)
 
 

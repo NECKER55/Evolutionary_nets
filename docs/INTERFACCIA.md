@@ -42,22 +42,36 @@ conta in minuti (10 di partenza). La scala e la selezione finale non ci sono.
 
 ## L'arena continua
 
-Una sola schermata. A sinistra la **vista che segue un essere** (giallo,
+Una sola schermata. A sinistra la **vista**, che segue un essere (giallo,
 con la scia; gli altri esseri sono verdi, il cibo rosso, le macchie fertili
-ombre verdi più chiare quanto più sono fertili); a destra la **mappa intera**
-con il riquadro della vista, poi le misure (vivi, nati, colonizzatori, morti,
-ultimo minuto, ultimo esame) e i dati dell'essere seguito. Se l'essere
-seguito muore si passa al più anziano.
+ombre verdi più chiare quanto più sono fertili) oppure è **libera**: si
+sposta con le frecce o WASD, o cliccando (e trascinando) sulla **mappa
+intera** a destra, dove il riquadro giallo mostra cosa si sta guardando. Il
+clic sulla vista grande non sposta niente. Sotto la mappa le misure (vivi,
+nati, colonizzatori, morti, ultimo minuto, ultimo esame; la velocità con i
+secondi di mondo per secondo vero, "s/s"; "GPU" se gira sulla scheda video),
+i dati dell'essere scelto e una legenda dei colori. Con il mondo che si
+complica: le sei manopole del mondo con una barra ciascuna; esseri grandi
+quanto la loro taglia, con un alone del colore del loro segnale quando si
+illuminano e il muso rosso quando mordono; frutti rossi e gialli (anello
+scuro: cattivo, per chi guarda), cibo duro con bordo bianco spesso, cibo
+grande più grosso; di notte un velo scuro. Se l'essere seguito muore si passa
+al più anziano.
 
 | Tasto | Azione |
 |---|---|
 | `Spazio` | pausa |
-| `1` `2` `3` | velocità: tempo reale, x4, x16 |
-| `Z` | turbo: quanto più veloce si può |
-| rotella, `+` `-` | zoom |
-| `Tab` / `O` / clic | segui il prossimo (dal più anziano) / il più anziano / quello cliccato |
+| `+` `-` | velocità: x1 (tempo reale), x2, x4, x8, x16 |
+| `T` | turbo |
+| `Z` | massima velocità: si calcola quasi senza sosta e si ridisegna 2 volte al secondo |
+| rotella, `Pag↑` `Pag↓` | zoom |
+| `H` | che cos'è ogni cosa: elementi della vista e misure |
+| frecce, `W` `A` `S` `D` | sposta la visuale (libera); con `Maiusc` più veloce |
+| clic o trascina sulla mappa intera | sposta la visuale lì |
+| `F` | torna a seguire l'essere scelto |
+| `Tab` / `O` | segui il prossimo (dal più anziano) / il più anziano |
 | `E` | esame fisso adesso, su 20 adulti a caso |
-| `S` | salva |
+| `Ctrl+S` | salva |
 | `Esc` | torna al menu (salva se ci sono novità) |
 
 L'esploratore delle reti non c'è ancora per l'arena.

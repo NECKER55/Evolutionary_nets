@@ -2,10 +2,12 @@
 
 Stato: **prima versione implementata** (2026-10-23): `sim/arena.py` (il
 mondo), `evo/ecology.py` (nascite, morti, misure, salvataggi),
-`viz/arena_view.py` (la schermata), `uv run main.py --task arena`. Gira sul
-processore (NumPy e numba); il motore GPU, costruito attorno alle
-generazioni, non la fa ancora (sezione 11). Le modalità a generazioni non
-cambiano: stesso seme, stessi numeri di prima.
+`viz/arena_view.py` (la schermata), `gpu/arena.py` (la GPU), `uv run main.py
+--task arena`. Con il motore "gpu" (quello di partenza) sensi, cervello,
+plasticità, movimento, urti, pasti e fame girano sulla scheda video, un
+secondo di mondo per volta; il motore "numpy" resta come riferimento (i test
+confrontano i due). Le modalità a generazioni non cambiano: stesso seme,
+stessi numeri di prima.
 
 Una nuova modalità del mondo, accanto a quella a generazioni (non al suo
 posto): tutti gli esseri vivono insieme in un'unica arena grande, il tempo
@@ -70,12 +72,12 @@ neuroni, cibo che dà 100.
 
 ## 5. Riproduzione
 
-- **Quando**: energia ≥ **300** (il doppio dell'energia iniziale), età
+- **Quando**: energia ≥ **250** (era 300, sezione 13), età
   ≥ **30 s** (maturità), e almeno **30 s** dall'ultimo figlio.
-- **Costo**: il figlio riceve **150** (l'energia iniziale di oggi); il
-  genitore ne paga **200**: in natura fare un figlio costa più dell'energia
-  che il figlio riceve. Dopo il parto il genitore resta con circa 100: deve
-  tornare a mangiare.
+- **Costo**: il figlio riceve **120**; il genitore ne paga **160** (erano 150
+  e 200): in natura fare un figlio costa più dell'energia che il figlio
+  riceve. Dopo il parto il genitore resta con circa 90: deve tornare a
+  mangiare.
 - **Dove**: il figlio nasce accanto al genitore (a 3 u, direzione a caso).
 - **Partner**: se entro **20 u** c'è un essere maturo e compatibile, con la
   probabilità del gene `sex` del genitore il figlio è un incrocio dei due
@@ -106,7 +108,7 @@ li spegne.
 ## 6. Cibo a macchie
 
 - **Macchie fertili**: **8** zone, ognuna una campana di raggio tipico
-  (σ) **120 u**. Il cibo ricresce in un punto a caso con probabilità
+  (σ) **160 u** (era 120, sezione 13). Il cibo ricresce in un punto a caso con probabilità
   proporzionale alla fertilità lì: dentro una macchia si trova molto cibo,
   fuori quasi niente (un fondo dello 0,05 della fertilità massima, per non
   lasciare deserti assoluti).
@@ -184,6 +186,21 @@ senza plasticità, e una prova in cui la macchia di cibo si sposta a metà vita.
 
 ## 11. Motore
 
+**Come è fatto (2026-10-23).** Sulla GPU (`gpu/arena.py`, JAX) gira un
+secondo di mondo intero (60 passi) per chiamata: griglia dei vicini rifatta
+a ogni passo (al più 16 oggetti per cella e per tipo), sensi, cervello e
+plasticità (le stesse funzioni del motore a generazioni), movimento sul
+toro, urti, pasti, morti di fame. Sul processore, una volta al secondo:
+vecchiaia, ricrescita del cibo e macchie, nascite e colonizzatori; i
+neonati arrivano sulla GPU riga per riga, senza ricompilare. Con 750 esseri
+a impulsi su 3000 posti (RTX 5070): circa 70 ms di GPU e 30 ms di
+processore per secondo di mondo, **circa 11 volte il tempo reale**, contro
+0,7 volte sul processore. I sensi della GPU coincidono con quelli del
+processore a meno di qualche per cento in rari recettori: la GPU cerca i
+vicini attorno al centro dell'essere, il processore attorno al recettore.
+
+### Il progetto iniziale
+
 - **Posti fissi** sulla GPU (quanti il tetto) con una maschera dei vivi:
   nascere è occupare un posto libero, morire è liberarlo. Le dimensioni non
   cambiano mai, così il codice compilato resta lo stesso.
@@ -212,7 +229,102 @@ circa un minuto, prima di arrivare all'energia per un figlio (300). I sensi
 si perdono: dentro le macchie il cibo è così fitto che correre alla cieca
 basta, e i sensi costano. Da ricalibrare (vedi sotto).
 
-## 13. Da verificare
+## 13. Ricalibrazione (2026-10-23)
+
+Sulla GPU, rete a impulsi, genoma diretto, 750 esseri all'inizio, seme 11.
+Prima tornata, 20 minuti, energia del cibo al secondo uguale per tutti salvo
+dove indicato:
+
+| variante | si regge da sola? | sensi usati, min. 20 |
+|---|---|---|
+| base (300/150/200, macchie 120) | quasi: colonizzatori da 66 a 0–17, vivi ~100 | 1,67 |
+| metà cibi da 200 | no (~60 colonizzatori/min) | 1,86 |
+| metà cibi da 200, macchie 200 | quasi, lenta | 0,87 |
+| figlio a 250 (120/160) | **sì dal minuto 18: 220 vivi** | 0,56 |
+| le due insieme | no | 1,52 |
+| un terzo dei cibi da 300, macchie 200 | no | 1,32 |
+
+Seconda tornata, 40 minuti, tutte con il figlio a 250:
+
+| variante | vivi (min. 20 → 24 → 40) | colonizzatori | sensi usati, min. 40 |
+|---|---|---|---|
+| macchie 120 | 220 → 344 → 143 (esplosione e crollo) | 0 dal min. 18 | 0,31 |
+| **macchie 160** | 142 → 146 → 214 (crescita regolare) | 0 dal min. 20 | 0,44 |
+| macchie 120, 30 cibi/s | ~100 sempre | ~60/min | 1,36 |
+
+Il cibo è sempre al massimo: non lo limita la quantità ma l'abilità di
+trovarlo. Rendere il cibo più raro peggiora l'avvio. Nuovi valori: figlio a
+250 (120 al figlio, 160 al genitore), macchie di raggio 160. Resta un
+problema: quando la popolazione decolla vincono le famiglie che corrono alla
+cieca dove il cibo è fitto e i sensi calano. Il mondo da solo non chiede di
+più: va complicato (proposte in docs/NOTE.md o nella prossima specifica).
+
+## 15. Il mondo che si complica (2026-10-23)
+
+### Perché
+
+Con la popolazione che si regge da sola vincono le famiglie che corrono alla
+cieca dove il cibo è fitto, e i sensi si perdono: il mondo non chiede altro.
+In natura l'intelligenza cresce dove le risorse sono sparse e cambiano (nei
+primati la dieta prevede la grandezza del cervello meglio del gruppo,
+DeCasien 2017), dove ci sono altri da prevedere, dove il cibo va ottenuto in
+più passi e dove c'è tempo per imparare. Le novità, una per ciascuna di
+queste pressioni, si accendono da sole e per gradi.
+
+### Il corpo (solo nell'arena)
+
+- **Taglia**, un gene (in scala logaritmica, tra 0,3 e 4): raggio × √taglia,
+  metabolismo × taglia^0,75 (Kleiber), riserva di energia × taglia, spinta
+  × taglia^-0,25. Più grande: morso più forte, più riserva, ma più lento e
+  più caro.
+- **Quattro azioni**, ciascuna comandata da un neurone motore in più (le
+  reti dell'arena hanno 6 o 8 motori; le altre arene non cambiano):
+  **mordere**, **luce** (del colore del proprio gene), **odore** (della
+  propria molecola), **nutrire**. Mordere costa 0,5/s, luce e odore 0,3/s
+  ciascuno a intensità piena.
+- I geni del corpo si ereditano (ognuno da uno dei genitori) e mutano con la
+  probabilità di mutazione del genitore.
+
+### Le sei manopole, nell'ordine
+
+| | manopola | cosa fa | che cosa chiede |
+|---|---|---|---|
+| 1 | `arena_depletion` | ogni cibo mangiato vicino a una macchia ne toglie l'1% della salute (per la manopola); la salute torna in 500 s; la fertilità è la salute | cercare un'altra macchia, ricordare dove erano |
+| 2 | `arena_fruits` | fino a metà del cibo nuovo è un frutto cattivo, del colore che nella sua macchia non è buono (toglie 30, fa male) | distinguere i colori ed evitare |
+| 3 | `arena_reversal` | ogni 10 minuti ogni macchia ha il colore buono giallo invece di rosso con probabilità fino a ½ | imparare durante la vita quale colore è buono qui |
+| 4 | `arena_predation` | si morde un essere toccato davanti (entro 60°) e almeno 1,2 volte più piccolo: gli si tolgono 40 · morso · taglia di energia al secondo, chi morde ne prende il 60% | cacciare, fuggire, prevedere l'altro |
+| 5 | `arena_extraction` | fino a metà del cibo nuovo è da aprire: **duro** (va morso per 1 s a morso pieno, vale il doppio) o **grande** (va morso da almeno due insieme, vale 6 volte, diviso tra loro) | azioni in più passi, coordinarsi |
+| 6 | `arena_night` | un giorno e una notte ogni 10 minuti: la luce del mondo cala fino a 1 − 0,85; la luce dei segnali no | olfatto, memoria, segnali |
+
+Sempre presenti, come capacità: i **segnali** (luce e odore di ciascuno, che
+gli altri vedono e annusano) e le **cure** (chi nutre passa 20 energia/s a un
+proprio figlio toccato non ancora adulto, che ne riceve l'80%).
+
+### La scala del mondo
+
+Ogni minuto: se negli ultimi 3 minuti non è servito nessun colonizzatore e i
+vivi sono almeno il minimo, la prima manopola non ancora al massimo sale di
+0,05; se in ognuno degli ultimi 3 minuti sono serviti colonizzatori, l'ultima
+manopola alzata scende di 0,05. Al più un cambio ogni 3 minuti, tutto nel
+registro (evento "mondo"). Le manopole sono stato del mondo: vengono dal
+salvataggio. `arena_world_ladder` = False le lascia ferme.
+
+### Misure in più
+
+Morti predati, frutti cattivi mangiati, energia data ai figli, taglia media e
+dispersione, livelli medi di morso, luce e odore, salute media delle macchie,
+manopole. Dopo ogni esame fisso, la **prova dell'apprendimento**: gli stessi
+20 senza plasticità; la differenza è quanto imparano durante la vita.
+
+### Motore
+
+Solo sul motore JAX ("gpu", che gira anche senza scheda video): il motore
+NumPy resta il riferimento del mondo base e lì le manopole restano a 0. Con
+750 esseri e il mondo complesso circa 10 volte il tempo reale: la GPU calcola
+solo i posti fino all'ultimo vivo (arrotondati a 256), e le nascite occupano i
+posti liberi più bassi.
+
+## 16. Da verificare
 
 - Che la popolazione si stabilizzi (né estinzione né tetto pieno) con i
   numeri della sezione 6; altrimenti si ritocca la ricrescita del cibo.

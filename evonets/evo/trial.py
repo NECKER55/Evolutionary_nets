@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 from ..net.brain import Genome
-from ..net.controllers import NeuralController
+from ..net.controllers import NeuralController, extra_motors
 from ..sim.world import World
 
 
@@ -32,7 +32,7 @@ class Trial:
         self.owner = np.repeat(np.arange(self.k), clones)  # di quale rete è ogni copia
         n = len(self.owner)
         self.world = World(cfg, n, seed, task)
-        self.ctrl = NeuralController(cfg, n)
+        self.ctrl = NeuralController(cfg, n, extra_motors=extra_motors(cfg, genomes))
         self.ctrl.brains.set_genome(genomes.take(self.owner))
         self.ctrl.reset(seed)
         self.done_at = np.full(n, np.nan)  # quando ciascuna copia ha completato
@@ -82,7 +82,7 @@ class Trial:
         pairs = []
         for k in range(self.arenas):
             w = World(self.cfg, len(self.owner), self.seed + k, type(self.world.task)(**_task_args(self.world.task)))
-            c = NeuralController(self.cfg, len(self.owner))
+            c = NeuralController(self.cfg, len(self.owner), extra_motors=extra_motors(self.cfg, genome))
             c.brains.set_genome(genome)
             c.reset(self.seed + k)
             pairs.append((w, c))

@@ -991,8 +991,8 @@ sensi fissi e non si possono più aprire.
 Una modalità a parte (`task = "arena"`, riga "Mondo" del menu): tutti gli
 esseri vivono insieme in un mondo unico di 2000 × 1400 senza bordi, senza
 generazioni né compito. Si nasce quando un adulto (almeno 30 s) ha almeno
-300 di energia e non ha partorito negli ultimi 30 s: il figlio riceve 150, il
-genitore ne paga 200, e se un adulto compatibile (metà delle identità dei
+250 di energia e non ha partorito negli ultimi 30 s: il figlio riceve 120, il
+genitore ne paga 160, e se un adulto compatibile (metà delle identità dei
 geni in comune) è entro 20 u, con la probabilità del gene `sex` il figlio è
 un incrocio dei due. Si muore di fame o di vecchiaia (legge di Gompertz, vita
 mediana 600 s). Il cibo ricresce (45 al secondo, al massimo 1500) a 8
@@ -1002,3 +1002,15 @@ per primo un cibo lo mangia. Sotto i 100 vivi arrivano colonizzatori, copie
 mutate di chi ha mangiato di più. L'esame fisso (i livelli del mondo del
 cibo) si fa ogni 10 minuti di mondo su 20 adulti presi a caso. Dettagli e
 numeri in [SPEC_ARENA.md](SPEC_ARENA.md).
+
+**Il mondo che si complica** (solo con il motore JAX; dettagli in
+SPEC_ARENA.md, sezione 15). Nell'arena ogni essere ha una **taglia** (gene:
+più grande = morso più forte e più riserva, ma più lento e più caro) e
+quattro **azioni** comandate da neuroni motori in più: mordere, accendere la
+propria luce (colore: gene), emettere il proprio odore (molecola: gene),
+nutrire un proprio figlio. Sei manopole, che il mondo alza una alla volta
+quando la popolazione si regge da sola e abbassa quando torna ad aver bisogno
+di colonizzatori: macchie che si esauriscono, frutti cattivi, inversione del
+colore buono, predazione (si morde chi è almeno 1,2 volte più piccolo),
+cibo da aprire (duro e grande), notte. Dopo ogni esame, la stessa prova senza
+plasticità misura quanto imparano durante la vita.

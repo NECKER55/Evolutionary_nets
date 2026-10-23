@@ -124,7 +124,13 @@ FROM_RUN = frozenset({
     "arena_birth_distance", "arena_mate_range", "arena_mate_share", "arena_patches", "arena_patch_sigma",
     "arena_patch_speed", "arena_patch_turn", "arena_season", "arena_season_low", "arena_background",
     "arena_food_rate", "arena_food_max", "arena_food_radius", "arena_tick", "arena_stats_every",
-    "arena_min_alive", "arena_archive",
+    "arena_min_alive", "arena_archive", "arena_food_energy",
+    "arena_world_ladder", "arena_dial_step", "arena_dial_calm", "arena_depletion", "arena_fruits", "arena_reversal",
+    "arena_predation", "arena_extraction", "arena_night", "arena_patch_wear", "arena_patch_recovery",
+    "arena_reversal_every", "arena_size_min", "arena_size_max", "arena_size_std", "arena_bite_rate",
+    "arena_bite_ratio", "arena_bite_gain", "arena_bite_cost", "arena_hard_work", "arena_hard_energy",
+    "arena_big_energy", "arena_signal_cost", "arena_signal_smell", "arena_feed_rate", "arena_feed_gain",
+    "arena_day",
     "being_color", "being_color_width", "being_albedo", "being_molecule", "being_smell",
 })
 

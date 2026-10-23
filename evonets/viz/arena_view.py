@@ -1,5 +1,6 @@
 """La schermata dell'arena continua (docs/SPEC_ARENA.md, sezione 10): una
-vista che segue un essere, con zoom e scia, la mappa intera del mondo e le
+vista che segue un essere, con zoom e scia, oppure libera (si sposta con le
+frecce o cliccando sulla mappa intera), la mappa intera del mondo e le
 misure al minuto. Il mondo è un toro: la vista e la mappa mostrano gli
 oggetti dalla parte più vicina."""
 
@@ -9,16 +10,34 @@ from pathlib import Path
 import numpy as np
 import pygame
 
+from ..net.brain import live_links
 from .launcher import Screen
-from .render import BG, BORDER, DIM, FOOD, PLAYER, TARGET, TEXT
+from .render import BG, BORDER, DIM, FOOD, FRUIT, PLAYER, TARGET, TEXT
 
 PANEL_W = 380
 BEING = (110, 200, 120)  # gli esseri: verdi (0,25 sull'asse della luce)
 PATCH = (60, 90, 50)
-SPEEDS = (1, 4, 16)  # passi per fotogramma: tempo reale, x4, x16
+SPEEDS = (1, 2, 4, 8, 16)  # passi per fotogramma (a 60 fotogrammi al secondo: x1 = tempo reale)
 TURBO_BUDGET = 0.08  # s di calcolo per fotogramma in turbo
+MAX_BUDGET = 0.5  # s di calcolo per fotogramma alla massima velocità (si ridisegna 2 volte al secondo)
 BACKGROUND_STEPS = 6  # passi per fotogramma mentre si guarda un'altra schermata
 TRAIL = 600
+PAN = 700.0  # pixel al secondo con le frecce (x3 con Maiusc)
+MAP_TOP = 12
+DIAL_LABELS = ("macchie che si esauriscono", "frutti cattivi", "inversione dei colori", "predazione",
+               "cibo da aprire", "notte")
+
+
+def light_rgb(q: float) -> tuple:
+    """Il colore sullo schermo di un punto dell'asse della luce (0 blu, 0,25
+    verde, 0,65 giallo, 0,85 rosso)."""
+    stops = ((0.0, (70, 90, 255)), (0.25, (110, 220, 120)), (0.45, (200, 200, 200)), (0.65, (240, 210, 60)),
+             (0.85, (240, 80, 70)), (1.0, (200, 40, 160)))
+    for (a, ca), (b, cb) in zip(stops[:-1], stops[1:]):
+        if q <= b:
+            t = (q - a) / (b - a)
+            return tuple(int(ca[i] + (cb[i] - ca[i]) * t) for i in range(3))
+    return stops[-1][1]
 
 
 class ArenaScreen(Screen):
@@ -30,9 +49,16 @@ class ArenaScreen(Screen):
         self.goal = eco.world.t + 60.0 * minutes if minutes else None
         self.paused = False
         self.turbo = False
+        self.full = False  # massima velocità
+        self.show_help = False  # H: che cos'è ogni cosa
+        self.rate = 0.0  # secondi di mondo per secondo vero (media mobile)
         self.speed_i = 0
         self.zoom = 3.0  # pixel per unità
         self.follow = self._oldest()
+        self.camera: np.ndarray | None = None  # None = segue `follow`; altrimenti il centro della visuale libera
+        self.map_rect = pygame.Rect(0, 0, 0, 0)  # la mappa intera, fissata da `draw`
+        self.dragging = False
+        self.last_frame = time.perf_counter()
         self.trail: list[tuple[float, float]] = []
         self.message = ""
         self.saved_t = eco.world.t
@@ -46,14 +72,17 @@ class ArenaScreen(Screen):
         return int(alive[np.argmax(self.world.age[alive])]) if len(alive) else -1
 
     def _steps(self, k: int = 0, budget: float = 0.0) -> None:
-        """k passi, o quanti ne stanno in `budget` secondi."""
+        """k passi (insieme: sulla GPU girano in una volta), o quanti ne stanno
+        in `budget` secondi, a blocchi di un secondo di mondo."""
         eco, start = self.evo, time.perf_counter()
-        n = 0
-        while (n < k or time.perf_counter() - start < budget) and not self._finished():
-            eco.step()
-            n += 1
-            if k and n >= k and not budget:
-                break
+        if budget:
+            block = int(round(self.cfg.arena_tick / self.cfg.dt))
+            while time.perf_counter() - start < budget and not self._finished():
+                eco.advance(block)
+        elif not self._finished():
+            if self.goal is not None:
+                k = max(1, min(k, int(round((self.goal - self.world.t) / self.cfg.dt))))
+            eco.advance(k)
         self.busy += time.perf_counter() - start
         if self.follow < 0 or not self.world.alive[self.follow]:
             self.follow = self._oldest()
@@ -73,12 +102,20 @@ class ArenaScreen(Screen):
             self._steps(BACKGROUND_STEPS)
 
     def update(self) -> None:
+        now = time.perf_counter()
+        real, self.last_frame = now - self.last_frame, now  # dal fotogramma prima
+        self._pan(min(real, 0.1))
         if self.paused:
+            self.rate = 0.0
             return
-        if self.turbo:
+        t0 = self.world.t
+        if self.full:
+            self._steps(budget=MAX_BUDGET)
+        elif self.turbo:
             self._steps(budget=TURBO_BUDGET)
         else:
             self._steps(SPEEDS[self.speed_i])
+        self.rate = 0.8 * self.rate + 0.2 * (self.world.t - t0) / max(real, 1e-6)
         if self.follow >= 0:
             p = self.world.pos[self.follow]
             self.trail.append((float(p[0]), float(p[1])))
@@ -113,20 +150,31 @@ class ArenaScreen(Screen):
                 self.app.launcher.returned(self._leave())
             elif k == pygame.K_SPACE:
                 self.paused = not self.paused
-            elif k == pygame.K_s:
+            elif k == pygame.K_s and ev.mod & pygame.KMOD_CTRL:  # S da sola sposta la visuale (WASD)
                 self._save()
-            elif k == pygame.K_z:
-                self.turbo = not self.turbo
-            elif k in (pygame.K_1, pygame.K_2, pygame.K_3):
-                self.speed_i, self.turbo = k - pygame.K_1, False
+            elif k == pygame.K_z:  # come nelle altre corse: massima velocità
+                self.full, self.turbo = not self.full, False
+            elif k == pygame.K_t:
+                self.turbo, self.full = not self.turbo, False
             elif k in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-                self.zoom = min(self.zoom * 1.25, 20.0)
+                self.turbo = self.full = False
+                self.speed_i = min(self.speed_i + 1, len(SPEEDS) - 1)
             elif k in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                self.turbo = self.full = False
+                self.speed_i = max(self.speed_i - 1, 0)
+            elif k == pygame.K_PAGEUP:
+                self.zoom = min(self.zoom * 1.25, 20.0)
+            elif k == pygame.K_PAGEDOWN:
                 self.zoom = max(self.zoom / 1.25, 0.3)
+            elif k == pygame.K_h:
+                self.show_help = not self.show_help
             elif k == pygame.K_TAB:
                 self._next()
+                self.camera = None
             elif k == pygame.K_o:
-                self.follow, self.trail = self._oldest(), []
+                self.follow, self.trail, self.camera = self._oldest(), [], None
+            elif k == pygame.K_f:
+                self.camera = None  # di nuovo dietro all'essere scelto
             elif k == pygame.K_e:
                 if self.evo.start_exam():
                     self.message = "esame avviato su 20 adulti a caso (in sottofondo)"
@@ -134,8 +182,33 @@ class ArenaScreen(Screen):
                     self.message = "esame già in corso, o nessun adulto"
         elif ev.type == pygame.MOUSEWHEEL:
             self.zoom = float(np.clip(self.zoom * (1.25 ** ev.y), 0.3, 20.0))
-        elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and ev.pos[0] < self._view_w():
-            self._pick(ev.pos)
+        elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and self.map_rect.collidepoint(ev.pos):
+            self.dragging = True
+            self._look_at_map(ev.pos)
+        elif ev.type == pygame.MOUSEMOTION and self.dragging:
+            self._look_at_map(ev.pos)
+        elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
+            self.dragging = False
+
+    def _look_at_map(self, px) -> None:
+        """La visuale libera si centra sul punto cliccato della mappa intera."""
+        r, w = self.map_rect, self.world
+        x = (min(max(px[0], r.left), r.right) - r.left) / r.w * w.W
+        y = (min(max(px[1], r.top), r.bottom) - r.top) / r.h * w.H
+        self.camera = np.array([x, y]) % [w.W, w.H]
+
+    def _pan(self, elapsed: float) -> None:
+        """Frecce o WASD: la visuale diventa libera e si sposta."""
+        keys = pygame.key.get_pressed()
+        dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
+        dy = (keys[pygame.K_DOWN] or keys[pygame.K_s]) - (keys[pygame.K_UP] or keys[pygame.K_w])
+        if not dx and not dy or pygame.key.get_mods() & pygame.KMOD_CTRL:
+            return
+        fast = 3.0 if pygame.key.get_mods() & pygame.KMOD_SHIFT else 1.0
+        if self.camera is None:
+            self.camera = self._centre()
+        step = PAN * fast * elapsed / self.zoom
+        self.camera = (self.camera + step * np.array([dx, dy], dtype=float)) % [self.world.W, self.world.H]
 
     def _next(self) -> None:
         """Il prossimo essere vivo, dal più anziano in giù."""
@@ -147,22 +220,14 @@ class ArenaScreen(Screen):
         self.follow = int(order[(here[0] + 1) % len(order)] if len(here) else order[0])
         self.trail = []
 
-    def _pick(self, pos) -> None:
-        """Segue l'essere vivo più vicino al punto cliccato."""
-        w = self.world
-        alive = np.flatnonzero(w.alive)
-        if not len(alive):
-            return
-        world_pt = self._unproject(np.array(pos, dtype=float))
-        d = np.hypot(*self._near(w.pos[alive] - world_pt).T)
-        self.follow, self.trail = int(alive[np.argmin(d)]), []
-
     # --- disegno --------------------------------------------------------------
 
     def _view_w(self) -> int:
         return self.app.screen.get_width() - PANEL_W
 
     def _centre(self) -> np.ndarray:
+        if self.camera is not None:
+            return self.camera.copy()
         if self.follow >= 0:
             return self.world.pos[self.follow].copy()
         return np.array([self.world.W / 2, self.world.H / 2])
@@ -195,13 +260,21 @@ class ArenaScreen(Screen):
             if -r < c[0] < vw + r and -r < c[1] < h + r:
                 shade = tuple(int(BG[i] + (PATCH[i] - BG[i]) * f) for i in range(3))
                 pygame.draw.circle(s, shade, c.astype(int), r)
-        # Il cibo.
+        # Il cibo: rosso o giallo; per chi guarda, un anello scuro sui frutti
+        # cattivi, un bordo spesso sul cibo duro; il cibo grande è più grosso.
         on = np.flatnonzero(task.food_on)
         px = self._project(task.food[on])
-        inside = (px[:, 0] > -5) & (px[:, 0] < vw + 5) & (px[:, 1] > -5) & (px[:, 1] < h + 5)
-        rf = max(1, int(task.food_r * self.zoom))
-        for p in px[inside]:
-            pygame.draw.circle(s, FOOD, p.astype(int), rf)
+        inside = (px[:, 0] > -8) & (px[:, 0] < vw + 8) & (px[:, 1] > -8) & (px[:, 1] < h + 8)
+        for k, p in zip(on[inside], px[inside]):
+            c = p.astype(int)
+            rf = max(1, int(task.radius[k] * self.zoom))
+            pygame.draw.circle(s, FRUIT if task.color[k] else FOOD, c, rf)
+            if task.kind[k] == 1:
+                pygame.draw.circle(s, (250, 250, 250), c, rf, max(1, rf // 3))
+            elif task.kind[k] == 2:
+                pygame.draw.circle(s, (250, 250, 250), c, rf, 1)
+            if task.bad[k]:
+                pygame.draw.circle(s, (40, 20, 20), c, rf + 2, 2)
         # La scia di chi si segue.
         if len(self.trail) > 1:
             pts = self._project(np.array(self.trail))
@@ -212,13 +285,25 @@ class ArenaScreen(Screen):
         alive = np.flatnonzero(w.alive)
         px = self._project(w.pos[alive])
         inside = (px[:, 0] > -5) & (px[:, 0] < vw + 5) & (px[:, 1] > -5) & (px[:, 1] < h + 5)
-        rb = max(2, int(self.cfg.agent_radius * self.zoom))
+        sizes = eco.sizes()
+        glow = getattr(w, "glow", np.zeros(w.n))
+        bite = getattr(w, "bite", np.zeros(w.n))
+        halo = pygame.Surface((vw, h), pygame.SRCALPHA)
         for i, p in zip(alive[inside], px[inside]):
-            color = PLAYER if i == self.follow else BEING
             c = p.astype(int)
+            rb = max(2, int(self.cfg.agent_radius * np.sqrt(sizes[i]) * self.zoom))
+            if glow[i] > 0.05:  # la luce del segnale, del suo colore
+                pygame.draw.circle(halo, (*light_rgb(eco.sig_color[i]), int(160 * glow[i])), c, rb * 3)
+            color = PLAYER if i == self.follow else BEING
             pygame.draw.circle(s, color, c, rb)
             nose = c + (rb + 3) * np.array([np.cos(w.heading[i]), np.sin(w.heading[i])])
-            pygame.draw.line(s, color, c, nose.astype(int), 1)
+            pygame.draw.line(s, (240, 60, 60) if bite[i] > 0.5 else color, c, nose.astype(int), 2 if bite[i] > 0.5 else 1)
+        s.blit(halo, (0, 0))
+        day = 1.0 - 0.85 * self.cfg.arena_night * (0.5 - 0.5 * np.cos(2 * np.pi * w.t / self.cfg.arena_day))
+        if day < 0.99:  # la notte
+            dark = pygame.Surface((vw, h), pygame.SRCALPHA)
+            dark.fill((0, 0, 20, int(200 * (1.0 - day))))
+            s.blit(dark, (0, 0))
         s.set_clip(None)
         pygame.draw.line(s, BORDER, (vw, 0), (vw, h))
         self._panel(s, vw + 14, app)
@@ -228,7 +313,8 @@ class ArenaScreen(Screen):
         # La mappa intera.
         mw = PANEL_W - 28
         mh = int(mw * w.H / w.W)
-        box = pygame.Rect(x, 12, mw, mh)
+        box = pygame.Rect(x, MAP_TOP, mw, mh)
+        self.map_rect = box
         pygame.draw.rect(s, (18, 20, 26), box)
         k = mw / w.W
         for c, f in zip(w.task.patches.centre, w.task.patches.fertility(w.t)):
@@ -236,8 +322,8 @@ class ArenaScreen(Screen):
                                (int(x + c[0] * k), int(12 + c[1] * k)), max(2, int(cfg.arena_patch_sigma * k)))
         for p in w.pos[w.alive]:
             s.set_at((int(x + p[0] * k), int(12 + p[1] * k)), BEING)
-        if self.follow >= 0:
-            p = w.pos[self.follow]
+        if self.follow >= 0 or self.camera is not None:
+            p = self._centre()
             half = np.array([self._view_w(), s.get_height()]) / self.zoom / 2 * k
             pygame.draw.rect(s, PLAYER, (x + p[0] * k - half[0], 12 + p[1] * k - half[1], 2 * half[0], 2 * half[1]),
                              1)
@@ -249,14 +335,21 @@ class ArenaScreen(Screen):
             s.blit((font or app.small).render(text, True, color), (x, y))
             y += 17
 
-        state = "IN PAUSA" if self.paused else ("TURBO" if self.turbo else f"x{SPEEDS[self.speed_i]}")
+        if self.paused:
+            state = "IN PAUSA"
+        else:
+            pace = "MASSIMA" if self.full else "TURBO" if self.turbo else f"x{SPEEDS[self.speed_i]}"
+            state = f"{pace} ({self.rate:.1f} s/s)"
+        if self.evo.gpu is not None:
+            state += " GPU"
         minutes, secs = divmod(int(w.t), 60)
-        line(f"arena continua   {minutes}:{secs:02d} di mondo   {state}", PLAYER, app.font)
+        line(f"{minutes}:{secs:02d} di mondo   {state}", PLAYER, app.font)
         alive = np.flatnonzero(w.alive)
         line(f"vivi {len(alive)} su {cfg.arena_cap}   cibo {int(w.task.food_on.sum())}")
         line(f"nati {eco.totals['nati']} (con partner {eco.totals['con partner']}), "
              f"colonizzatori {eco.totals['colonizzatori']}")
-        line(f"morti di fame {w.deaths['fame']}, di vecchiaia {w.deaths['vecchiaia']}")
+        line(f"morti: fame {w.deaths['fame']}, vecchiaia {w.deaths['vecchiaia']}, "
+             f"predati {w.deaths.get('predati', 0)}")
         if len(alive):
             line(f"età media {w.age[alive].mean():.0f} s, massima {w.age[alive].max():.0f} s")
         if eco.history:
@@ -265,25 +358,105 @@ class ArenaScreen(Screen):
             if "species" in r:
                 line(f"sensi usati {r.get('used', 0):.2f}, neuroni {r.get('neurons', 0):.2f}, "
                      f"gruppi {r['species']}", DIM)
+        # Le manopole del mondo che si complica.
+        if eco.gpu is not None:
+            y += 4
+            for k, label in zip(("arena_depletion", "arena_fruits", "arena_reversal", "arena_predation",
+                                 "arena_extraction", "arena_night"), DIAL_LABELS):
+                v = getattr(cfg, k)
+                pygame.draw.rect(s, (40, 44, 56), (x, y + 4, 60, 8))
+                pygame.draw.rect(s, TARGET if v > 0 else (40, 44, 56), (x, y + 4, int(60 * v), 8))
+                s.blit(app.small.render(f"{label} {v:.0%}", True, TEXT if v > 0 else DIM), (x + 68, y))
+                y += 15
+            y += 2
         if eco.exam is not None:
             line(f"esame in corso ({eco.exam.progress:.0%})", TARGET)
         elif eco.exams:
-            x = eco.exams[-1]
-            line(f"ultimo esame (min. {x['generation']}): media {x['score']:.0%}", TARGET)
+            normal = [r for r in eco.exams if r.get("lesion") is None]
+            if normal:
+                last = normal[-1]  # (non `x`: è la colonna dove si scrive)
+                probe = [r for r in eco.exams if r.get("lesion") == "plasticità" and r["generation"] == last["generation"]]
+                extra = f", senza plasticità {probe[-1]['score']:.0%}" if probe else ""
+                line(f"esame (min. {last['generation']}): {last['score']:.0%}{extra}", TARGET)
         y += 8
+        if self.camera is not None:
+            line("visuale libera: F per tornare a seguire", TARGET)
         if self.follow >= 0:
             i = self.follow
-            line(f"seguito: #{eco.ids[i]}", PLAYER, app.font)
+            line(f"seguito: #{eco.ids[i]}" + ("" if self.camera is None else " (fuori visuale)"), PLAYER, app.font)
             line(f"età {w.age[i]:.0f} s   energia {w.energy[i]:.0f}   cibi mangiati {w.task.eaten[i]}")
-            b = eco.ctrl.brains
-            line(f"recettori {int(b.genome.r_active[i].sum())}   neuroni {int(b.active[i].sum())}   "
-                 f"collegamenti {int(b.links[i].sum())}")
+            g = eco.ctrl.brains.genome  # dal genoma: con la GPU il cervello compilato qui è di prima
+            links = live_links(g.conn[i:i + 1], g.active[i:i + 1], g.r_active[i:i + 1]).sum()
+            line(f"recettori {int(g.r_active[i].sum())}   neuroni {int(g.active[i].sum())}   "
+                 f"collegamenti {int(links)}")
         y += 8
-        for text in ("Spazio pausa   S salva   Esc menu (salva)",
-                     "1/2/3 velocità   Z turbo   E esame",
-                     "rotella o +/- zoom   Tab prossimo   O più anziano",
-                     "clic su un essere: seguilo"):
+        # Legenda: che cosa si vede.
+        for color, text in ((BEING, "essere (trattino: dove guarda; rosso: morde)"),
+                            (PLAYER, "l'essere seguito, con la scia"),
+                            (FOOD, "cibo rosso"), (FRUIT, "frutto giallo (anello scuro: cattivo)"),
+                            (PATCH, "macchia fertile: più chiara, più cibo")):
+            pygame.draw.circle(s, color, (x + 5, y + 7), 4)
+            s.blit(app.small.render(text, True, DIM), (x + 16, y))
+            y += 16
+        y += 6
+        for text in ("Spazio pausa  +/- velocità  T turbo  Z massima",
+                     "frecce/WASD visuale (Maiusc veloce)  clic: mappa",
+                     "rotella o Pag zoom  F segui  Tab  O anziano  E esame",
+                     "Ctrl+S salva  Esc menu  H che cos'è ogni cosa"):
             line(text, DIM)
         if self.message:
             y += 6
             line(self.message[:60], TARGET)
+        if self.show_help:
+            self._help(s, app)
+
+    HELP = (
+        ("Che cosa si vede", None),
+        ("Il mondo è un toro: chi esce da un lato rientra dall'altro. La vista e la mappa", ""),
+        ("mostrano ogni cosa dalla parte più vicina.", ""),
+        ("Essere (verde): un agente con il suo cervello. Il trattino indica dove guarda.", ""),
+        ("Seguito (giallo): l'essere scelto, con la scia del suo percorso recente.", ""),
+        ("Cibo (rosso): dà energia a chi lo tocca per primo. Ricresce soprattutto nelle macchie.", ""),
+        ("Macchie fertili (ombre verdi): dove ricresce il cibo. Si spostano piano e cambiano", ""),
+        ("con le stagioni: più chiare = più fertili adesso.", ""),
+        ("Mappa intera (in alto a destra): tutto il mondo; il riquadro giallo è la vista.", ""),
+        ("Grandezza di un essere: la sua taglia. Alone colorato: accende la sua luce (segnale).", ""),
+        ("Muso rosso: sta mordendo. Cibo con bordo bianco spesso: duro (va morso a lungo);", ""),
+        ("grande con bordo sottile: va morso in due. Anello scuro: frutto cattivo (fa male).", ""),
+        ("Velo scuro: è notte (la luce del mondo cala, quella dei segnali no).", ""),
+        ("", ""),
+        ("Le misure", None),
+        ("min:s di mondo: il tempo del mondo. s/s: secondi di mondo per secondo vero.", ""),
+        ("vivi su posti: esseri vivi e tetto (Tetto nel menu).", ""),
+        ("cibo: quanti cibi ci sono adesso (al massimo 1500).", ""),
+        ("nati: figli di esseri del mondo (con partner: con due genitori).", ""),
+        ("colonizzatori: arrivati da fuori perché i vivi erano sotto il minimo; sono copie", ""),
+        ("mutate di chi ha mangiato di più (spariscono quando il mondo si regge da solo).", ""),
+        ("morti di fame: energia finita. di vecchiaia: per età (vita mediana 10 minuti).", ""),
+        ("sensi usati: recettori collegati al cervello, in media. neuroni: neuroni interni.", ""),
+        ("gruppi: famiglie che non si incrociano più tra loro (quasi specie).", ""),
+        ("esame: la prova fissa del mondo del cibo su 20 adulti a caso, ogni 10 minuti,", ""),
+        ("poi la stessa senza plasticità: la differenza è quanto imparano durante la vita.", ""),
+        ("manopole del mondo: le novità, che il mondo accende una alla volta quando la", ""),
+        ("popolazione si regge da sola (e abbassa se torna ad aver bisogno di colonizzatori).", ""),
+        ("seguito: età, energia (300 = può fare un figlio), cibi mangiati, cervello.", ""),
+        ("", ""),
+        ("H chiude questa pagina.", ""),
+    )
+
+    def _help(self, s, app) -> None:
+        w, h = s.get_size()
+        shade = pygame.Surface((w, h), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, 190))
+        s.blit(shade, (0, 0))
+        box = pygame.Rect(60, 40, w - 120, h - 80)
+        pygame.draw.rect(s, (20, 22, 30), box)
+        pygame.draw.rect(s, BORDER, box, 1)
+        y = box.y + 18
+        for text, kind in self.HELP:
+            if kind is None:
+                s.blit(app.big.render(text, True, PLAYER), (box.x + 24, y))
+                y += 32
+            else:
+                s.blit(app.font.render(text, True, TEXT), (box.x + 24, y))
+                y += 20

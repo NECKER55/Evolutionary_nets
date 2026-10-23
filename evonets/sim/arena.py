@@ -252,12 +252,24 @@ class Patches:
         self.centre = rng.uniform([0.0, 0.0], [W, H], (k, 2))
         self.heading = rng.uniform(-np.pi, np.pi, k)
         self.phase = rng.uniform(0.0, 2.0 * np.pi, k)
+        self.health = np.ones(k)  # 1 = intatta; cala dove si mangia (manopola arena_depletion)
+        self.good = np.zeros(k, dtype=int)  # il colore buono nella macchia: 0 rosso, 1 giallo
 
     def fertility(self, t: float) -> np.ndarray:
-        """(k,) la fertilità di ogni macchia all'istante t, tra arena_season_low e 1."""
+        """(k,) la fertilità di ogni macchia all'istante t: la stagione (tra
+        arena_season_low e 1) per la salute."""
         cfg = self.cfg
         wave = 0.5 + 0.5 * np.sin(2.0 * np.pi * t / cfg.arena_season + self.phase)
-        return cfg.arena_season_low + (1.0 - cfg.arena_season_low) * wave
+        return (cfg.arena_season_low + (1.0 - cfg.arena_season_low) * wave) * self.health
+
+    def nearest(self, pts: np.ndarray) -> np.ndarray:
+        """(n,) la macchia più vicina a ogni punto, -1 se è oltre 2σ."""
+        d = pts[:, None, :] - self.centre[None]
+        size = np.array([self.W, self.H])
+        d = d - size * np.floor(d / size + 0.5)
+        dist = np.hypot(d[..., 0], d[..., 1])
+        k = dist.argmin(axis=1)
+        return np.where(dist[np.arange(len(pts)), k] <= 2.0 * self.cfg.arena_patch_sigma, k, -1)
 
     def step(self, dt: float, rng: np.random.Generator) -> None:
         cfg = self.cfg
@@ -265,8 +277,9 @@ class Patches:
         move = cfg.arena_patch_speed * dt * np.stack([np.cos(self.heading), np.sin(self.heading)], axis=1)
         self.centre = (self.centre + move) % [self.W, self.H]
 
-    def sample(self, n: int, t: float, rng: np.random.Generator) -> np.ndarray:
-        """(n, 2) punti estratti con probabilità proporzionale alla fertilità."""
+    def sample(self, n: int, t: float, rng: np.random.Generator, which_too: bool = False):
+        """(n, 2) punti estratti con probabilità proporzionale alla fertilità
+        (e, con `which_too`, la macchia da cui vengono, -1 = il fondo)."""
         cfg = self.cfg
         sigma = cfg.arena_patch_sigma
         mass = np.append(self.fertility(t) * 2.0 * np.pi * sigma ** 2, cfg.arena_background * self.W * self.H)
@@ -274,7 +287,10 @@ class Patches:
         out = rng.uniform([0.0, 0.0], [self.W, self.H], (n, 2))  # il fondo: ovunque
         inside = which < len(self.centre)
         out[inside] = self.centre[which[inside]] + sigma * rng.standard_normal((int(inside.sum()), 2))
-        return out % [self.W, self.H]
+        out %= [self.W, self.H]
+        if which_too:
+            return out, np.where(inside, which, -1)
+        return out
 
 
 class ArenaFood:
@@ -296,17 +312,41 @@ class ArenaFood:
         k = cfg.arena_food_max
         self.food = np.zeros((k, 2))
         self.food_on = np.zeros(k, dtype=bool)
+        # Ogni cibo: colore (0 rosso, 1 giallo), cattivo o no, tipo (0 normale,
+        # 1 duro, 2 grande) e raggio. Nel mondo base: rosso, buono, normale.
+        self.color = np.zeros(k, dtype=int)
+        self.bad = np.zeros(k, dtype=bool)
+        self.kind = np.zeros(k, dtype=int)
+        self.radius = np.full(k, cfg.arena_food_radius)
         self.eaten = np.zeros(world.n, dtype=int)  # cibi mangiati da ogni posto (da quando è nato)
         self.eaten_total = 0
+        self.bad_total = 0  # frutti cattivi mangiati
+        self.fed_total = 0.0  # energia passata ai figli
         self._owed = 0.0
         self.grow(world, k // 2)  # si parte con metà del cibo possibile
 
     def grow(self, world, n: int) -> None:
-        """Fino a `n` cibi nuovi nei posti liberi, dove la fertilità è alta."""
+        """Fino a `n` cibi nuovi nei posti liberi, dove la fertilità è alta.
+        Con le manopole del mondo (docs/SPEC_ARENA.md, sezione 15): una quota
+        arena_fruits / 2 è un frutto cattivo, del colore che nella sua macchia
+        non è buono; una quota arena_extraction / 2 è da aprire, metà duro e
+        metà grande."""
         free = np.flatnonzero(~self.food_on)[:n]
-        if len(free):
-            self.food[free] = self.patches.sample(len(free), world.t, world.rng)
-            self.food_on[free] = True
+        if not len(free):
+            return
+        cfg, rng = self.cfg, world.rng
+        m = len(free)
+        pos, which = self.patches.sample(m, world.t, rng, which_too=True)
+        good = np.where(which >= 0, self.patches.good[np.maximum(which, 0)], 0)
+        bad = rng.random(m) < 0.5 * cfg.arena_fruits
+        special = ~bad & (rng.random(m) < 0.5 * cfg.arena_extraction)
+        kind = np.where(special, np.where(rng.random(m) < 0.5, 1, 2), 0)
+        self.food[free] = pos
+        self.food_on[free] = True
+        self.bad[free] = bad
+        self.color[free] = np.where(bad, 1 - good, good)
+        self.kind[free] = kind
+        self.radius[free] = np.choose(kind, [cfg.arena_food_radius, 4.0, 6.0])
 
     def step(self, world) -> None:
         cfg = self.cfg
@@ -328,7 +368,7 @@ class ArenaFood:
             self.eaten += n_eat
             self.eaten_total += len(ate)
             world.taste = np.minimum(world.taste + n_eat, 1.0)  # il gusto del cibo
-            world.energy = np.minimum(world.energy + cfg.food_energy * n_eat, cfg.energy_max)
+            world.energy = np.minimum(world.energy + cfg.arena_food_energy * n_eat, cfg.energy_max)
             world.grids_dirty = True
 
     def odors(self, world, points: np.ndarray, agent: np.ndarray) -> list:

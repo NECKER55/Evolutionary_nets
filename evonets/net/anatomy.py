@@ -8,7 +8,7 @@ import numpy as np
 
 from . import development, receptors
 from .brain import META, Genome, live_links
-from .controllers import NeuralController
+from .controllers import NeuralController, extra_motors
 from .geometry import motor_anchors, receptor_anchors
 
 KIND_NAMES = {"rate": "continua", "spike-ei": "a impulsi E/I"}
@@ -38,7 +38,7 @@ class Anatomy:
     """
 
     def __init__(self, cfg, genome: Genome):
-        brains = NeuralController(cfg, 1).brains
+        brains = NeuralController(cfg, 1, extra_motors=extra_motors(cfg, genome)).brains
         brains.set_genome(genome)
         self.brains = brains
         self.kind = brains.KIND

@@ -403,9 +403,11 @@ class Config:
     # arena_maturity e arena_birth_interval s dall'ultimo figlio. Il figlio
     # riceve arena_child_energy, il genitore ne paga arena_birth_cost (fare un
     # figlio costa più di quanto il figlio riceve).
-    arena_birth_energy: float = 300.0
-    arena_child_energy: float = 150.0
-    arena_birth_cost: float = 200.0
+    # Ricalibrati il 2026-10-23 (docs/SPEC_ARENA.md, sezione 13): con 300 / 150
+    # / 200 la popolazione non si reggeva da sola in 40 minuti di mondo.
+    arena_birth_energy: float = 250.0
+    arena_child_energy: float = 120.0
+    arena_birth_cost: float = 160.0
     arena_maturity: float = 30.0  # s
     arena_birth_interval: float = 30.0  # s
     arena_birth_distance: float = 3.0  # u: il figlio nasce accanto al genitore
@@ -418,7 +420,7 @@ class Config:
     # cambiano con le stagioni (fertilità tra arena_season_low e 1, ogni
     # macchia con la sua fase); fuori dalle macchie un fondo debole.
     arena_patches: int = 8
-    arena_patch_sigma: float = 120.0  # u, raggio tipico di una macchia
+    arena_patch_sigma: float = 160.0  # u, raggio tipico di una macchia (era 120: cibo troppo fitto)
     arena_patch_speed: float = 0.1  # u/s: circa mezza macchia in una vita mediana
     arena_patch_turn: float = 0.05  # rad/√s: quanto in fretta cambia direzione
     arena_season: float = 1200.0  # s, periodo delle stagioni
@@ -427,6 +429,7 @@ class Config:
     arena_food_rate: float = 45.0  # cibi che ricrescono al secondo, in tutto il mondo
     arena_food_max: int = 1500  # cibi presenti insieme, al massimo
     arena_food_radius: float = 3.0
+    arena_food_energy: float = 100.0  # energia di un cibo nell'arena (il mondo del cibo usa food_energy)
     # Colonizzatori (isola e continente): finché i vivi sono meno di
     # arena_min_alive arrivano esseri nuovi, copie mutate di chi ha mangiato di
     # più tra i vissuti (un archivio dei migliori arena_archive), o reti nuove
@@ -442,6 +445,55 @@ class Config:
     being_albedo: float = 1.0
     being_molecule: float = 0.45
     being_smell: float = 0.3
+    # Il mondo che si complica (docs/SPEC_ARENA.md, sezione 15; solo con il
+    # motore JAX, "gpu"). Sei manopole da 0 a 1, che con arena_world_ladder il
+    # mondo alza da solo, una alla volta, di arena_dial_step a ogni minuto in
+    # cui la popolazione si regge da sola da arena_dial_calm minuti, e
+    # abbassa se torna a dipendere dai colonizzatori per arena_dial_calm minuti.
+    arena_world_ladder: bool = True
+    arena_dial_step: float = 0.05
+    arena_dial_calm: int = 3
+    arena_depletion: float = 0.0  # 1. le macchie si esauriscono dove si mangia
+    arena_fruits: float = 0.0  # 2. frutti cattivi: fino a metà del cibo nuovo, del colore sbagliato
+    arena_reversal: float = 0.0  # 3. in una macchia il colore buono può cambiare (fino a metà delle volte)
+    arena_predation: float = 0.0  # 4. si può mordere chi è più piccolo
+    arena_extraction: float = 0.0  # 5. cibo da aprire: duro (morso a lungo) e grande (morso in due)
+    arena_night: float = 0.0  # 6. la notte: la luce cala fino a 1 - 0,85
+    # Esaurimento: ogni cibo mangiato vicino a una macchia ne toglie
+    # arena_patch_wear della salute (per la manopola); la salute torna in
+    # arena_patch_recovery secondi; la fertilità è la salute.
+    arena_patch_wear: float = 0.01
+    arena_patch_recovery: float = 500.0  # s
+    arena_reversal_every: float = 600.0  # s: ogni quanto una macchia può cambiare colore buono
+    # Il corpo dell'arena: la taglia (gene, in scala logaritmica) moltiplica
+    # il raggio per √taglia, il metabolismo per taglia^0,75 (Kleiber), la
+    # riserva di energia per taglia, la spinta per taglia^-0,25.
+    arena_size_min: float = 0.3
+    arena_size_max: float = 4.0
+    arena_size_std: float = 0.1  # variazione alla partenza e ampiezza delle mutazioni della taglia
+    # Morso: toglie arena_bite_rate · comando · taglia energia al secondo a un
+    # essere toccato davanti (entro 60°) e almeno arena_bite_ratio volte più
+    # piccolo; chi morde ne prende arena_bite_gain. Costa arena_bite_cost/s.
+    arena_bite_rate: float = 40.0
+    arena_bite_ratio: float = 1.2
+    arena_bite_gain: float = 0.6
+    arena_bite_cost: float = 0.5
+    # Cibo da aprire: duro (raggio 4, va morso per arena_hard_work secondi a
+    # morso pieno, vale arena_hard_energy volte) e grande (raggio 6, va morso
+    # da almeno 2 insieme, vale arena_big_energy volte, diviso tra chi morde).
+    arena_hard_work: float = 1.0
+    arena_hard_energy: float = 2.0
+    arena_big_energy: float = 6.0
+    # Segnali: luce (colore: gene) e odore (molecola: gene) a intensità
+    # comandata; costano arena_signal_cost/s a intensità piena. La luce dei
+    # segnali non cala di notte (bioluminescenza).
+    arena_signal_cost: float = 0.3
+    arena_signal_smell: float = 1.0
+    # Cure: chi nutre passa arena_feed_rate energia/s a un proprio figlio
+    # toccato non ancora adulto, che ne riceve arena_feed_gain.
+    arena_feed_rate: float = 20.0
+    arena_feed_gain: float = 0.8
+    arena_day: float = 600.0  # s: un giorno e una notte
 
     # Pericoli (zone tossiche in deriva armonica). Il danno cresce dal bordo
     # (zero) al centro (hazard_drain) come profondità ** hazard_falloff.

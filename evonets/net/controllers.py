@@ -6,6 +6,12 @@ from .brain import Brains, SpikingBrains
 NET_TYPES = {"rate": (Brains, 2), "spike-ei": (SpikingBrains, 4)}
 
 
+def extra_motors(cfg, genome) -> int:
+    """I motori in più di un genoma rispetto a quelli del suo tipo di rete
+    (le azioni dell'arena continua; 0 nelle altre arene)."""
+    return genome.n_out - NET_TYPES[cfg.net_type][1]
+
+
 class RandomWalkController:
     """Controllore mock: comandi casuali ma lisci (processo di Ornstein-Uhlenbeck).
 
@@ -40,12 +46,16 @@ class NeuralController:
     rileggere i sensi, che cambierebbe la sequenza casuale e quindi la corsa.
     """
 
-    def __init__(self, cfg, n: int, seed: int = 0):
+    def __init__(self, cfg, n: int, seed: int = 0, extra_motors: int = 0):
         if cfg.net_type not in NET_TYPES:
             raise ValueError(f"net_type sconosciuto: {cfg.net_type!r} (validi: {', '.join(NET_TYPES)})")
         self.cfg = cfg
         kind, n_motors = NET_TYPES[cfg.net_type]
-        self.brains = kind(cfg, n, n_motors, seed)
+        # Motori in più (le azioni dell'arena continua: mordere, luce, odore,
+        # nutrire): il loro livello resta in `extra`, il mondo non li usa qui.
+        self.n_motors, self.extra_motors = n_motors, extra_motors
+        self.extra = np.zeros((n, extra_motors))
+        self.brains = kind(cfg, n, n_motors + extra_motors, seed)
         self.noise_rng = np.random.default_rng([seed, 7])  # solo per il rumore dei sensi
         self.obs = np.zeros((n, self.brains.n_in))
         self.adapt = np.full((n, self.brains.n_in), np.nan)  # media recente dei quanti di ogni recettore
@@ -88,14 +98,28 @@ class NeuralController:
         signal = np.stack([world.taste, world.pain], axis=1)  # gusto e dolore: per il sistema di valore
         if racing.all():
             self.obs = self.sense(world)
-            return self.brains.step(self.obs, signal)
+            return self._moves(self.brains.step(self.obs, signal))
         actions = np.zeros((world.n, 2))
         rows = np.flatnonzero(racing)
         if len(rows):
             obs = self.sense(world, rows)
             self.obs[rows] = obs
-            actions[rows] = self.brains.step_some(obs, rows, signal[rows])
+            actions[rows] = self._moves(self.brains.step_some(obs, rows, signal[rows]), rows)
         return actions
+
+    def _moves(self, out: np.ndarray, rows=None) -> np.ndarray:
+        """Spinta e sterzata; il livello dei motori in più va in `extra`
+        (tra 0 e 1). Senza motori in più è il risultato della rete così com'è."""
+        if not self.extra_motors:
+            return out
+        b = self.brains
+        first = b.n_hidden + self.n_motors
+        levels = np.clip(b.state[:, first:first + self.extra_motors], 0.0, 1.0)
+        if rows is None:
+            self.extra = levels
+        else:
+            self.extra[rows] = levels[rows]
+        return out[:, :2]
 
     def _noisy(self, obs: np.ndarray) -> np.ndarray:
         sd = self.cfg.sensor_noise
