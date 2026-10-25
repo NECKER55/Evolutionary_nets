@@ -35,6 +35,71 @@ Su/Giù o Tab scelgono la riga, Sinistra/Destra (o il clic) cambiano il valore,
 numeri e percorso si scrivono da tastiera. Nei numeri le cifre si aggiungono in
 coda: per scriverne uno nuovo si cancella prima con Backspace.
 
+Con **Mondo = arena continua** (docs/SPEC_ARENA.md) compare la riga
+**Tetto** (quanti esseri vivi al massimo); **Individui** è quanti ce ne sono
+all'inizio, **Generazioni** diventa **Minuti di mondo** ed **Esame ogni** si
+conta in minuti (10 di partenza). La scala e la selezione finale non ci sono.
+
+## L'arena continua
+
+Una sola schermata. A sinistra la **vista**, che segue un essere (giallo,
+con la scia; gli altri esseri sono verdi, il cibo rosso, le macchie fertili
+ombre verdi più chiare quanto più sono fertili) oppure è **libera**: si
+sposta con le frecce o WASD, o cliccando (e trascinando) sulla **mappa
+intera** a destra, dove il riquadro giallo mostra cosa si sta guardando. Il
+clic sulla vista grande non sposta niente. Sotto la mappa le misure (vivi,
+nati, colonizzatori, morti, ultimo minuto, ultimo esame; la velocità con i
+secondi di mondo per secondo vero, "s/s"; "GPU" se gira sulla scheda video),
+i dati dell'essere scelto e una legenda dei colori. Con il mondo che si
+complica: le sei manopole del mondo con una barra ciascuna; esseri grandi
+quanto la loro taglia, con un alone del colore del loro segnale quando si
+illuminano e il muso rosso quando mordono; frutti rossi e gialli (anello
+scuro: cattivo, per chi guarda), cibo duro con bordo bianco spesso, cibo
+grande più grosso; di notte un velo scuro. Lo sfondo mostra il clima: rosso
+dove fa caldo, blu dove fa freddo (anche nella mappa intera); il pannello dice
+la temperatura dove sta l'essere seguito e quanto consuma lì. Le pozze d'acqua
+sono dischi blu (anche nella mappa), più piccoli man mano che si beve; il
+pannello conta le pozze e i morti di sete, e dice l'acqua dell'essere seguito
+(0% = muore di sete). Le manopole sono su due colonne. Se l'essere seguito muore si passa
+al più anziano.
+
+| Tasto | Azione |
+|---|---|
+| `Spazio` | pausa |
+| `+` `-` | velocità: x1 (tempo reale), x2, x4, x8, x16 |
+| `T` | turbo |
+| `Z` | massima velocità: si calcola quasi senza sosta e si ridisegna 2 volte al secondo |
+| rotella, `Pag↑` `Pag↓` | zoom |
+| `H` | che cos'è ogni cosa: elementi della vista e misure |
+| frecce, `W` `A` `S` `D` | sposta la visuale (libera); con `Maiusc` più veloce |
+| clic o trascina sulla mappa intera | sposta la visuale lì |
+| `F` | torna a seguire l'essere scelto |
+| `Tab` / `O` | segui il prossimo (dal più anziano) / il più anziano |
+| `E` | esame fisso adesso, su 20 adulti a caso |
+| `Ctrl+S` | salva |
+| `Esc` | torna al menu (salva se ci sono novità) |
+
+Tre schede, come nelle altre corse (`V` o clic sui bottoni in alto a destra):
+
+- **Mondo**: la vista descritta sopra.
+- **Panoramica**: *a che punto siamo* (le manopole del mondo, quale è in
+  corso e che cosa chiede, se la popolazione si regge da sola) e grafici
+  minuto per minuto, uno per concetto, ognuno con la sua scala: *quanti sono
+  vivi*; *ogni minuto* chi nasce, chi muore (fame, sete, vecchiaia, predati) e
+  chi arriva da fuori; *cervello* (sensi usati, neuroni interni) e *corpo e
+  azioni*; *esame* (normale e senza plasticità); *cibo* (presente, mangiato,
+  frutti cattivi) e *acqua* (nei corpi, secondi tra due bevute). Ogni linea ha
+  il nome e il valore attuale scritti alla fine, niente legenda; le linee
+  sempre a zero non compaiono; la scala ignora il primo minuto (la moria
+  iniziale), che se serve esce dall'alto. Sotto ogni coppia di grafici una
+  frase li legge.
+- **Reti**: l'esploratore delle reti, con tre elenchi: i 100 più anziani vivi,
+  i campioni (il più anziano di ogni minuto), tutti i vivi (`1` `2` `3` o
+  `Tab`; `R` rifà la foto dei vivi). Per ogni essere: numero, età, taglia,
+  cibi mangiati, neuroni, collegamenti. Clic su un neurone: da chi riceve e a
+  chi manda. `Invio`: si torna al mondo seguendo l'essere scelto. Le azioni
+  (mordere, luce, odore, nutrire) compaiono tra i motori.
+
 ## La corsa: la pagina principale
 
 In alto la generazione, la rete, la popolazione e lo stato della generazione

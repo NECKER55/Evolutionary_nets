@@ -12,7 +12,7 @@ import numpy as np
 import pygame
 
 from ..evo.trial import TRIAL_SEED, Trial
-from ..net.controllers import NeuralController
+from ..net.controllers import NeuralController, extra_motors
 from ..sim.world import World
 from .render import BORDER, DEAD, DIM, PLAYER, TARGET, TEXT, WALL, Renderer
 
@@ -30,7 +30,7 @@ class TestScreen:
         self.genomes, self.labels, self.title = genomes, labels, title
         self.k = len(genomes)
         self.world = World(cfg, self.k, TRIAL_SEED)
-        self.ctrl = NeuralController(cfg, self.k)
+        self.ctrl = NeuralController(cfg, self.k, extra_motors=extra_motors(cfg, genomes))
         self.ctrl.brains.set_genome(genomes.take(np.arange(self.k)))
         self.ctrl.reset(TRIAL_SEED)
         self.renderer = Renderer(self.world, app.screen)

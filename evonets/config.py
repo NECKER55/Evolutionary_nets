@@ -388,6 +388,206 @@ class Config:
     ladder_step: float = 0.02  # di quanto si muove (posizione da 0 a 3)
     ladder_crash: float = 0.05  # di quanto scende se nessuno completa
 
+    # Arena continua (task = "arena", docs/SPEC_ARENA.md): tutti gli esseri in
+    # un mondo unico senza bordi, senza generazioni: si nasce con l'energia,
+    # si muore di fame o di vecchiaia. Le altre modalità non usano queste.
+    arena_size_w: float = 2000.0  # u, il mondo (toroidale)
+    arena_size_h: float = 1400.0
+    arena_cap: int = 3000  # posti: esseri vivi al massimo (sicurezza contro l'esplosione)
+    arena_cell: float = 80.0  # u, celle della griglia dei vicini (più della portata della vista)
+    # Vecchiaia (Gompertz): probabilità di morire per secondo h0 · e^(età / τ);
+    # vita mediana circa 600 s, entro 300 s ne muore l'8%, entro 900 s quasi tutti.
+    arena_aging_h0: float = 8.6e-5
+    arena_aging_tau: float = 150.0  # s
+    # Riproduzione: con energia almeno arena_birth_energy, età almeno
+    # arena_maturity e arena_birth_interval s dall'ultimo figlio. Il figlio
+    # riceve arena_child_energy, il genitore ne paga arena_birth_cost (fare un
+    # figlio costa più di quanto il figlio riceve).
+    # Ricalibrati il 2026-10-23 (docs/SPEC_ARENA.md, sezione 13): con 300 / 150
+    # / 200 la popolazione non si reggeva da sola in 40 minuti di mondo.
+    arena_birth_energy: float = 250.0
+    arena_child_energy: float = 120.0
+    arena_birth_cost: float = 160.0
+    arena_maturity: float = 30.0  # s
+    arena_birth_interval: float = 30.0  # s
+    arena_birth_distance: float = 3.0  # u: il figlio nasce accanto al genitore
+    # Partner: un adulto entro arena_mate_range, compatibile (almeno
+    # arena_mate_share delle identità dei geni in comune), con la probabilità
+    # del gene "sex" del genitore. Il partner non paga.
+    arena_mate_range: float = 20.0  # u
+    arena_mate_share: float = 0.5
+    # Cibo a macchie fertili che si spostano (passeggiata casuale lenta) e
+    # cambiano con le stagioni (fertilità tra arena_season_low e 1, ogni
+    # macchia con la sua fase); fuori dalle macchie un fondo debole.
+    arena_patches: int = 8
+    arena_patch_sigma: float = 160.0  # u, raggio tipico di una macchia (era 120: cibo troppo fitto)
+    arena_patch_speed: float = 0.1  # u/s: circa mezza macchia in una vita mediana
+    arena_patch_turn: float = 0.05  # rad/√s: quanto in fretta cambia direzione
+    arena_season: float = 1200.0  # s, periodo delle stagioni
+    arena_season_low: float = 0.3
+    arena_background: float = 0.0  # fertilità fuori dalle macchie, rispetto al massimo (era 0,05: ora solo nelle macchie)
+    # Cibi che maturano al secondo in tutto il mondo, e quanti al più insieme.
+    # Coerenti con il fabbisogno (2026-10-25): un essere fermo mangia 1,5
+    # cibi al minuto, uno che corre sempre ~4,4: 720 al minuto mantengono
+    # ~160 esseri che corrono o ~480 efficienti. Prima 30/s e 1500 (cibo per
+    # 400-1200 esseri con 100 vivi: nessuna competizione, sprechi senza costo).
+    arena_food_rate: float = 12.0
+    arena_food_max: int = 900
+    # Il cibo nasce a ondate (solo motore JAX): ogni arena_food_every secondi
+    # tutto quello maturato nel frattempo (arena_food_rate al secondo), fino
+    # al massimo. 0 = un po' ogni secondo. Prova di 6 minuti (2026-10-23):
+    # 60 s, 30/s, 1500 al massimo il migliore dei quattro (meno colonizzatori).
+    arena_food_every: float = 60.0
+    arena_food_radius: float = 3.0
+    arena_food_energy: float = 100.0  # energia di un cibo nell'arena (il mondo del cibo usa food_energy)
+    # Colonizzatori (isola e continente): finché i vivi sono meno di
+    # arena_min_alive arrivano esseri nuovi, copie mutate di chi ha mangiato di
+    # più tra i vissuti (un archivio dei migliori arena_archive), o reti nuove
+    # se nessuno ha ancora mangiato. Smettono quando la popolazione si
+    # mantiene da sola. 0 = mai (si può estinguere).
+    arena_min_alive: int = 100
+    arena_archive: int = 50
+    arena_tick: float = 1.0  # s: ogni quanto si contano nascite e morti per vecchiaia
+    arena_stats_every: float = 60.0  # s: una riga di storia
+    # Gli altri esseri: dischi opachi del loro colore, con un odore loro.
+    being_color: float = 0.25
+    being_color_width: float = 0.06
+    being_albedo: float = 1.0
+    being_molecule: float = 0.45
+    being_smell: float = 0.3
+    # Il mondo che si complica (docs/SPEC_ARENA.md, sezione 15; solo con il
+    # motore JAX, "gpu"). Sei manopole da 0 a 1, che con arena_world_ladder il
+    # mondo alza da solo, una alla volta, di arena_dial_step a ogni minuto in
+    # cui la popolazione si regge da sola da arena_dial_calm minuti, e
+    # abbassa se torna a dipendere dai colonizzatori per arena_dial_calm minuti.
+    arena_world_ladder: bool = True
+    arena_dial_step: float = 0.05
+    arena_dial_calm: int = 3
+    arena_scarcity: float = 0.0  # 0. cibo raro: ricrescita e massimo fino a arena_scarce_rate / arena_scarce_max volte
+    arena_thirst: float = 0.0  # 1. sete: la traspirazione sale fino a (1 + arena_thirst_more) volte
+    arena_pool_distance: float = 0.0  # 2. le pozze nuove nascono più lontane dal cibo (fino a arena_pool_far_*)
+    arena_depletion: float = 0.0  # 3. le macchie si esauriscono dove si mangia
+    arena_fruits: float = 0.0  # 4. frutti cattivi: fino a metà del cibo nuovo, del colore sbagliato
+    arena_reversal: float = 0.0  # 5. in una macchia il colore buono può cambiare (fino a metà delle volte)
+    arena_predation: float = 0.0  # 6. si può mordere chi è più piccolo
+    arena_extraction: float = 0.0  # 7. cibo da aprire: duro (morso a lungo) e grande (morso in due)
+    arena_night: float = 0.0  # 8. la notte: la luce cala fino a 1 - 0,85
+    arena_drought: float = 0.0  # 9. siccità: le pozze evaporano (si prosciugano in arena_pool_dry secondi)
+    # Un neurone interno che compare (si riaccende) in un figlio nasce già
+    # collegato ai vicini, con la regola della nascita (probabilità che cala
+    # con la distanza): un neurone nuovo fa crescere dendriti e assone. Solo
+    # nell'arena continua e con il genoma diretto.
+    arena_wire_new: bool = True
+    # Neuroni interni accesi negli esseri primordiali (all'inizio e nei
+    # colonizzatori nuovi): con il genoma diretto collegati con la regola
+    # della nascita, con lo sviluppo dai marcatori. Solo nell'arena continua.
+    arena_hidden_initial: int = 2
+    # Esaurimento: ogni cibo mangiato vicino a una macchia ne toglie
+    # arena_patch_wear della salute (per la manopola); la salute torna in
+    # arena_patch_recovery secondi; la fertilità è la salute.
+    arena_scarce_rate: float = 0.4  # con il cibo raro al massimo: 45 · 0,4 = 18 cibi al secondo
+    arena_scarce_max: float = 0.35  # e al più 1500 · 0,35 = 525 presenti insieme
+    arena_patch_wear: float = 0.01
+    arena_patch_recovery: float = 500.0  # s
+    arena_reversal_every: float = 600.0  # s: ogni quanto una macchia può cambiare colore buono
+    # Il corpo dell'arena: la taglia (gene, in scala logaritmica) moltiplica
+    # il raggio per √taglia, il metabolismo per taglia^0,75 (Kleiber), la
+    # riserva di energia per taglia, la spinta per taglia^-0,25.
+    arena_size_min: float = 0.3
+    arena_size_max: float = 4.0
+    arena_size_std: float = 0.1  # variazione alla partenza e ampiezza delle mutazioni della taglia
+    # Morso: toglie arena_bite_rate · comando · taglia energia al secondo a un
+    # essere toccato davanti (entro 60°) e almeno arena_bite_ratio volte più
+    # piccolo; chi morde ne prende arena_bite_gain. Costa arena_bite_cost/s.
+    arena_bite_rate: float = 40.0
+    arena_bite_ratio: float = 1.2
+    arena_bite_gain: float = 0.6
+    arena_bite_cost: float = 0.5
+    # Cibo da aprire: duro (raggio 4, va morso per arena_hard_work secondi a
+    # morso pieno, vale arena_hard_energy volte) e grande (raggio 6, va morso
+    # da almeno 2 insieme, vale arena_big_energy volte, diviso tra chi morde).
+    arena_hard_work: float = 1.0
+    arena_hard_energy: float = 2.0
+    arena_big_energy: float = 6.0
+    # Segnali: luce (colore: gene) e odore (molecola: gene) a intensità
+    # comandata; costano arena_signal_cost/s a intensità piena. La luce dei
+    # segnali non cala di notte (bioluminescenza).
+    arena_signal_cost: float = 0.3
+    arena_signal_smell: float = 1.0
+    # Cure: chi nutre passa arena_feed_rate energia/s a un proprio figlio
+    # toccato non ancora adulto, che ne riceve arena_feed_gain.
+    arena_feed_rate: float = 20.0
+    arena_feed_gain: float = 0.8
+    arena_day: float = 600.0  # s: un giorno e una notte
+    # Clima (solo con il motore JAX): temperatura da 0 a 1, una fascia calda al
+    # centro del mondo e fresca verso i bordi (alto e basso, che sul toro si
+    # toccano), 0,5 ± arena_temperature, più ± arena_temp_season con le
+    # stagioni. Il metabolismo vale arena_temp_q^(T - 0,5) volte (Q10: al
+    # caldo si consuma di più); la fertilità delle macchie vale
+    # 1 + arena_temp_food · (T - 0,5) volte (al caldo si produce di più).
+    arena_temperature: float = 0.4
+    arena_temp_season: float = 0.1
+    arena_temp_q: float = 3.0
+    arena_temp_food: float = 1.5
+    # Acqua (solo con il motore JAX): una seconda riserva del corpo,
+    # arena_water_max · taglia. Cala di arena_water_loss/s (per taglia^0,75,
+    # per 1 + arena_water_move · |spinta|, per lo stesso Q10 del clima); a zero
+    # si muore di sete. Si beve stando dentro una pozza, arena_drink_rate/s.
+    # Le pozze sono ferme, lontane dalle macchie di cibo ma non troppo (il
+    # centro della macchia più vicina tra arena_pool_gap_min e
+    # arena_pool_gap_max), e si consumano bevendo: il raggio è
+    # arena_pool_radius · √(volume / arena_pool_volume). Una pozza vuota
+    # sparisce; quando ne restano meno di arena_pools_min ne nasce una nuova
+    # (in media dopo arena_pool_wait secondi). Fare un figlio costa
+    # arena_birth_water d'acqua, che il figlio riceve.
+    arena_water: bool = True
+    arena_water_max: float = 100.0
+    # /s: senza bere ~140 s fermi, ~60 s correndo al caldo: la stessa scala
+    # dell'energia (un piccolo da fermo ~50 s, una riserva piena ~180 s).
+    # Calibrazione del 2026-10-24 (20 minuti di mondo, sviluppo): con 0,7 un
+    # quarto dei morti è di sete (con un quarto della traspirazione il 3%), e
+    # la popolazione non va peggio (nati 58/min contro 44).
+    arena_water_loss: float = 0.7
+    arena_thirst_more: float = 1.0  # con la manopola della sete al massimo: il doppio (~70 s fermi)
+    arena_water_move: float = 0.5
+    arena_drink_rate: float = 25.0
+    # Il sollievo della sete: bere dà un segnale positivo al sistema di valore
+    # (lo stesso canale del gusto, come la dopamina per cibo e acqua),
+    # arena_drink_reward · (acqua bevuta / riserva) · (1 - acqua / riserva):
+    # bere da assetati vale molto, da sazi niente. Con 2 una bevuta completa
+    # da vuoti vale quanto un pasto. Svanisce in taste_tau, come il gusto.
+    arena_drink_reward: float = 2.0
+    # Anche mangiare dà piacere secondo il bisogno (alliestesia): ogni pasto
+    # aggiunge al gusto arena_eat_reward · (energia ricevuta / un cibo) ·
+    # (1 - energia / riserva). Da affamati un cibo vale 1, come prima per
+    # tutti i pasti; da sazi quasi niente.
+    arena_eat_reward: float = 1.0
+    arena_pools: int = 6  # pozze all'inizio (e al più arena_pool_slots)
+    arena_pool_slots: int = 10
+    arena_pools_min: int = 4
+    arena_pool_wait: float = 60.0  # s
+    arena_pool_radius: float = 60.0  # u
+    arena_pool_volume: float = 60000.0
+    # Dal centro della macchia più vicina: vicine (appena fuori dal bordo della
+    # macchia, σ + raggio della pozza = 220) e, con la manopola
+    # arena_pool_distance al massimo, lontane.
+    arena_pool_gap_min: float = 230.0  # u
+    arena_pool_gap_max: float = 300.0  # u
+    arena_pool_far_min: float = 260.0  # u
+    arena_pool_far_max: float = 450.0  # u: a velocità piena ~15 s
+    arena_pool_dry: float = 600.0  # s: con la siccità al massimo una pozza piena evapora in tanto
+    arena_birth_water: float = 40.0  # il genitore la paga; il figlio nasce con la riserva piena (idratato dal genitore)
+    arena_birth_water_spare: float = 0.1  # e deve restargliene questa quota della riserva
+    # Come la si percepisce: luce blu (vista), umidità (olfatto, portata
+    # maggiore degli altri odori), e un senso interno (la riserva d'acqua,
+    # sull'asse dell'interno in WATER_QUALITY).
+    water_color: float = 0.1
+    water_color_width: float = 0.06
+    water_albedo: float = 1.0
+    water_molecule: float = 0.15
+    water_smell: float = 1.0
+    water_odor_range: float = 100.0  # u
+
     # Pericoli (zone tossiche in deriva armonica). Il danno cresce dal bordo
     # (zero) al centro (hazard_drain) come profondità ** hazard_falloff.
     hazard_drain: float = 60.0  # energia/s al centro

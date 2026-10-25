@@ -8,7 +8,7 @@ import numpy as np
 
 from . import development, receptors
 from .brain import META, Genome, live_links
-from .controllers import NeuralController
+from .controllers import ACTION_LABELS, NeuralController, extra_motors
 from .geometry import motor_anchors, receptor_anchors
 
 KIND_NAMES = {"rate": "continua", "spike-ei": "a impulsi E/I"}
@@ -38,7 +38,7 @@ class Anatomy:
     """
 
     def __init__(self, cfg, genome: Genome):
-        brains = NeuralController(cfg, 1).brains
+        brains = NeuralController(cfg, 1, extra_motors=extra_motors(cfg, genome)).brains
         brains.set_genome(genome)
         self.brains = brains
         self.kind = brains.KIND
@@ -55,7 +55,8 @@ class Anatomy:
         self.inhibitory = brains.inhibitory[0] if hasattr(brains, "inhibitory") else None
         self.modulatory = brains.modulatory[0]  # (H,)
         self.kmod = brains.kmod[0]  # (T, H): quanto M di ogni modulatore arriva a ogni neurone
-        self.labels = node_labels(genome, brains.OUT_LABELS)
+        extra = self.n_out - len(brains.OUT_LABELS)  # le azioni dell'arena continua, se ci sono
+        self.labels = node_labels(genome, tuple(brains.OUT_LABELS) + ACTION_LABELS[:max(extra, 0)])
         # Fenomeno dominante di ogni recettore (per il colore nei disegni).
         dom = [receptors.dominant(genome.receptors, 0, k) for k in range(self.n_in)]
         self.phenomenon = [p for p, _ in dom]

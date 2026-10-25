@@ -985,3 +985,58 @@ cresce con le sue cellule). Quelli dei formati da 3 a 6 si aprono convertiti
 moltiplicatori a parità di quanti, distanze ricalcolate), con le
 costanti con cui erano nati, e il registro lo annota. Quelli precedenti avevano i
 sensi fissi e non si possono più aprire.
+
+## 22. L'arena continua
+
+Una modalità a parte (`task = "arena"`, riga "Mondo" del menu): tutti gli
+esseri vivono insieme in un mondo unico di 2000 × 1400 senza bordi, senza
+generazioni né compito. Si nasce quando un adulto (almeno 30 s) ha almeno
+250 di energia e non ha partorito negli ultimi 30 s: il figlio riceve 120, il
+genitore ne paga 160, e se un adulto compatibile (metà delle identità dei
+geni in comune) è entro 20 u, con la probabilità del gene `sex` il figlio è
+un incrocio dei due. Si muore di fame o di vecchiaia (legge di Gompertz, vita
+mediana 600 s). Il cibo ricresce (45 al secondo, al massimo 1500) a 8
+macchie fertili che si spostano piano e cambiano con le stagioni. Gli esseri
+si vedono (colore 0,25), si annusano (molecola 0,45) e si urtano; chi tocca
+per primo un cibo lo mangia. Sotto i 100 vivi arrivano colonizzatori, copie
+mutate di chi ha mangiato di più. L'esame fisso (i livelli del mondo del
+cibo) si fa ogni 10 minuti di mondo su 20 adulti presi a caso. Dettagli e
+numeri in [SPEC_ARENA.md](SPEC_ARENA.md).
+
+**Il mondo che si complica** (solo con il motore JAX; dettagli in
+SPEC_ARENA.md, sezione 15). Nell'arena ogni essere ha una **taglia** (gene:
+più grande = morso più forte e più riserva, ma più lento e più caro) e
+quattro **azioni** comandate da neuroni motori in più: mordere, accendere la
+propria luce (colore: gene), emettere il proprio odore (molecola: gene),
+nutrire un proprio figlio. Sei manopole, che il mondo alza una alla volta
+quando la popolazione si regge da sola e abbassa quando torna ad aver bisogno
+di colonizzatori: macchie che si esauriscono, frutti cattivi, inversione del
+colore buono, predazione (si morde chi è almeno 1,2 volte più piccolo),
+cibo da aprire (duro e grande), notte. Dopo ogni esame, la stessa prova senza
+plasticità misura quanto imparano durante la vita.
+
+**Cibo e clima** (solo con il motore JAX). Il cibo nasce solo nelle macchie.
+La prima manopola della scala del mondo lo rende raro (fino al 40% della
+ricrescita e al 35% dei cibi presenti). Il clima: fascia calda al centro del
+mondo, fresca verso i bordi; al caldo il metabolismo è fino a 1,7 volte e le
+macchie producono fino a 1,75 volte, al freddo il metabolismo scende a 0,6
+volte e le macchie a 0,25 volte. I recettori della temperatura la sentono.
+
+
+**Acqua** (solo con il motore JAX). Una seconda riserva, che cala sempre (di
+più al caldo e correndo): a zero si muore di sete. Si beve stando dentro una
+pozza; le pozze sono ferme, lontane dal cibo ma non troppo, si restringono
+bevendo e spariscono vuote; quando ne restano meno di 4 ne nasce una nuova.
+Fare un figlio costa acqua. Le pozze si vedono (blu), si annusano da lontano
+(umidità) e la sete si sente da dentro. L'ottava manopola, la siccità, le fa
+evaporare.
+
+**Sete graduale e neuroni iniziali** (arena continua). La sete è tarata sulla
+scala dell'energia (senza bere ~140 s da fermi) e una manopola della scala
+del mondo la porta fino al doppio; le pozze nascono appena fuori dalle macchie e una manopola le
+allontana; il figlio nasce idratato. Gli esseri primordiali hanno 2 neuroni
+interni già collegati, e un neurone che compare in un figlio nasce collegato.
+
+**Piacere secondo il bisogno** (arena continua, motore JAX). Mangiare e bere
+danno un segnale positivo al sistema di valore tanto più forte quanto più si
+ha fame o sete: da affamati un cibo vale come prima, da sazi quasi niente.

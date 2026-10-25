@@ -140,6 +140,37 @@ def evolve_many(cfg: Config, generations: int, seed: int, k: int, save: str, exa
           + ", ".join(str(p) for p in paths))
 
 
+def live(cfg: Config, minutes: int, seed: int, initial: int | None, load: str | None, save: str) -> None:
+    """L'arena continua senza grafica (docs/SPEC_ARENA.md): `minutes` minuti
+    di mondo, una riga al minuto, poi salva (anche a ogni minuto, e a Ctrl+C)."""
+    from evonets.evo.ecology import Ecology
+
+    e = Ecology.load(cfg, load) if load else Ecology(cfg, seed, initial)
+    print(f"arena continua {cfg.arena_size_w:.0f} x {cfg.arena_size_h:.0f}, {cfg.arena_cap} posti, "
+          f"rete {cfg.net_type}, genoma {cfg.genome}, seme {e.seed}; salvo in {save}")
+    print(" min  vivi  nati partn colon fame vecch  mang  cibo  età  energ sensi neur specie  (s)")
+    stop = stop_requested()
+    shown = len(e.exams)
+    start, end = time.perf_counter(), e.world.t + 60.0 * minutes
+    while e.world.t < end - 1e-9 and not stop:
+        before = len(e.history)
+        e.step()
+        if len(e.history) > before:
+            r = e.history[-1]
+            print(f"{r['minute']:4d} {r['alive']:5d} {r['births']:5d} {r['mates']:5d} {r['colonists']:5d} "
+                  f"{r['starved']:4d} {r['old_age']:5d} {r['eaten']:5d} {r['food']:5d} "
+                  f"{r.get('age_mean', 0):5.0f} {r.get('energy_mean', 0):5.0f} {r.get('used', 0):5.2f} "
+                  f"{r.get('neurons', 0):4.2f} {r.get('species', 0):5d}  {time.perf_counter() - start:5.0f}",
+                  flush=True)
+            for x in e.exams[shown:]:
+                print(f"     esame al minuto {x['generation']}: media {x['score']:.0%} | "
+                      + "  ".join(f"{k} {v:.0%}" for k, v in x["scores"].items()), flush=True)
+            shown = len(e.exams)
+            e.save(save)
+    e.save(save)
+    print(f"salvato in {save}: minuto {e.generation}, {int(e.world.alive.sum())} vivi")
+
+
 def evolve(cfg: Config, generations: int, seed: int, load: str | None, save: str, select: int = 0,
            exam_every: int | None = None) -> None:
     evo = start(cfg, seed, load)
@@ -212,7 +243,7 @@ def main() -> None:
                     help="con --evolve: K semi (dal seme dato in su) insieme nello stesso lotto sulla GPU")
     ap.add_argument("--engine", choices=("gpu", "numpy"), default="gpu",
                     help="motore di simulazione: gpu = compilato con JAX (default), numpy = l'originale")
-    ap.add_argument("--task", choices=("bersaglio", "cibo"), default="bersaglio",
+    ap.add_argument("--task", choices=("bersaglio", "cibo", "arena"), default="bersaglio",
                     help="compito: bersaglio = toccarlo una volta (il mondo di prima), "
                          "cibo = nutrirsi (docs/SPEC_MONDO.md; senza veleno)")
     ap.add_argument("--mode", choices=("evoluzione", "cervello"), default="evoluzione",
@@ -230,6 +261,8 @@ def main() -> None:
     ap.add_argument("--load", metavar="FILE", help="riprende da una popolazione salvata")
     ap.add_argument("--save", metavar="FILE",
                     help="dove salvare (default: runs/pop.npz con --evolve, un nome nuovo nel menu)")
+    ap.add_argument("--cap", type=int, default=None,
+                    help="con --task arena: posti, cioè esseri vivi al massimo (default: 3000)")
     ap.add_argument("--bench", action="store_true", help="misura il throughput senza grafica")
     ap.add_argument("--steps", type=int, default=5000, help="step per --bench")
     args = ap.parse_args()
@@ -244,6 +277,13 @@ def main() -> None:
     if args.bench:
         bench(cfg, args.agents or 1000, args.steps, seed)
         return
+    if args.task == "arena":
+        if args.cap:
+            cfg.arena_cap = args.cap
+        cfg.exam_every = 10 if args.exam_every is None else args.exam_every  # in minuti di mondo
+        if args.evolve:
+            live(cfg, args.evolve or 0, seed, args.agents, args.load, args.save or "runs/arena.npz")
+            return
     if args.agents:
         cfg.population = args.agents
     if args.exam:

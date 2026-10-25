@@ -154,6 +154,9 @@ def stimuli(cfg, world, genes: ReceptorGenes, rows=None) -> np.ndarray:
         + spectral(mu_l, sg_l, cfg.rock_color, cfg.rock_color_width, cfg.rock_albedo) * seen["roccia"].reshape(n, R)
         + spectral(mu_l, sg_l, cfg.fruit_color, cfg.food_color_width, cfg.food_albedo) * seen["frutto"].reshape(n, R)
     )
+    if "essere" in seen:  # gli altri esseri: solo nei mondi dove ci sono (l'arena continua)
+        out[..., LIGHT] += (spectral(mu_l, sg_l, cfg.being_color, cfg.being_color_width, cfg.being_albedo)
+                            * seen["essere"].reshape(n, R))
 
     # Sostanze, nel punto del corpo dove sta il recettore.
     for molecule, conc in signals.chemicals(cfg, world, flat, agent):
@@ -273,6 +276,8 @@ class Prepared:
                                    cfg.rock_albedo)
         self.c_fruit = L * spectral(mu[..., LIGHT], sg[..., LIGHT], cfg.fruit_color, cfg.food_color_width,
                                     cfg.food_albedo)
+        self.c_being = L * spectral(mu[..., LIGHT], sg[..., LIGHT], cfg.being_color, cfg.being_color_width,
+                                    cfg.being_albedo)
         self.mu_c, self.sg_c, self.g_c = mu[..., CHEMICAL], sg[..., CHEMICAL], C
         self.c_press = M * tuning(0.0, mu[..., MECHANICAL], sg[..., MECHANICAL])
         self.mu_m, self.sg_m, self.g_m = mu[..., MECHANICAL], sg[..., MECHANICAL], M
@@ -280,6 +285,11 @@ class Prepared:
         self.g_mag = g[..., MAGNETIC]
         q = np.array([qk for qk, _ in signals.BODY_QUANTITIES])
         self.c_body = g[..., INTERNAL, None] * tuning(q, mu[..., INTERNAL, None], sg[..., INTERNAL, None])
+        # L'acqua (arena continua, motore JAX): la pozza vista e la riserva sentita.
+        self.c_pool = L * spectral(mu[..., LIGHT], sg[..., LIGHT], cfg.water_color, cfg.water_color_width,
+                                   cfg.water_albedo)
+        self.c_water = g[..., INTERNAL] * tuning(signals.WATER_QUALITY, mu[..., INTERNAL], sg[..., INTERNAL])
+        self.c_quench = g[..., INTERNAL] * tuning(signals.QUENCH_QUALITY, mu[..., INTERNAL], sg[..., INTERNAL])
 
     def take(self, rows) -> "Prepared":
         new = object.__new__(Prepared)
@@ -301,6 +311,8 @@ class Prepared:
                + self.c_glow * seen["veleno"].reshape(n, R) + self.c_food * seen["cibo"].reshape(n, R)
                + self.c_pred * seen["predatore"].reshape(n, R) + self.c_rock * seen["roccia"].reshape(n, R)
                + self.c_fruit * seen["frutto"].reshape(n, R))
+        if "essere" in seen:  # gli altri esseri (arena continua)
+            out += self.c_being * seen["essere"].reshape(n, R)
         for molecule, conc in signals.chemicals(cfg, world, points, agent):
             out += self.g_c * tuning(molecule, self.mu_c, self.sg_c) * conc.reshape(n, R)
         if world.bump[rows].any():
