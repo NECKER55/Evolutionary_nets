@@ -350,12 +350,14 @@ def physics(ph, P, s, actions, extra, near_food, near_being):
             + jnp.where(win_big, unit * ph["arena_big_energy"] / jnp.maximum(n_big[fi], 1.0), 0.0))
     good_meals = ((win_plain & ~bad).sum(1) + win_hard.sum(1) + win_big.sum(1)).astype(F)
     bad_meals = (win_plain & bad).sum(1).astype(F)
+    hunger = jnp.clip(1.0 - energy / e_max, 0.0, 1.0)  # prima del pasto
+    pleasure = ph["arena_eat_reward"] * gain.sum(1) / unit * hunger  # più fame, più piacere (come bere)
     energy = energy + gain.sum(1) - ph["bad_fruit_damage"] * bad_meals
     eaten = jax.ops.segment_max((win_plain | win_hard | win_big).reshape(-1).astype(jnp.int32), flat_f, n_food) > 0
     food_on = jnp.where(eaten, 0.0, s["food_on"])
     work = jnp.where(eaten | (s["food_on"] <= 0), 0.0, work)
     energy = jnp.clip(energy, 0.0, e_max)
-    taste = jnp.minimum(s["taste"] * jnp.exp(-dt / ph["taste_tau"]) + good_meals, 1.0)
+    taste = jnp.minimum(s["taste"] * jnp.exp(-dt / ph["taste_tau"]) + pleasure, 1.0)
     pain = jnp.minimum(bitten.astype(F) + bad_meals, 1.0)
     dry = alive & thirsty & (water <= 0.0) & (energy > 0.0)
     dead = alive & ((energy <= 0.0) | dry)
@@ -450,13 +452,12 @@ def arena_phys(cfg) -> dict:
               "arena_signal_smell", "arena_feed_rate", "arena_feed_gain", "arena_temperature", "arena_temp_season",
               "arena_temp_q", "arena_season", "arena_water_max", "arena_water_loss", "arena_water_move",
               "arena_drink_rate", "arena_pool_radius", "arena_pool_volume", "water_molecule", "water_smell",
-              "water_odor_range", "arena_drink_reward"):
+              "water_odor_range", "arena_drink_reward", "arena_eat_reward"):
         ph[k] = np.float32(getattr(cfg, k))
     ph["food_energy"] = np.float32(cfg.arena_food_energy)  # nell'arena il cibo vale arena_food_energy
     ph["arena_water"] = np.float32(bool(cfg.arena_water))
-    # La sete graduale: la traspirazione cresce con la manopola.
-    ph["arena_water_loss"] = np.float32(cfg.arena_water_loss * (cfg.arena_thirst_min
-                                                                 + (1.0 - cfg.arena_thirst_min) * cfg.arena_thirst))
+    # La manopola della sete: la traspirazione cresce fino a (1 + arena_thirst_more) volte.
+    ph["arena_water_loss"] = np.float32(cfg.arena_water_loss * (1.0 + cfg.arena_thirst_more * cfg.arena_thirst))
     return ph
 
 

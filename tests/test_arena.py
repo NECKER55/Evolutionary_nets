@@ -387,7 +387,7 @@ def test_drinking_fills_the_body_and_shrinks_the_pool_and_thirst_kills():
     out = _physics(gpu, ga, jnp, np.zeros((3, 4)))
     water = np.asarray(out["water"])
     drink = cfg.arena_drink_rate * cfg.dt
-    sweat = cfg.arena_water_loss * cfg.arena_thirst_min * cfg.dt  # sete graduale: la manopola è a 0
+    sweat = cfg.arena_water_loss * cfg.dt  # la manopola della sete è a 0
     assert abs(water[0] - (10.0 - sweat + drink)) < 1e-3  # dentro la pozza: beve
     assert abs(water[1] - (10.0 - sweat + drink)) < 1e-3  # anche il secondo (a 2 u dal centro)
     assert abs(float(out["pool_vol"][0]) - (cfg.arena_pool_volume - 2 * drink)) < 0.05
@@ -512,7 +512,7 @@ def test_thirst_grows_with_its_dial():
         gpu.push_world()
         out = _physics(gpu, ga, jnp, np.zeros((3, 4)))
         lost.append(10.0 - float(out["water"][1]))
-    assert abs(lost[0] / lost[1] - cfg.arena_thirst_min) < 1e-3
+    assert abs(lost[1] / lost[0] - (1.0 + cfg.arena_thirst_more)) < 1e-3
 
 
 def test_primordial_beings_start_with_wired_hidden_neurons():
@@ -566,3 +566,16 @@ def test_the_drink_measure_counts_returns_to_water():
         e._watch_drinks()
     # intervalli: 11 - 0 = 11 (il primo), poi 17 - 12 = 5, 21 - 18 = 3, 25 - 22 = 3
     assert e._first_gap[i] == 11 and e._later_n[i] == 3 and e._later_sum[i] == 11
+
+
+def test_eating_pleases_more_when_hungry():
+    tastes = []
+    for energy in (10.0, 400.0):
+        cfg, w, gpu, ga, jnp = _scene()
+        w.task.food[0], w.task.food_on[0] = [100.0, 100.0], True
+        w.energy[:] = energy
+        w.grids_dirty = True
+        gpu.push_world()
+        gpu.s["taste"] = jnp.zeros(3)
+        tastes.append(float(_physics(gpu, ga, jnp, np.zeros((3, 4)))["taste"][0]))
+    assert tastes[0] > 0.9 and tastes[1] < 0.2 * tastes[0]

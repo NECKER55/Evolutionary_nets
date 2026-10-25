@@ -82,14 +82,17 @@ al più anziano.
 Tre schede, come nelle altre corse (`V` o clic sui bottoni in alto a destra):
 
 - **Mondo**: la vista descritta sopra.
-- **Panoramica**: *a che punto siamo* (le sei manopole del mondo, quale è in
-  corso e che cosa chiede, se la popolazione si regge da sola), e quattro
-  grafici minuto per minuto, ciascuno con una frase che lo spiega:
-  *popolazione* (vivi, nati, morti di fame, di vecchiaia, predati,
-  colonizzatori), *cervello e corpo* (sensi usati, neuroni, collegamenti,
-  taglia, morso, luce), *esame* (normale e senza plasticità: la differenza è
-  quanto imparano durante la vita), *il mondo* (cibo mangiato e presente,
-  frutti cattivi, salute delle macchie, energia data ai figli).
+- **Panoramica**: *a che punto siamo* (le manopole del mondo, quale è in
+  corso e che cosa chiede, se la popolazione si regge da sola) e grafici
+  minuto per minuto, uno per concetto, ognuno con la sua scala: *quanti sono
+  vivi*; *ogni minuto* chi nasce, chi muore (fame, sete, vecchiaia, predati) e
+  chi arriva da fuori; *cervello* (sensi usati, neuroni interni) e *corpo e
+  azioni*; *esame* (normale e senza plasticità); *cibo* (presente, mangiato,
+  frutti cattivi) e *acqua* (nei corpi, secondi tra due bevute). Ogni linea ha
+  il nome e il valore attuale scritti alla fine, niente legenda; le linee
+  sempre a zero non compaiono; la scala ignora il primo minuto (la moria
+  iniziale), che se serve esce dall'alto. Sotto ogni coppia di grafici una
+  frase li legge.
 - **Reti**: l'esploratore delle reti, con tre elenchi: i 100 più anziani vivi,
   i campioni (il più anziano di ogni minuto), tutti i vivi (`1` `2` `3` o
   `Tab`; `R` rifà la foto dei vivi). Per ogni essere: numero, età, taglia,

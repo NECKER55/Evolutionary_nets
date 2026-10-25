@@ -426,8 +426,13 @@ class Config:
     arena_season: float = 1200.0  # s, periodo delle stagioni
     arena_season_low: float = 0.3
     arena_background: float = 0.0  # fertilità fuori dalle macchie, rispetto al massimo (era 0,05: ora solo nelle macchie)
-    arena_food_rate: float = 30.0  # cibi che maturano al secondo, in tutto il mondo (era 45, senza ondate)
-    arena_food_max: int = 1500  # cibi presenti insieme, al massimo
+    # Cibi che maturano al secondo in tutto il mondo, e quanti al più insieme.
+    # Coerenti con il fabbisogno (2026-10-25): un essere fermo mangia 1,5
+    # cibi al minuto, uno che corre sempre ~4,4: 720 al minuto mantengono
+    # ~160 esseri che corrono o ~480 efficienti. Prima 30/s e 1500 (cibo per
+    # 400-1200 esseri con 100 vivi: nessuna competizione, sprechi senza costo).
+    arena_food_rate: float = 12.0
+    arena_food_max: int = 900
     # Il cibo nasce a ondate (solo motore JAX): ogni arena_food_every secondi
     # tutto quello maturato nel frattempo (arena_food_rate al secondo), fino
     # al massimo. 0 = un po' ogni secondo. Prova di 6 minuti (2026-10-23):
@@ -459,7 +464,7 @@ class Config:
     arena_dial_step: float = 0.05
     arena_dial_calm: int = 3
     arena_scarcity: float = 0.0  # 0. cibo raro: ricrescita e massimo fino a arena_scarce_rate / arena_scarce_max volte
-    arena_thirst: float = 0.0  # 1. sete: la traspirazione sale da arena_thirst_min ad arena_water_loss
+    arena_thirst: float = 0.0  # 1. sete: la traspirazione sale fino a (1 + arena_thirst_more) volte
     arena_pool_distance: float = 0.0  # 2. le pozze nuove nascono più lontane dal cibo (fino a arena_pool_far_*)
     arena_depletion: float = 0.0  # 3. le macchie si esauriscono dove si mangia
     arena_fruits: float = 0.0  # 4. frutti cattivi: fino a metà del cibo nuovo, del colore sbagliato
@@ -537,8 +542,13 @@ class Config:
     # arena_birth_water d'acqua, che il figlio riceve.
     arena_water: bool = True
     arena_water_max: float = 100.0
-    arena_water_loss: float = 0.7  # /s con la sete al massimo: senza bere ~140 s fermi, meno muovendosi e al caldo
-    arena_thirst_min: float = 0.25  # con la manopola della sete a 0: un quarto (~560 s fermi)
+    # /s: senza bere ~140 s fermi, ~60 s correndo al caldo: la stessa scala
+    # dell'energia (un piccolo da fermo ~50 s, una riserva piena ~180 s).
+    # Calibrazione del 2026-10-24 (20 minuti di mondo, sviluppo): con 0,7 un
+    # quarto dei morti è di sete (con un quarto della traspirazione il 3%), e
+    # la popolazione non va peggio (nati 58/min contro 44).
+    arena_water_loss: float = 0.7
+    arena_thirst_more: float = 1.0  # con la manopola della sete al massimo: il doppio (~70 s fermi)
     arena_water_move: float = 0.5
     arena_drink_rate: float = 25.0
     # Il sollievo della sete: bere dà un segnale positivo al sistema di valore
@@ -547,6 +557,11 @@ class Config:
     # bere da assetati vale molto, da sazi niente. Con 2 una bevuta completa
     # da vuoti vale quanto un pasto. Svanisce in taste_tau, come il gusto.
     arena_drink_reward: float = 2.0
+    # Anche mangiare dà piacere secondo il bisogno (alliestesia): ogni pasto
+    # aggiunge al gusto arena_eat_reward · (energia ricevuta / un cibo) ·
+    # (1 - energia / riserva). Da affamati un cibo vale 1, come prima per
+    # tutti i pasti; da sazi quasi niente.
+    arena_eat_reward: float = 1.0
     arena_pools: int = 6  # pozze all'inizio (e al più arena_pool_slots)
     arena_pool_slots: int = 10
     arena_pools_min: int = 4

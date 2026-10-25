@@ -1031,8 +1031,12 @@ Fare un figlio costa acqua. Le pozze si vedono (blu), si annusano da lontano
 (umidità) e la sete si sente da dentro. L'ottava manopola, la siccità, le fa
 evaporare.
 
-**Sete graduale e neuroni iniziali** (arena continua). La sete parte leggera
-(un quarto della traspirazione) e sale con una manopola della scala del
-mondo; le pozze nascono appena fuori dalle macchie e una manopola le
+**Sete graduale e neuroni iniziali** (arena continua). La sete è tarata sulla
+scala dell'energia (senza bere ~140 s da fermi) e una manopola della scala
+del mondo la porta fino al doppio; le pozze nascono appena fuori dalle macchie e una manopola le
 allontana; il figlio nasce idratato. Gli esseri primordiali hanno 2 neuroni
 interni già collegati, e un neurone che compare in un figlio nasce collegato.
+
+**Piacere secondo il bisogno** (arena continua, motore JAX). Mangiare e bere
+danno un segnale positivo al sistema di valore tanto più forte quanto più si
+ha fame o sete: da affamati un cibo vale come prima, da sazi quasi niente.

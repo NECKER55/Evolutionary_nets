@@ -131,11 +131,11 @@ FROM_RUN = frozenset({
     "arena_reversal_every", "arena_size_min", "arena_size_max", "arena_size_std", "arena_bite_rate",
     "arena_bite_ratio", "arena_bite_gain", "arena_bite_cost", "arena_hard_work", "arena_hard_energy",
     "arena_big_energy", "arena_signal_cost", "arena_signal_smell", "arena_feed_rate", "arena_feed_gain",
-    "arena_day", "arena_temperature", "arena_temp_season", "arena_temp_q", "arena_temp_food", "arena_drought", "arena_food_every", "arena_drink_reward",
+    "arena_day", "arena_temperature", "arena_temp_season", "arena_temp_q", "arena_temp_food", "arena_drought", "arena_food_every", "arena_drink_reward", "arena_eat_reward",
     "arena_water", "arena_water_max", "arena_water_loss", "arena_water_move", "arena_drink_rate", "arena_pools",
     "arena_pool_slots", "arena_pools_min", "arena_pool_wait", "arena_pool_radius", "arena_pool_volume",
     "arena_pool_gap_min", "arena_pool_gap_max", "arena_pool_far_min", "arena_pool_far_max", "arena_pool_distance",
-    "arena_birth_water_spare", "arena_wire_new", "arena_thirst", "arena_thirst_min", "arena_hidden_initial", "arena_pool_dry", "arena_birth_water", "water_color",
+    "arena_birth_water_spare", "arena_wire_new", "arena_thirst", "arena_thirst_more", "arena_hidden_initial", "arena_pool_dry", "arena_birth_water", "water_color",
     "water_color_width", "water_albedo", "water_molecule", "water_smell", "water_odor_range",
     "being_color", "being_color_width", "being_albedo", "being_molecule", "being_smell",
 })

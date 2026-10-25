@@ -290,7 +290,7 @@ queste pressioni, si accendono da sole e per gradi.
 | | manopola | cosa fa | che cosa chiede |
 |---|---|---|---|
 | 0 | `arena_scarcity` | il cibo diventa raro: ricrescita fino al 40% (18 al secondo) e al più il 35% presenti insieme (525) | arrivare al cibo prima degli altri, vederlo da lontano, non sprecare energia |
-| 1 | `arena_thirst` | sete: la traspirazione sale dal 25% (senza bere ~560 s fermi) al 100% (~140 s) | fare la spola tra cibo e acqua, scegliere quale bisogno prima |
+| 1 | `arena_thirst` | sete: la traspirazione sale fino al doppio (senza bere da ~140 s a ~70 s fermi) | bere più spesso, scegliere quale bisogno prima |
 | 2 | `arena_pool_distance` | le pozze nuove nascono più lontane dal cibo: dal centro della macchia più vicina da 230–300 u fino a 260–450 u | andare a bere lontano e tornare, orientarsi, ricordare dov'è l'acqua |
 | 3 | `arena_depletion` | ogni cibo mangiato vicino a una macchia ne toglie l'1% della salute (per la manopola); la salute torna in 500 s; la fertilità è la salute | cercare un'altra macchia, ricordare dove erano |
 | 4 | `arena_fruits` | fino a metà del cibo nuovo è un frutto cattivo, del colore che nella sua macchia non è buono (toglie 30, fa male) | distinguere i colori ed evitare |
@@ -324,6 +324,30 @@ nascita (cala con la distanza nel cervello e con la portata dell'individuo).
 Prima nasceva senza collegamenti e doveva aspettarli dalle mutazioni (1% per
 collegamento): in 40 minuti i vivi avevano 0,05–0,2 neuroni interni.
 
+### Il piacere di mangiare e di bere
+
+Mangiare e bere danno piacere secondo il bisogno (alliestesia), sullo
+stesso canale positivo del sistema di valore che guida la plasticità: un
+pasto vale (energia ricevuta / un cibo) · (1 − energia / riserva), una
+bevuta 2 · (acqua bevuta / riserva) · (1 − acqua / riserva). Da affamati un
+cibo vale 1 (come prima per tutti i pasti), da sazi quasi niente; una
+bevuta completa da assetati vale quanto un pasto.
+
+### Calibrazione della sete (2026-10-24)
+
+Con un quarto della traspirazione l'acqua durava ~9 minuti mentre un essere
+vive in mediana ~47 s: si moriva solo di fame (acqua all'89% un secondo prima
+di morire). Tarata sulla scala dell'energia, 20 minuti di mondo (sviluppo,
+2 neuroni, scala ferma), minuti 11–20:
+
+| traspirazione | acqua piena da fermi | morti di sete | nati/min | colonizzatori/min |
+|---|---|---|---|---|
+| 100% (0,7/s) | ~140 s | 23% | 58 | 85 |
+| 60% | ~240 s | 9% | 49 | 70 |
+| 40% | ~360 s | 3% | 44 | 73 |
+
+Si parte dal 100%; la manopola della sete la porta fino al doppio.
+
 ### Esseri primordiali con 2 neuroni interni
 
 Gli esseri primordiali (all'inizio e i colonizzatori nuovi quando l'archivio
@@ -354,8 +378,8 @@ Una seconda riserva del corpo, accanto all'energia (solo motore JAX,
 `arena_water`). Scelte concordate il 2026-10-23: sete subito ma leggera, pozze
 ferme, in posti diversi dal cibo ma non troppo lontani, consumate piano piano,
 che riappaiono quando sono poche; un senso interno nuovo per la sete.
-- **Riserva**: 100 · taglia. Cala di 0,7/s (per la manopola della sete: da
-  un quarto a tutto) · taglia^0,75 · (1 + 0,5 · |spinta|)
+- **Riserva**: 100 · taglia. Cala di 0,7/s (fino al doppio con la manopola
+  della sete) · taglia^0,75 · (1 + 0,5 · |spinta|)
   · lo stesso Q10 del clima: senza bere si resiste ~140 s fermi, ~55 s correndo
   al caldo. A zero si muore di sete (contati a parte da fame e predazione).
 - **Pozze**: 6 all'inizio, su 10 posti. Ferme. Nascono con il centro della

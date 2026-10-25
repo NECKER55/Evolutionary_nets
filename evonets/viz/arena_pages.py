@@ -10,7 +10,7 @@ from ..net.anatomy import Anatomy
 from ..net.brain import live_links
 from .inspector import HINT, InfoPanel, NetView, RowList
 from .overview import PANEL, para
-from .render import DIM, FOOD, FRUIT, MODULATOR, PLAYER, PREDATOR, TARGET, TEXT, plot
+from .render import DIM, FOOD, FRUIT, MODULATOR, PLAYER, PREDATOR, TARGET, TEXT
 
 WINDOW = 120  # minuti mostrati nei grafici
 DEMANDS = ("arrivare al cibo prima degli altri: vederlo da lontano, non sprecare energia",
@@ -29,13 +29,67 @@ WATER = (90, 140, 240)
 DRINK = (170, 210, 255)
 
 
-def legend(s, font, items, x: int, y: int) -> None:
-    """Una riga di legenda: (colore, nome)."""
-    for color, name in items:
-        pygame.draw.line(s, color, (x, y + 7), (x + 16, y + 7), 2)
-        img = font.render(name, True, DIM)
-        s.blit(img, (x + 20, y))
-        x += img.get_width() + 34
+LABEL_W = 104  # spazio a destra di ogni grafico per i nomi delle linee
+
+
+def nice(top: float) -> float:
+    """Il primo numero tondo (1, 2, 2,5, 5 per una potenza di 10) da `top` in su."""
+    if top <= 0:
+        return 1.0
+    p = 10 ** np.floor(np.log10(top))
+    return float(next(m * p for m in (1, 2, 2.5, 5, 10) if m * p >= top - 1e-9))
+
+
+def chart(s, box: pygame.Rect, font, title: str, minutes, lines, fmt="{:.0f}", top: float | None = None,
+          skip_first: bool = True) -> None:
+    """Un grafico chiaro: titolo, asse da 0 a un numero tondo, minuti in
+    basso, e ogni linea con il suo nome e il valore attuale scritti alla fine
+    (niente legenda da decifrare). `lines`: (nome, valori, colore, spessore);
+    le linee sempre a zero non si disegnano. Con `skip_first` la scala non
+    tiene conto del primo minuto (la moria iniziale schiaccerebbe il resto:
+    la sua linea esce dall'alto)."""
+    s.blit(font.render(title, True, TEXT), (box.x, box.y))
+    lines = [ln for ln in lines if len(ln[1]) and np.nanmax(ln[1]) > 0]
+    area = pygame.Rect(box.x + 40, box.y + 20, box.w - 40 - LABEL_W, box.h - 20 - 16)
+    if not lines:
+        s.blit(font.render("(ancora niente)", True, DIM), (area.x, area.y + 10))
+        return
+    start = 1 if skip_first and len(lines[0][1]) > 3 else 0
+    if top is None:
+        top = nice(max(np.nanmax(v[start:]) for _, v, _, _ in lines) * 1.05)
+        if start and any(np.nanmax(v[:start]) > top for _, v, _, _ in lines):
+            s.blit(font.render("(primo minuto fuori scala)", True, DIM), (box.x + font.size(title)[0] + 10, box.y))
+    top = nice(top)
+    for f in (0.0, 0.5, 1.0):
+        y = area.bottom - area.h * f
+        pygame.draw.line(s, (44, 48, 60), (area.x, y), (area.right, y), 1)
+        img = font.render(fmt.format(top * f), True, DIM)
+        s.blit(img, (area.x - img.get_width() - 5, y - 7))
+    ends = []
+    for name, values, color, width in lines:
+        n = len(values)
+        xs = area.x + np.arange(n) * area.w / max(n - 1, 1)
+        pts = [(int(x), int(area.bottom - area.h * min(max(v, 0.0), top) / top)) for x, v in zip(xs, values)
+               if np.isfinite(v)]
+        if len(pts) > 1:
+            pygame.draw.lines(s, color, False, pts, width)
+        elif pts:
+            pygame.draw.circle(s, color, pts[0], 3)
+        if pts:
+            ends.append([pts[-1][1], f"{name} {fmt.format(values[-1])}", color])
+    ends.sort(key=lambda e: e[0])  # i nomi non si sovrappongono: si scostano di una riga
+    for k in range(1, len(ends)):
+        ends[k][0] = max(ends[k][0], ends[k - 1][0] + 13)
+    if ends and ends[-1][0] > area.bottom + 6:  # troppo in basso: il gruppo risale
+        ends[-1][0] = area.bottom + 6
+        for k in range(len(ends) - 2, -1, -1):
+            ends[k][0] = min(ends[k][0], ends[k + 1][0] - 13)
+    for y, text, color in ends:
+        s.blit(font.render(text, True, color), (area.right + 6, y - 7))
+    if len(minutes):
+        first, last = font.render(f"min {minutes[0]}", True, DIM), font.render(f"min {minutes[-1]}", True, DIM)
+        s.blit(first, (area.x, area.bottom + 3))
+        s.blit(last, (area.right - last.get_width(), area.bottom + 3))
 
 
 class ArenaOverview:
@@ -51,14 +105,14 @@ class ArenaOverview:
         if note:
             img = self.app.small.render(note, True, DIM)
             s.blit(img, (rect.right - img.get_width() - 14, rect.y + 13))
-        return rect.y + 36
+        return rect.y + 34
 
     def draw(self, s, area: pygame.Rect, eco) -> None:
         gap = 12
         half = (area.w - gap) // 2
         left = pygame.Rect(area.x, area.y, half, area.h)
         right = pygame.Rect(left.right + gap, area.y, area.w - half - gap, area.h)
-        top = pygame.Rect(left.x, left.y, left.w, 232)
+        top = pygame.Rect(left.x, left.y, left.w, 240)
         self._where(s, top, eco)
         self._population(s, pygame.Rect(left.x, top.bottom + gap, left.w, left.bottom - top.bottom - gap), eco)
         h3 = (right.h - 2 * gap) // 3
@@ -81,14 +135,14 @@ class ArenaOverview:
         current = next((k for k, d in enumerate(DIALS) if getattr(cfg, d) < 1.0), None)
         for k, (d, name) in enumerate(zip(DIALS, DIAL_NAMES)):
             v = getattr(cfg, d)
-            color = TARGET if v >= 1.0 else PLAYER if k == current and v > 0 else PLAYER if k == current else DIM
+            color = TARGET if v >= 1.0 else PLAYER if k == current else DIM
             pygame.draw.rect(s, (40, 44, 56), (x0, y + 4, 120, 9))
             pygame.draw.rect(s, color, (x0, y + 4, int(120 * v), 9))
             state = "fatto" if v >= 1.0 else ("in corso" if k == current else "da venire")
             s.blit(app.small.render(f"{k + 1}. {name}  {v:.0%}  ({state})", True,
                                     TEXT if current is None or k <= current else DIM),
                    (x0 + 130, y))
-            y += 17
+            y += 16
         recent = hist[-cfg.arena_dial_calm:]
         alone = 0
         for r in reversed(hist):
@@ -109,15 +163,22 @@ class ArenaOverview:
             text = (f"La popolazione non si regge ancora da sola: negli ultimi minuti sono arrivati {need} "
                     "colonizzatori. Il mondo non si complica finché non ce la fa"
                     + (", e se continua abbassa l'ultima novità." if any(getattr(cfg, d) > 0 for d in DIALS) else "."))
-        para(s, app.font, text, x0, y + 6, rect.w - 28)
+        para(s, app.small, text, x0, y + 4, rect.w - 28)
 
     # --- grafici -----------------------------------------------------------------
 
     def _series(self, hist, key, scale: float = 1.0):
         return np.array([float(r.get(key, 0.0) or 0.0) * scale for r in hist[-WINDOW:]])
 
-    def _plot_box(self, rect, y, legend_rows: int = 1) -> pygame.Rect:
-        return pygame.Rect(rect.x + 56, y + 18 * legend_rows + 4, rect.w - 72, rect.bottom - y - 18 * legend_rows - 52)
+    def _minutes(self, hist) -> list:
+        return [r["minute"] for r in hist[-WINDOW:]]
+
+    def _pair(self, rect, y, text_lines: int = 2):
+        """Due grafici affiancati sotto il titolo della sezione, con lo spazio
+        per `text_lines` righe di spiegazione sotto."""
+        h = rect.bottom - y - 14 * text_lines - 12
+        w = (rect.w - 28 - 16) // 2
+        return pygame.Rect(rect.x + 14, y, w, h), pygame.Rect(rect.x + 14 + w + 16, y, w, h)
 
     def _population(self, s, rect, eco) -> None:
         app, hist = self.app, eco.history
@@ -125,43 +186,47 @@ class ArenaOverview:
         if not hist:
             para(s, app.font, "Le misure arrivano a ogni minuto di mondo.", rect.x + 14, y, rect.w - 28, DIM)
             return
-        series = [(self._series(hist, "alive"), PLAYER, 2), (self._series(hist, "births"), GREEN, 1),
-                  (self._series(hist, "starved"), FOOD, 1), (self._series(hist, "thirst"), WATER, 1),
-                  (self._series(hist, "old_age"), GREY, 1),
-                  (self._series(hist, "killed"), PREDATOR, 1), (self._series(hist, "colonists"), MODULATOR, 1)]
-        legend(s, app.small, [(PLAYER, "vivi"), (GREEN, "nati/min"), (FOOD, "fame/min"), (WATER, "sete"),
-                              (GREY, "vecchiaia"), (PREDATOR, "predati"), (MODULATOR, "colonizzatori")],
-               rect.x + 14, y)
-        box = self._plot_box(rect, y)
-        top = max(max(v.max() for v, _, _ in series), 1.0)
-        plot(s, box, app.small, series, top, fmt="{:4.0f}")
+        mins = self._minutes(hist)
+        h = (rect.bottom - y - 50) // 2
+        a = pygame.Rect(rect.x + 14, y, rect.w - 28, h)
+        b = pygame.Rect(rect.x + 14, y + h + 6, rect.w - 28, h)
+        chart(s, a, app.small, "Quanti sono vivi", mins, [("vivi", self._series(hist, "alive"), PLAYER, 2)])
+        chart(s, b, app.small, "Ogni minuto: chi nasce, chi muore e perché, chi arriva da fuori", mins,
+              [("nati", self._series(hist, "births"), GREEN, 2),
+               ("fame", self._series(hist, "starved"), FOOD, 1),
+               ("sete", self._series(hist, "thirst"), WATER, 1),
+               ("vecchiaia", self._series(hist, "old_age"), GREY, 1),
+               ("predati", self._series(hist, "killed"), PREDATOR, 1),
+               ("colonizz.", self._series(hist, "colonists"), MODULATOR, 1)])
         r = hist[-1]
-        text = (f"Ultimo minuto: {r['alive']} vivi, {r['births']} nati ({r['mates']} con partner), "
-                f"{r['starved']} morti di fame, {r.get('thirst', 0)} di sete, {r['old_age']} di vecchiaia, "
-                f"{r.get('killed', 0)} predati, "
-                f"{r['colonists']} colonizzatori. Età media {r.get('age_mean', 0):.0f} s.")
-        para(s, app.small, text, rect.x + 14, box.bottom + 8, rect.w - 28)
+        text = (f"Ultimo minuto: {r['births']} nati ({r['mates']} con partner); morti {r['starved']} di fame, "
+                f"{r.get('thirst', 0)} di sete, {r['old_age']} di vecchiaia, {r.get('killed', 0)} predati; "
+                f"{r['colonists']} colonizzatori. Età media {r.get('age_mean', 0):.0f} s. "
+                + ("Si regge da sola quando i colonizzatori vanno a zero." if r["colonists"] else
+                   "Nessun colonizzatore: si regge da sola."))
+        para(s, app.small, text, rect.x + 14, b.bottom + 6, rect.w - 28)
 
     def _brains(self, s, rect, eco) -> None:
         app, hist = self.app, eco.history
         y = self._section(s, rect, "CERVELLO E CORPO", "in media sui vivi")
         if not hist:
             return
-        series = [(self._series(hist, "used"), TARGET, 2), (self._series(hist, "neurons"), MODULATOR, 1),
-                  (self._series(hist, "links", 0.1), GREY, 1), (self._series(hist, "size_mean"), GREEN, 1),
-                  (self._series(hist, "bite_mean"), FOOD, 1), (self._series(hist, "glow_mean"), FRUIT, 1)]
-        legend(s, app.small, [(TARGET, "sensi usati"), (MODULATOR, "neuroni"), (GREY, "collegam./10"),
-                              (GREEN, "taglia"), (FOOD, "morso"), (FRUIT, "luce")], rect.x + 14, y)
-        box = self._plot_box(rect, y)
-        top = max(max(v.max() for v, _, _ in series), 1.0)
-        plot(s, box, app.small, series, top, fmt="{:4.1f}")
+        mins = self._minutes(hist)
+        a, b = self._pair(rect, y)
+        chart(s, a, app.small, "Cervello", mins,
+              [("sensi", self._series(hist, "used"), TARGET, 2), ("neuroni", self._series(hist, "neurons"), MODULATOR, 2)],
+              fmt="{:.1f}")
+        chart(s, b, app.small, "Corpo e azioni (0-1)", mins,
+              [("taglia", self._series(hist, "size_mean"), GREEN, 1), ("morso", self._series(hist, "bite_mean"), FOOD, 1),
+               ("luce", self._series(hist, "glow_mean"), FRUIT, 1), ("odore", self._series(hist, "smell_mean"), GREY, 1)],
+              fmt="{:.2f}")
         r, first = hist[-1], hist[0]
         trend = r.get("used", 0) - first.get("used", 0)
-        text = (f"Sensi usati {r.get('used', 0):.2f} ({'+' if trend >= 0 else ''}{trend:.2f} dall'inizio), "
-                f"neuroni {r.get('neurons', 0):.2f}, taglia {r.get('size_mean', 0):.2f}. "
+        text = (f"Sensi usati = recettori collegati al cervello ({'+' if trend >= 0 else ''}{trend:.2f} dall'inizio); "
+                f"collegamenti {r.get('links', 0):.0f}. "
                 + ("I sensi calano: il mondo si lascia vivere alla cieca." if trend < -0.3 else
-                   "I sensi crescono: vedere e annusare conviene." if trend > 0.3 else ""))
-        para(s, app.small, text, rect.x + 14, box.bottom + 8, rect.w - 28)
+                   "I sensi crescono: vedere e annusare conviene." if trend > 0.3 else "I sensi sono stabili."))
+        para(s, app.small, text, rect.x + 14, a.bottom + 4, rect.w - 28)
 
     def _exam(self, s, rect, eco) -> None:
         app = self.app
@@ -180,11 +245,10 @@ class ArenaOverview:
             return
         a = np.array([r["score"] for r in normal]) * 100
         b = np.array([probe.get(r["generation"], np.nan) for r in normal]) * 100
-        legend(s, app.small, [(PLAYER, "normale"), (MODULATOR, "senza plasticità")], rect.x + 14, y)
-        box = self._plot_box(rect, y)
-        series = [(a, PLAYER, 2)] + ([(b[~np.isnan(b)], MODULATOR, 1)] if (~np.isnan(b)).any() else [])
-        plot(s, box, app.small, series, max(10.0, np.nanmax(a) * 1.2, np.nanmax(np.nan_to_num(b)) * 1.2),
-             fmt="{:3.0f}%")
+        box = pygame.Rect(rect.x + 14, y, rect.w - 28, rect.bottom - y - 40)
+        chart(s, box, app.small, "Riuscita all'esame (%)", [r["generation"] for r in normal],
+              [("normale", a, PLAYER, 2), ("senza plast.", b, MODULATOR, 2)], fmt="{:.0f}%",
+              top=max(10.0, np.nanmax(a), np.nanmax(np.nan_to_num(b))), skip_first=False)
         last = normal[-1]
         p = probe.get(last["generation"])
         text = f"Minuto {last['generation']}: {last['score']:.0%}"
@@ -193,7 +257,7 @@ class ArenaOverview:
             text += (f", senza plasticità {p:.0%}: " + ("imparano durante la vita." if d > 2 else
                                                          "la plasticità peggiora: si confondono." if d < -2 else
                                                          "nessuna differenza, per ora non imparano."))
-        para(s, app.small, text, rect.x + 14, box.bottom + 8, rect.w - 28)
+        para(s, app.small, text, rect.x + 14, box.bottom + 4, rect.w - 28)
 
     @staticmethod
     def _returns(r) -> str:
@@ -203,34 +267,29 @@ class ArenaOverview:
             return ""
         verdict = ("tornano prima: imparano dove sta l'acqua" if ratio < 0.8 else
                    "ci mettono di più che la prima volta" if ratio > 1.2 else "come la prima volta: non imparano")
-        return f"Chi ha già bevuto torna a bere in {ratio:.0%} del tempo della prima volta ({r['return_n']} esseri): {verdict}."
+        return f" Chi ha già bevuto torna a bere in {ratio:.0%} del tempo della prima volta: {verdict}."
 
     def _world(self, s, rect, eco) -> None:
         app, hist = self.app, eco.history
-        y = self._section(s, rect, "IL MONDO")
+        y = self._section(s, rect, "CIBO E ACQUA")
         if not hist:
             return
-        series = [(self._series(hist, "eaten"), FOOD, 2), (self._series(hist, "bad_eaten"), FRUIT, 1),
-                  (self._series(hist, "food", 0.1), GREY, 1), (self._series(hist, "patch_health", 100), GREEN, 1),
-                  (self._series(hist, "water_mean", 100), WATER, 1), (self._series(hist, "drink_gap"), DRINK, 1)]
-        legend(s, app.small, [(FOOD, "mangiati/min"), (FRUIT, "cattivi"), (GREY, "cibo/10"), (GREEN, "macchie %"),
-                              (WATER, "acqua %"), (DRINK, "s tra bevute")], rect.x + 14, y)
-        box = self._plot_box(rect, y)
-        top = max(max(v.max() for v, _, _ in series), 1.0)
-        plot(s, box, app.small, series, top, fmt="{:4.0f}")
+        mins = self._minutes(hist)
+        a, b = self._pair(rect, y)
+        chart(s, a, app.small, "Cibo (al minuto)", mins,
+              [("presente", self._series(hist, "food"), GREY, 1), ("mangiati", self._series(hist, "eaten"), FOOD, 2),
+               ("cattivi", self._series(hist, "bad_eaten"), FRUIT, 1)])
+        water = [("nei corpi %", self._series(hist, "water_mean", 100), WATER, 2)]
+        if any(r.get("patch_health", 1) < 0.995 for r in hist[-WINDOW:]):
+            water.append(("macchie %", self._series(hist, "patch_health", 100), GREEN, 1))
+        chart(s, b, app.small, "Acqua", mins, water + [("s tra bevute", self._series(hist, "drink_gap"), DRINK, 1)])
         r = hist[-1]
-        text = (f"Cibo presente {r['food']}, mangiati {r['eaten']} nell'ultimo minuto"
-                + (f", {r.get('bad_eaten', 0)} frutti cattivi" if r.get("bad_eaten") else "")
-                + (f"; salute media delle macchie {r.get('patch_health', 1):.0%}" if r.get("patch_health", 1) < 0.995
-                   else "")
-                + (f"; energia data ai figli {r.get('fed', 0):.0f}" if r.get("fed") else "")
-                + (f"; temperatura dove vivono {r['temp_mean']:.2f}" if "temp_mean" in r
+        text = ((f"{r['pools']} pozze; tra due bevute {r['drink_gap']:.0f} s." if r.get("drink_gap") and "pools" in r
+                 else f"{r.get('pools', 0)} pozze." if eco.cfg.arena_water else "Niente acqua (motore NumPy).")
+                + (f" Temperatura dove vivono {r['temp_mean']:.2f} (0 freddo, 1 caldo)." if "temp_mean" in r
                    and eco.cfg.arena_temperature > 0 else "")
-                + (f"; {r['pools']} pozze, acqua nei corpi {r.get('water_mean', 1):.0%}" if eco.cfg.arena_water
-                   and "pools" in r else "")
-                + (f"; tra due bevute {r['drink_gap']:.0f} s" if r.get("drink_gap") else "") + ". "
                 + self._returns(r))
-        para(s, app.small, text, rect.x + 14, box.bottom + 8, rect.w - 28)
+        para(s, app.small, text, rect.x + 14, a.bottom + 4, rect.w - 28)
 
 
 # --- Le reti -----------------------------------------------------------------------
