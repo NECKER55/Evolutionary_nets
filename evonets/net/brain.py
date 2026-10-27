@@ -67,7 +67,12 @@ PLASTIC = ("eta", "A", "B", "C", "D", "mod", "hebb", "target", "homeo", "persist
 # sviluppo e torna alla velocità dell'adulto con il tempo
 # τ_c = critical_initial_tau · e^closure (s di età, dal grembo):
 # η_h(età) = η_h · (1 + (B − 1) · e^(−età/τ_c)).
-GENES = PLASTIC + ("gain", "boost", "closure")
+# "elig": quanto dura la traccia di eleggibilità (docs/SPEC_FASE_E.md,
+# sezione "Traccia di eleggibilità"), τ_e = eligibility_initial_tau · e^gene:
+# la regola modulata non cambia subito la sinapsi, propone un cambiamento che
+# resta nella traccia; il modulatore che arriva dopo (piacere o dolore) lo
+# applica con il suo segno. È in coda: i salvataggi di prima lo ricevono a 0.
+GENES = PLASTIC + ("gain", "boost", "closure", "elig")
 
 
 # Un gene alza una velocità o una forza al più di e^12 volte (circa 160.000)
@@ -88,7 +93,8 @@ def sigmoid(x):
 
 
 # Le costanti della configurazione che usa `plasticity`.
-PLASTICITY_CONSTANTS = ("dt", "synapse_max", "homeo_tau", "capture_rate")
+PLASTICITY_CONSTANTS = ("dt", "synapse_max", "homeo_tau", "capture_rate", "surprise", "surprise_horizon",
+                        "surprise_smooth", "critic_rate")
 
 
 def frequencies(xp, x, centred: bool):
@@ -106,12 +112,26 @@ def plasticity(cfg, xp, p, pre, post, m, n_in: int, centred: bool):
     arriva a ogni neurone; `centred` per le reti continue (vedi
     `frequencies`). Le regole di Hebb e l'omeostasi usano le frequenze; la
     plasticità modulata, che è una regola scritta dai geni, i valori come
-    sono. Restituisce (pesi, traccia provvisoria, corrente di fondo, ā)."""
+    sono. Restituisce (pesi, traccia provvisoria, corrente di fondo, ā,
+    traccia di eleggibilità, critico)."""
     dt, top = cfg["dt"], cfg["synapse_max"]
+    senses = xp.maximum(pre[:, :n_in], 0.0)  # risposte dei recettori: già frequenze
     # I nuclei di valore proiettano su tutto il cervello: il gusto aggiunge M
     # positivo, il dolore M negativo (p["signal"]: gusto e dolore, (n, 2)).
-    m = m + (p["value"][:, 0] * p["signal"][:, 0] - p["value"][:, 1] * p["signal"][:, 1])[:, None]
-    senses = xp.maximum(pre[:, :n_in], 0.0)  # risposte dei recettori: già frequenze
+    reward = p["value"][:, 0] * p["signal"][:, 0] - p["value"][:, 1] * p["signal"][:, 1]
+    # Sorpresa (TD continuo, Doya 2000): il critico prevede dai sensi il piacere
+    # in arrivo, V = v·x; δ = piacere − V/orizzonte + dV/dt (dV/dt da una media
+    # lenta di V). Impara con δ sulla traccia dei sensi; si riparte a ogni vita.
+    c = p["critic"]
+    v, seen, slow = c[:, :n_in], c[:, n_in:2 * n_in], c[:, 2 * n_in]
+    value = (v * senses).sum(1)
+    delta = reward - value / cfg["surprise_horizon"] + (value - slow) / cfg["surprise_smooth"]
+    slow = slow + (dt / cfg["surprise_smooth"]) * (value - slow)
+    fade = xp.exp(-dt / cfg["surprise_horizon"])
+    seen = seen * fade + (1.0 - fade) * senses
+    v = xp.clip(v + cfg["critic_rate"] * dt * delta[:, None] * seen, -10.0, 10.0)
+    critic = xp.concatenate([v, seen, slow[:, None]], axis=1)
+    m = m + ((1.0 - cfg["surprise"]) * reward + cfg["surprise"] * delta)[:, None]
     rate_pre = xp.concatenate([senses, frequencies(xp, pre[:, n_in:], centred)], axis=1)
     rate_post = frequencies(xp, post, centred)
     avg = p["avg"] + (dt / cfg["homeo_tau"]) * (rate_post - p["avg"])
@@ -139,9 +159,14 @@ def plasticity(cfg, xp, p, pre, post, m, n_in: int, centred: bool):
     rule = p["rule"]
     drive = ((rule[..., 0] * post)[:, :, None] * pre[:, None, :] + rule[..., 1, None] * pre[:, None, :]
              + (rule[..., 2] * post + rule[..., 3])[:, :, None])
-    stable = xp.clip(stable + saturate(sign * (p["eta"] * m)[:, :, None] * drive * links), 0.0, top)
+    # Traccia di eleggibilità (Izhikevich 2007): la regola propone, la traccia
+    # ricorda la proposta per τ_e (media mobile: a regime vale la proposta), e
+    # il modulatore la applica con il suo segno quando arriva, anche dopo.
+    keep = p["elig_keep"][:, :, None]
+    elig = p["elig"] * keep + (1.0 - keep) * drive * links
+    stable = xp.clip(stable + saturate(sign * (p["eta"] * m)[:, :, None] * elig), 0.0, top)
     strength = xp.clip(stable + early, 0.0, top)
-    return sign * strength, strength - stable, bias, avg
+    return sign * strength, strength - stable, bias, avg, elig, critic
 
 
 def clamp_meta(meta: np.ndarray, cfg: Config) -> None:
@@ -152,6 +177,15 @@ def clamp_meta(meta: np.ndarray, cfg: Config) -> None:
     for name, top in CEILING.items():
         k = META_INDEX[name]
         meta[:, k] = np.minimum(meta[:, k], np.log(top))
+
+
+def fit_traits(g: "Genome", n_traits: int) -> "Genome":
+    """I geni propri dei neuroni nati dopo un salvataggio (in coda) ricevono
+    0: il valore di partenza. Restituisce lo stesso genoma."""
+    missing = n_traits - g.traits.shape[2]
+    if missing > 0:
+        g.traits = np.concatenate([g.traits, np.zeros(g.traits.shape[:2] + (missing,))], axis=2)
+    return g
 
 
 def live_links(conn: np.ndarray, active: np.ndarray, r_active: np.ndarray) -> np.ndarray:
@@ -475,7 +509,8 @@ class Brains:
                  f"omeostasi della soglia: forza h0 x {np.exp(intrinsic):.2g}",
                  f"guadagno degli ingressi (sviluppo): x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC)]):.2g}",
                  f"periodo critico: hebbiano x B0 x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC) + 1]):.2g}"
-                 f" all'inizio, si chiude in τ0 x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC) + 2]):.2g}"]
+                 f" all'inizio, si chiude in τ0 x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC) + 2]):.2g}",
+                 f"traccia di eleggibilità: dura τ0 x {np.exp(traits[cls.BASE_TRAITS + len(PLASTIC) + 3]):.2g}"]
         if hidden:
             lines.append("modulatore: sì (non trasmette, rilascia M)" if mod > 0
                          else f"modulatore: no (gene {mod:+.2f})")
@@ -509,6 +544,7 @@ class Brains:
         t = genome.traits[:, :, self.BASE_TRAITS:]
         t[..., 0] = rng.normal(0.0, 0.5, t.shape[:2])
         t[..., 1:5] = rng.normal(0.0, cfg.plasticity_initial_rule, t.shape[:2] + (4,))
+        t[..., 1] += cfg.plasticity_innate_rule  # regola innata: A·pre·post (vedi Config)
         offset = NormalDist().inv_cdf(1.0 - cfg.modulatory_initial_share)
         t[..., 5] = rng.normal(0.0, 1.0, t.shape[:2]) - offset
         t[..., 6] = rng.normal(0.0, 0.5, t.shape[:2])  # hebbiano di base: debole e diverso da individuo a individuo
@@ -516,6 +552,7 @@ class Brains:
         t[..., 8] = rng.normal(0.0, 0.5, t.shape[:2])  # forza debole e casuale
         t[..., 9] = rng.normal(0.0, 0.5, t.shape[:2])  # durata della traccia provvisoria
         t[..., 10] = rng.normal(0.0, 0.5, t.shape[:2])  # omeostasi della soglia: debole e casuale
+        t[..., len(PLASTIC) + 3] = 0.0  # traccia di eleggibilità: uguale per tutti alla partenza, poi muta
 
     def _init_genes(self, cfg: Config, rng: np.random.Generator, genome: Genome) -> None:
         """Per i tipi di rete che hanno geni con una distribuzione iniziale propria."""
@@ -544,7 +581,7 @@ class Brains:
         self.reset_state()
 
     # Ciò che cambia durante una vita: lo stato della rete e ciò che si è imparato.
-    LIVE = ("w_eff", "early", "bias_now", "avg", "clock", "state", "charge", "spikes")
+    LIVE = ("w_eff", "early", "elig", "critic", "bias_now", "avg", "clock", "state", "charge", "spikes")
 
     def replace(self, rows: np.ndarray, genome: Genome) -> None:
         """Gli individui `rows` diventano `genome` (una riga per ciascuno, con
@@ -598,6 +635,7 @@ class Brains:
         self.homeo = cfg.homeo_initial_rate * scale_gene(p[..., 8])  # (N, T): h, per secondo
         self.intrinsic = cfg.homeo_initial_rate * scale_gene(p[..., 10])  # (N, T), per secondo
         self.early_keep = np.exp(-cfg.dt / (cfg.early_initial_tau * scale_gene(p[..., 9])))  # (N, T), per passo
+        self.elig_keep = np.exp(-cfg.dt / (cfg.eligibility_initial_tau * scale_gene(d[..., 2])))  # (N, T), per passo
         self.kmod = np.exp(-self.dist[:, :, R : R + H] / cfg.modulation_range) * mod[:, None, :]
         # Chi impara: con l'hebbiano di base e l'omeostasi, tutti (salvo plasticità spenta).
         self.learns = np.full(self.n, cfg.plasticity) & (
@@ -655,6 +693,8 @@ class Brains:
         self.clock = np.where(born, self.cfg.prenatal_time, 0.0) + self.lived
         self.avg = np.where(np.isfinite(g.born_avg), g.born_avg, self.target_act)
         self.early = np.zeros_like(self.w_eff)
+        self.elig = np.zeros_like(self.w_eff)
+        self.critic = np.zeros((self.n, 2 * self.n_in + 1))  # sorpresa: il critico riparte a ogni vita
         self.bias_now = np.where(np.isfinite(g.born_bias), g.born_bias, self.bias)
         self._subset = None
 
@@ -748,13 +788,15 @@ class Brains:
         pre = self._pre(obs[local], before[local], after[local])  # (n, S)
         post = after[local]  # (n, T)
         m = np.einsum("nth,nh->nt", self.kmod[who], after[local, :H] * self._mod_sign[who])
-        p = {k: getattr(self, k)[who] for k in ("w_eff", "early", "bias_now", "avg", "sign", "links", "target_act",
-                                                "homeo", "intrinsic", "hebb", "eta", "rule", "early_keep", "boost",
+        p = {k: getattr(self, k)[who] for k in ("w_eff", "early", "elig", "critic", "bias_now", "avg", "sign", "links",
+                                                "target_act", "homeo", "intrinsic", "hebb", "eta", "rule", "early_keep",
+                                                "elig_keep", "boost",
                                                 "closure", "clock", "value")}
         p["signal"] = np.zeros((len(who), 2)) if signal is None else signal[local]
         consts = {k: getattr(self.cfg, k) for k in PLASTICITY_CONSTANTS}
-        w, early, bias, avg = plasticity(consts, np, p, pre, post, m, self.n_in, self.CENTRED)
+        w, early, bias, avg, elig, critic = plasticity(consts, np, p, pre, post, m, self.n_in, self.CENTRED)
         self.w_eff[who], self.early[who], self.bias_now[who], self.avg[who] = w, early, bias, avg
+        self.elig[who], self.critic[who] = elig, critic
         if sub is not None:
             sub["w_eff"][local], sub["bias_now"][local] = w, bias
         elif self._subset is not None:

@@ -45,7 +45,8 @@ PHYS = (
     "toxin_molecule", "hazard_smell", "target_molecule", "target_smell", "smell_range", "vibration_range",
     "target_vibration", "target_vibration_freq", "hazard_vibration", "hazard_vibration_freq",
     "ambient_temperature", "heat_range", "target_heat", "hazard_heat", "receptor_dark", "receptor_saturation",
-    "sensor_noise", "synapse_max", "homeo_tau", "capture_rate", "taste_tau", "spike_gain", "life_max",
+    "sensor_noise", "synapse_max", "homeo_tau", "capture_rate", "surprise", "surprise_horizon", "surprise_smooth",
+    "critic_rate", "taste_tau", "spike_gain", "life_max",
     # Il mondo del cibo.
     "prey_flee_range", "predator_range", "predator_radius", "predator_damage", "food_energy", "food_min_dist",
     "predator_vibration", "predator_vibration_freq",
@@ -263,11 +264,12 @@ def learn(ph, P, s, pre, post, after_hidden, racing, centred):
     """Come `Brains._learn` (la stessa `brain.plasticity`), solo per chi
     impara ed è in gara. Restituisce lo stato della plasticità aggiornato."""
     M = jnp.einsum("nth,nh->nt", P["kmod"], after_hidden * P["mod_sign"])
-    p = {**P, "w_eff": s["w"], "early": s["early"], "bias_now": s["bias_now"], "avg": s["avg"], "clock": s["clock"],
-         "signal": jnp.stack([s["taste"], s["pain"]], 1)}
-    w, early, bias, avg = plasticity(ph, jnp, p, pre, post, M, P["active"].shape[1], centred)
+    p = {**P, "w_eff": s["w"], "early": s["early"], "elig": s["elig"], "critic": s["critic"], "bias_now": s["bias_now"], "avg": s["avg"],
+         "clock": s["clock"], "signal": jnp.stack([s["taste"], s["pain"]], 1)}
+    w, early, bias, avg, elig, critic = plasticity(ph, jnp, p, pre, post, M, P["active"].shape[1], centred)
     on = (P["learns"] * racing)[:, None] > 0
     return dict(w=jnp.where(on[:, :, None], w, s["w"]), early=jnp.where(on[:, :, None], early, s["early"]),
+                elig=jnp.where(on[:, :, None], elig, s["elig"]), critic=jnp.where(on, critic, s["critic"]),
                 bias_now=jnp.where(on, bias, s["bias_now"]), avg=jnp.where(on, avg, s["avg"]),
                 clock=s["clock"] + ph["dt"] * racing)  # l'età avanza per chi è in gara
 
