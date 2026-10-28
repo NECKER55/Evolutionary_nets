@@ -16,15 +16,16 @@ import time
 import numpy as np
 import pygame
 
-from ..net.sections import BITE, FAST, FOVEA, MOTOR, N_A, N_HEADS, fovea_of
-from ..sim.pile import (BUMP, ENERGY, F_INPUTS, F_NEURONS, N_PROGRAMS, N_SENSES, PAIN, PROGRAMS, RAY, RAYS, SECTORS,
-                        SENSES, TASTE, WALL_COLOURS, WATCHED, objects_of)
+from ..net.sections import BITE, FAST, FOVEA, MAP, MOTOR, N_A, N_HEADS, fovea_of
+from ..sim.pile import (BUMP, ENERGY, F_INPUTS, F_NEURONS, FEATURES, N_PROGRAMS, N_SENSES, PAIN, PROGRAMS, RAY, RAYS,
+                        SECTORS, SENSES, TASTE, WALL_COLOURS, WATCHED, battery_good, objects_of)
 from .launcher import Screen
 from .render import BG, BORDER, DIM, PLAYER, TARGET, TEXT
 
 RED_C, YELLOW_C, BLUE_C = (235, 80, 70), (240, 210, 60), (90, 130, 255)
 BEING_C = (150, 200, 160)
 ME_C = (110, 230, 255)  # l'essere seguito (non giallo: si confonderebbe con le pile gialle)
+TEACHER_C = (255, 190, 60)  # il maestro (oro, con la corona)
 POS, NEG = (90, 220, 120), (240, 90, 80)  # rafforza, indebolisce
 FIXED = (95, 100, 120)  # collegamenti fissi
 DELTA_C = (200, 120, 255)  # la sorpresa
@@ -37,7 +38,7 @@ EYE_ROWS = (("rosso", RED_C), ("giallo", YELLOW_C), ("blu", BLUE_C)) + tuple(
     (f"muro {c}", col) for c, col in zip(WALL_COLOURS, WALL_C))
 PROG_SHORT = ("avvicinati", "allontanati", "lascialo", "esplora", "mordi")
 F_SHORT = ("vai verso", "vai via", "guarda altro", "vaga")
-FOVEA_SHORT = ("fov. rosso", "fov. giallo", "fov. blu", "fov. vicino", "fov. sinistra", "fov. destra", "fov. nuovo")
+FOVEA_SHORT = tuple(f"fov. {f}" for f in FEATURES) + ("fov. vicino", "fov. sinistra", "fov. destra", "fov. nuovo")
 
 SECTION_HELP = {
     "A": ("A  interfaccia dei sensi (fissa)",
@@ -65,9 +66,19 @@ SECTION_HELP = {
           "indietro), più il riflesso dei muri. Non impara nella vita; i suoi pesi sono geni (fase B). Il morso "
           "lo decide E."),
     "S": ("S  attenzione: su cosa mi concentro",
-          "Un oggetto alla volta (pila o compagno), scelto per salienza: innata (vicino, appena comparso, un po' "
-          "di inerzia, e chi è stato appena lasciato si ignora per 3 s) più imparata (un peso per colore, che δ "
-          "cambia: ciò che ha portato sorprese positive cattura lo sguardo). Le barre sono i pesi imparati."),
+          "Una mappa di priorità fatta di posizioni (come il collicolo superiore): 9 neuroni-direzione, da sinistra "
+          "a destra, ognuno con l'oggetto più vicino in quella direzione; più è acceso, più è probabile che lo "
+          "sguardo vada lì (anello: dove va adesso). S non impara: sotto ogni neurone, le quattro cose che somma: "
+          "la salienza innata (grigio: vicino, nuovo, inerzia, inibizione del ritorno) e ciò che O dice "
+          "dell'oggetto: il valore (verde se attira, rosso se respinge), l'importanza (arancio: conta, buono o "
+          "cattivo che sia) e l'incertezza (viola)."),
+    "O": ("O  valore degli oggetti: che cosa fa bene, che cosa fa male",
+          "Come la corteccia orbitofrontale: per ogni caratteristica (e lo sfondo), quanto piacere (verde) e quanto "
+          "dolore (rosso) porta di solito, e quanto è incerta (viola). Impara quando il corpo sente qualcosa: alla "
+          "fine dell'episodio, il merito va a ciò che si aveva in mente prima, con le caratteristiche in "
+          "competizione (Rescorla-Wagner); anche da ciò che succede al maestro. Il valore di adesso è piacere × "
+          "fame − dolore: da sazi il cibo vale meno senza imparare niente. In alto i due neuroni di uscita, letti "
+          "da E e dal critico: quanto vale ciò che guardo, e ciò che ho appena preso."),
     "V": ("V  critico: va meglio o peggio del previsto?",
           "Prevede quanto bene arriverà da B, D, C. δ = ciò che arriva meno ciò che prevedeva: positivo = meglio "
           "del previsto. È il maestro interno: le linee viola lo portano a chi impara."),
@@ -121,6 +132,9 @@ class PileScreen(Screen):
         self.view = run.view(0, 0)
         self.rate = 0.0
         self.last = time.perf_counter()
+        self.teach = (False, 0.0)  # (c'è il maestro, quanto imparano ancora da lui)
+        self.teach_hist: list = []  # (t, errore), ogni 5 s di mondo
+        self.teach_lesson = [0.0, 0.0]
 
     # --- il tempo -------------------------------------------------------------
 
@@ -167,6 +181,11 @@ class PileScreen(Screen):
         p = self.view[0]["pos"][self.follow]
         self.trail.append((float(p[0]), float(p[1])))
         del self.trail[:-300]
+        if hasattr(self.run, "teaching"):
+            self.teach = self.run.teaching()
+            if self.teach[0] and (not self.teach_hist or self.run.t - self.teach_hist[-1][0] >= 5.0):
+                self.teach_hist.append((self.run.t, self.teach[1]))
+                del self.teach_hist[:-240]
 
     # --- comandi --------------------------------------------------------------
 
@@ -201,6 +220,12 @@ class PileScreen(Screen):
                 self._save()
             elif k == pygame.K_p and not self.testing:
                 self._test_networks()
+            elif k == pygame.K_m and not self.testing and self.run.agent == "sezioni":
+                on = not self.teach[0]
+                self.run.set_teacher(on)
+                self.teach = self.run.teaching()
+                self.message = (f"maestro messo al minuto {self.run.t / 60:.1f}" if on else
+                                f"maestro tolto al minuto {self.run.t / 60:.1f}: al suo posto un giovane")
             elif k == pygame.K_SPACE:
                 self.paused = not self.paused
             elif k == pygame.K_t:
@@ -268,6 +293,8 @@ class PileScreen(Screen):
         les = f", senza {','.join(sorted(les))}" if les else ""
         head = (f"Arena delle pile — {r.agent}{les}, fase {r.phase} — recinto {self.encl + 1}/{r.B} "
                 f"— essere {self.follow + 1}/{r.n}")
+        if self.teach[0] and self.follow == 0:
+            head += " (il maestro)"
         if self.testing:
             head = f"Prova delle reti una a una — {r.agent}{les} — rete {self.encl + 1}/{r.B}, da sola nel suo recinto"
         s.blit(app.font.render(head, True, PLAYER), (16, 12))
@@ -288,15 +315,17 @@ class PileScreen(Screen):
             r.center = P(c)
             pygame.draw.rect(s, (52, 62, 40) if z == int(w["zone"]) else ZONE_C, r, 0 if z == int(w["zone"]) else 1)
         s.set_clip(box)  # la vista e le scie restano nel recinto
-        good = int(w["good"])
+        good_now = battery_good(cfg, np.asarray(w["bcolor"])[None], np.asarray(w["bbig"])[None],
+                                np.atleast_1d(np.asarray(w["good"])))[0]
         for k in range(cfg.batteries):
             if not w["bon"][k]:
                 continue
             col = RED_C if int(w["bcolor"][k]) == 0 else YELLOW_C
             c = P(w["bpos"][k])
-            pygame.draw.circle(s, col, c, max(3, int(cfg.battery_radius * sc)))
-            if int(w["bcolor"][k]) == good:
-                pygame.draw.circle(s, (230, 240, 230), c, max(4, int(cfg.battery_radius * sc)) + 2, 1)
+            rad = max(3, int(cfg.battery_radius * sc * (1.4 if int(w["bbig"][k]) else 0.8)))  # grande o piccola
+            pygame.draw.circle(s, col, c, rad)
+            if bool(good_now[k]):
+                pygame.draw.circle(s, (230, 240, 230), c, rad + 2, 1)
         # La vista e i raggi dell'essere seguito.
         i = self.follow
         me, hd = w["pos"][i], float(w["heading"][i])
@@ -311,7 +340,7 @@ class PileScreen(Screen):
         for k in range(cfg.batteries):  # le pile di nuovo sopra il velo, nitide
             if w["bon"][k]:
                 pygame.draw.circle(s, RED_C if int(w["bcolor"][k]) == 0 else YELLOW_C, P(w["bpos"][k]),
-                                   max(3, int(cfg.battery_radius * sc)))
+                                   max(3, int(cfg.battery_radius * sc * (1.4 if int(w["bbig"][k]) else 0.8))))
         for r_, a in enumerate(RAYS):
             end = me + (cfg.ray_range + cfg.radius) * np.array([np.cos(hd + a), np.sin(hd + a)])
             pygame.draw.line(s, lerp((60, 66, 84), (255, 150, 60), raw[i, 9 + r_]), P(me), P(end), 1)
@@ -320,10 +349,21 @@ class PileScreen(Screen):
         for j in range(self.run.n):
             c = P(w["pos"][j])
             rad = max(4, int(cfg.radius * sc))
-            col = ME_C if j == i else BEING_C
+            teacher = self.teach[0] and j == 0
+            col = ME_C if j == i else (TEACHER_C if teacher else BEING_C)
             if w["charging"][j] > 0:
                 col = lerp(col, (255, 255, 255), 0.5)
-            pygame.draw.circle(s, col, c, rad, 0 if j == i else 2)
+            ghost = bool(np.asarray(w.get("ghost", np.zeros(self.run.n, bool)))[j])
+            if ghost:  # il fantasma: solo il contorno, tratteggiato
+                for k in range(0, 360, 40):
+                    a0 = np.radians(k)
+                    pygame.draw.arc(s, col, (c[0] - rad, c[1] - rad, 2 * rad, 2 * rad), a0, a0 + np.radians(22), 2)
+            else:
+                pygame.draw.circle(s, col, c, rad, 0 if j == i else 2)
+            if teacher:  # la corona
+                cx, cy = c[0], c[1] - rad - 4
+                pygame.draw.polygon(s, TEACHER_C, [(cx - 7, cy + 3), (cx - 7, cy - 4), (cx - 3, cy), (cx, cy - 6),
+                                                   (cx + 3, cy), (cx + 7, cy - 4), (cx + 7, cy + 3)])
             tip = w["pos"][j] + cfg.radius * 1.4 * np.array([np.cos(w["heading"][j]), np.sin(w["heading"][j])])
             pygame.draw.circle(s, BLUE_C, P(tip), 3)
         if bool(self.view[1].get("bite", False)):  # la bocca aperta: morde
@@ -348,7 +388,10 @@ class PileScreen(Screen):
         app, r, w = self.app, self.run, self.view[0]
         i = self.follow
         x, y = 16, 552
-        good = "rossa" if int(w["good"]) == 0 else "gialla"
+        if self.cfg.good_by == "grandezza":
+            good = "grande" if int(w["good"]) == 1 else "piccola"
+        else:
+            good = "rossa" if int(w["good"]) == 0 else "gialla"
         line = lambda txt, col=TEXT: (s.blit(app.small.render(txt, True, col), (x, line.y)), setattr(line, "y", line.y + 16))
         line.y = y
         line(f"ora la pila buona è la {good} (cerchio bianco); zona attiva evidenziata", TEXT)
@@ -377,9 +420,30 @@ class PileScreen(Screen):
                  + (f", scelta {me['scelta']:.0%} ({rank}ª su {len(done)})" if rank else ""), PLAYER)
             line("PagSu/Giù: rete precedente / successiva   +/-: velocità   Esc: torna alla corsa", DIM)
         else:
-            line("clic o Tab: segui   PagSu/Giù: recinto   P: prova le reti una a una   Ctrl+S: salva", DIM)
+            line("clic/Tab: segui  PagSu/Giù: recinto  P: reti una a una  Ctrl+S: salva", DIM)
+        if self.teach[0]:
+            kind = getattr(self.run, "teacher_kind", "fantasma")
+            line(f"maestro {kind}: con la corona" + (", tratteggiato" if kind == "fantasma" else "")
+                 + "; M lo toglie", TEACHER_C)
+            line(f"quanto imparano ancora da lui: {self.teach[1]:.3f}", TEACHER_C)
+            self._teach_curve(s, x + 420, line.y - 32)
+        elif not self.testing and r.agent == "sezioni":
+            line("M: metti un maestro in ogni recinto", DIM)
         if self.message:
             line(self.message, TARGET)
+
+    def _teach_curve(self, s, x, y):
+        """La curva di quanto si impara ancora dal maestro: quando si appiattisce,
+        da lui non c'è più molto da imparare."""
+        h = self.teach_hist
+        r = pygame.Rect(x, y, 90, 30)
+        pygame.draw.rect(s, BORDER, r, 1)
+        if len(h) < 2:
+            return
+        v = np.array([e for _, e in h])
+        top = max(float(v.max()), 1e-6)
+        pts = [(r.x + 1 + int(88 * k / (len(v) - 1)), r.bottom - 2 - int(26 * e / top)) for k, e in enumerate(v)]
+        pygame.draw.lines(s, TEACHER_C, False, pts, 1)
 
     # --- il cervello ----------------------------------------------------------
 
@@ -416,7 +480,9 @@ class PileScreen(Screen):
         self._reflex_pos = A_pos[RAY.start + 1]
         E_pos = self._section_E(s, xs["E"], top + 40, br, agent)
         self._section_F(s, xs["F"], E_pos, br, agent)
-        self._section_S(s, xs["E"], E_pos[-1][1] + 70, br)
+        self._section_S(s, xs["E"], E_pos[-1][1] + 50, br)
+        if agent == "sezioni":
+            self._section_O(s, xs["C"] + 10, area.bottom - 150, br, world)
         if agent == "guidato":
             fov = N_SENSES + len(FAST)
             self._links(s, [(A_pos[fov + k], E_pos[0], 0.8, FIXED) for k in range(3)])
@@ -435,48 +501,95 @@ class PileScreen(Screen):
         C_pos = self._section_C(s, xs["C"], top, br, B_pos, D_pos, E_pos)
         f = np.concatenate([br["state_b"], br["mem"], [1.0]])
         self._weights_to_E(s, br["w_e"], B_pos + D_pos, f, E_pos, limit=10)
-        self._section_V(s, xs["C"] + 20, area.bottom - 120, br,
+        self._section_V(s, xs["D"] - 50, area.bottom - 150, br,
                         [C_pos[0], E_pos[0], D_pos[len(D_pos) // 2]])
         self._legend(s, area)
 
     LABELS = {"A": "A sensi", "B": "B cosa c'è", "D": "D appena", "C": "C/L ricordi", "E": "E scelta",
-              "F": "F motore", "V": "V critico (δ)", "U": "U", "S": "S attenzione"}
+              "F": "F motore", "V": "V critico (δ)", "U": "U", "S": "S attenzione", "O": "O valore"}
 
     def _objects(self, world):
         """Gli oggetti in vista nel recinto guardato (1, n, M)."""
         cfg = self.cfg
-        return objects_of(world["pos"][None], world["heading"][None], world["bpos"][None],
-                          np.asarray(world["bcolor"])[None], np.asarray(world["bon"], bool)[None], cfg)
+        bcolor, bbig = np.asarray(world["bcolor"])[None], np.asarray(world["bbig"])[None]
+        good = battery_good(cfg, bcolor, bbig, np.atleast_1d(np.asarray(world["good"])))
+        ghost = world.get("ghost")
+        extra = {} if ghost is None else {"ghost": np.asarray(ghost, bool)[None],
+                                          "ghost_hide": np.asarray(world["ghost_hide"])[None]}
+        return objects_of(world["pos"][None], world["heading"][None], np.asarray(world["speed"])[None],
+                          world["bpos"][None], bcolor, bbig, np.asarray(world["bon"], bool)[None], good, cfg, **extra)
 
     def _attended(self, world, br):
-        """(c'è, colore, vicinanza, angolo, indice) dell'oggetto attento dall'essere seguito."""
+        """(c'è, caratteristiche, vicinanza, angolo, indice) dell'oggetto attento dall'essere seguito."""
         t = int(br.get("att_target", -1))
         if t < 0:
-            return False, 0, 0.0, 0.0, -1
+            return False, np.zeros(len(FEATURES)), 0.0, 0.0, -1
         o = self._objects(world)
         i = self.follow
-        return True, int(o["col"][0, i, t]), float(o["near"][0, i, t]), float(o["ang"][0, i, t]), t
+        return True, o["feat"][0, i, t], float(o["near"][0, i, t]), float(o["ang"][0, i, t]), t
 
     def _fovea(self, world, br):
-        has, col, near, ang, _ = self._attended(world, br)
-        return fovea_of(np.array([col]), np.array([near]), np.array([ang]), np.array([has]),
+        has, feat, near, ang, _ = self._attended(world, br)
+        return fovea_of(feat[None], np.array([near]), np.array([ang]), np.array([has]),
                         np.array([float(br.get("att_new", 0.0))]))[0]
 
     def _section_S(self, s, x, y, br):
+        """S: la mappa di priorità (9 posizioni, da sinistra a destra) e, sotto
+        ogni posizione, le quattro parti che somma (innata, valore, importanza,
+        incertezza)."""
         app = self.app
         self._label(s, "S", x - 4, y - 22)
-        r = pygame.Rect(x, y, 200, 48)
+        r = pygame.Rect(x, y, 230, 92)
         pygame.draw.rect(s, (30, 34, 46), r)
         pygame.draw.rect(s, BORDER, r, 1)
-        w = br.get("att_w", np.zeros(3))
-        for k, (name, col) in enumerate((("rosso", RED_C), ("giallo", YELLOW_C), ("blu", BLUE_C))):
-            yy = r.y + 6 + k * 14
-            s.blit(app.small.render(name, True, col), (r.x + 6, yy - 2))
-            mid = r.x + 120
-            v = float(np.clip(w[k] / 3.0, -1.0, 1.0))
-            pygame.draw.line(s, BORDER, (mid, yy), (mid, yy + 10), 1)
-            pygame.draw.rect(s, POS if v > 0 else NEG, (min(mid, mid + int(70 * v)), yy + 2, abs(int(70 * v)), 7))
+        prob = np.asarray(br.get("att_prob", np.zeros(MAP)))
+        has = np.asarray(br.get("att_has", np.zeros(MAP, bool)))
+        parts = np.asarray(br.get("att_parts", np.zeros((MAP, 4))))
+        place = int(np.argmax(prob)) if prob.sum() > 0 else -1
+        colours = ((150, 150, 165), None, (240, 160, 70), DELTA_C)
+        for k in range(MAP):
+            c = (r.x + 14 + k * 24, r.y + 13)
+            v = float(prob[k])
+            pygame.draw.circle(s, lerp((40, 44, 58), (250, 230, 140), min(1.0, 2 * v)) if has[k] else (26, 28, 36), c, 8)
+            pygame.draw.circle(s, PLAYER if k == place and v > 0 else BORDER, c, 8, 2 if k == place else 1)
+            if not has[k]:
+                continue
+            base = r.y + 50  # le quattro parti: barrette verso l'alto (attira) o il basso (respinge)
+            for j in range(4):
+                val = float(np.clip(parts[k, j] / 2.0, -1.0, 1.0))
+                col = (POS if val > 0 else NEG) if j == 1 else colours[j]
+                h = int(20 * abs(val))
+                pygame.draw.rect(s, col, (c[0] - 8 + 4 * j, base - h if val > 0 else base, 3, max(h, 1)))
+        pygame.draw.line(s, BORDER, (r.x + 4, r.y + 50), (r.right - 4, r.y + 50), 1)
+        s.blit(app.small.render("barre: innata, valore,", True, DIM), (r.x + 6, r.y + 56))
+        s.blit(app.small.render("importanza, incertezza", True, DIM), (r.x + 6, r.y + 72))
         self.targets.append((r, ("section", "S")))
+
+    def _section_O(self, s, x, y, br, world):
+        """O: per ogni caratteristica, piacere (verde), dolore (rosso),
+        incertezza (viola); in alto i due neuroni di uscita."""
+        app = self.app
+        self._label(s, "O", x - 4, y - 22)
+        r = pygame.Rect(x, y, 170, 112)
+        pygame.draw.rect(s, (30, 34, 46), r)
+        pygame.draw.rect(s, BORDER, r, 1)
+        n_f = len(FEATURES)
+        pl = np.asarray(br.get("o_pl", np.zeros(n_f + 1)))
+        pa = np.asarray(br.get("o_pa", np.zeros(n_f + 1)))
+        un = np.asarray(br.get("o_assoc", np.zeros(n_f + 1)))
+        out = np.asarray(br.get("o_out", np.zeros(2)))
+        s.blit(app.small.render(f"guardo {out[0]:+.2f} preso {out[1]:+.2f}", True,
+                                POS if out[0] > 0 else (NEG if out[0] < 0 else TEXT)), (r.x + 5, r.y + 2))
+        for k, name in enumerate(FEATURES + ("sfondo",)):
+            yy = r.y + 19 + k * 13
+            s.blit(app.small.render(name[:8], True, TEXT if k < n_f else DIM), (r.x + 5, yy - 3))
+            for j, (v, col) in enumerate(((pl[k], POS), (pa[k], NEG))):
+                w = int(30 * float(np.clip(abs(v), 0.0, 1.0)))
+                xx = r.x + 72 + 34 * j
+                pygame.draw.rect(s, BORDER, (xx, yy + 1, 30, 7), 1)
+                pygame.draw.rect(s, col if v >= 0 else lerp(col, (40, 40, 40), 0.6), (xx, yy + 1, w, 7))
+            pygame.draw.rect(s, DELTA_C, (r.x + 142, yy + 1, int(24 * float(np.clip(un[k], 0.0, 1.0))), 7))
+        self.targets.append((r, ("section", "O")))
 
     def _links(self, s, links):
         """Collegamenti semplici: (da, a, forza 0-1, colore)."""
@@ -541,7 +654,7 @@ class PileScreen(Screen):
         y += 6
         fov = N_SENSES + len(FAST)
         fovea_pos = []
-        colours = [RED_C, YELLOW_C, BLUE_C] + [ME_C] * 4
+        colours = [RED_C, YELLOW_C, BLUE_C, TEXT, TEXT, BEING_C] + [ME_C] * 4
         for f in range(len(FOVEA)):
             v = float(a[fov + f])
             s.blit(app.small.render(FOVEA_SHORT[f], True, lerp(DIM, colours[f], 0.4 + 0.6 * v)), (x, y))
@@ -730,11 +843,11 @@ class PileScreen(Screen):
                 pygame.draw.line(s, lerp((60, 50, 80), DELTA_C, min(abs(d) * 20, 1.0)), (mid, r.y), t, 1)
         if "unc" in br:
             u = float(br["unc"]) / 3.0
-            ru = pygame.Rect(r.right + 14, y, 80, 40)
+            ru = pygame.Rect(r.x, r.bottom + 6, 130, 34)
             pygame.draw.rect(s, (30, 34, 46), ru)
             pygame.draw.rect(s, BORDER, ru, 1)
-            pygame.draw.rect(s, lerp((80, 80, 120), DELTA_C, u), (ru.x + 6, ru.y + 8, int(68 * u), 10))
-            s.blit(app.small.render(f"U {float(br['unc']):.2f}", True, TEXT), (ru.x + 6, ru.y + 24))
+            pygame.draw.rect(s, lerp((80, 80, 120), DELTA_C, u), (ru.x + 6, ru.y + 6, int(118 * u), 8))
+            s.blit(app.small.render(f"U {float(br['unc']):.2f}", True, TEXT), (ru.x + 6, ru.y + 17))
             self.targets.append((ru, ("section", "U")))
 
     def _legend(self, s, area):
@@ -846,6 +959,8 @@ class PileScreen(Screen):
                  "l'incertezza. Passa il mouse su qualsiasi cosa per la spiegazione.", "",
                  "Comandi: clic o Tab segue un essere, PagSu/PagGiù cambia recinto, +/- velocità, T turbo,",
                  "Spazio pausa, Ctrl+S salva, P prova le reti una a una (ognuna da sola nel suo recinto),",
+                 "M mette o toglie il maestro (oro, con la corona: sa quali pile sono buone; gli altri imparano",
+                 "il valore delle cose anche dalla sua vita),",
                  "H questo aiuto, Esc torna al menu (salvando, se ci sono novità)."]
         for k, t in enumerate(lines):
             s.blit((app.font if k == 0 else app.small).render(t, True, PLAYER if k == 0 else TEXT),

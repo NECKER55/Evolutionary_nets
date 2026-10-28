@@ -2,8 +2,8 @@
 
 Fase A: popolazione fissa, chi muore rinasce con lo stesso cervello di
 partenza del suo tipo (nessuna evoluzione): si misura l'apprendimento dentro
-la vita. Fase B: accoppiamento muso contro muso; chi muore rinasce con un
-incrocio dei geni dell'ultima coppia del suo recinto (o di due del recinto a
+la vita. Fase B: accoppiamento muso contro muso; chi muore rinasce con i geni di
+uno dei due dell'ultima coppia del suo recinto (più la mutazione) (o di due del recinto a
 caso, se non ce n'è ancora una): l'evoluzione tara i parametri e i valori
 innati.
 
@@ -21,7 +21,7 @@ import time
 
 import numpy as np
 
-from ..net.sections import AGENTS, EXPLORE, GENE_NAMES, Sections, Sizes, cross, decode, mutate
+from ..net.sections import AGENTS, EXPLORE, GENE_NAMES, Sections, Sizes, decode, inherit, mutate, teacher_mask
 from ..sim.pile import EYES, N_PROGRAMS, PROGRAMS, Motor, PileConfig, PileWorld
 
 WINDOWS = ((-30, 0), (0, 15), (15, 30), (30, 60), (60, 90))  # s rispetto all'inversione
@@ -37,10 +37,12 @@ def start_genomes(agent: str, phase: str, N: int, seed: int, cfg: PileConfig, le
     return mutate(first, np.random.default_rng([seed, 1]), 0.2)
 
 
+TEACHERS = ("fantasma", "visibile")  # il maestro: invisibile, e mangia la sua copia delle pile; o un compagno vero
 class NumpyRun:
     """Una corsa nell'arena delle pile sul processore (riferimento)."""
 
-    def __init__(self, cfg: PileConfig, agent: str, phase: str, enclosures: int, seed: int = 0, lesions=()):
+    def __init__(self, cfg: PileConfig, agent: str, phase: str, enclosures: int, seed: int = 0, lesions=(),
+                 teacher: str = ""):
         cfg.mating = phase == "B"
         self.cfg, self.agent, self.phase = cfg, agent, phase
         self.lesions, self.seed = tuple(lesions), seed
@@ -48,15 +50,32 @@ class NumpyRun:
         self.B, self.n = self.w.B, self.w.n
         N = self.B * self.n
         kw = brain_kwargs(agent, cfg, lesions)
-        self.brain = AGENTS[agent](N, cfg.dt, seed, genomes=start_genomes(agent, phase, N, seed, cfg, lesions), **kw)
+        genomes = start_genomes(agent, phase, N, seed, cfg, lesions)
+        self.brain = AGENTS[agent](N, cfg.dt, seed, genomes=genomes, **kw)
         self.motor = Motor((self.B, self.n), np.random.default_rng([seed, 2]))
         self.rng = np.random.default_rng([seed, 3])
         self.pairs = {}  # recinto -> (genoma a, genoma b) dell'ultima coppia
-        self.reward = np.zeros(N)
+        self.reward = np.zeros((N, 3))  # ciò che il corpo ha sentito: piacere, dolore, energia spesa
         self.usage = np.zeros(N_PROGRAMS)
         self.counts = np.zeros((N, self.brain.nb, 4)) if isinstance(self.brain, Sections) else None
         self.series = {k: [] for k in SERIES}
         self.by = {k: np.zeros(N) for k in ("good_by", "bad_by", "deaths_by")}  # per essere
+        self.counted = np.ones(N)  # chi entra nelle misure (il maestro no)
+        self.teacher_kind = teacher or "fantasma"
+        if teacher:
+            self.set_teacher(True)
+
+    def set_teacher(self, on: bool) -> None:
+        """Mette o toglie il maestro (il primo essere di ogni recinto, del tipo
+        `teacher_kind`). Chi era maestro rinasce come un giovane qualunque,
+        visibile; nelle misure non entra più."""
+        if not isinstance(self.brain, Sections):
+            raise ValueError("il maestro c'è solo con il cervello a sezioni")
+        mask = teacher_mask(self.B * self.n, self.n) & on
+        self.brain.set_teacher(mask, self.n)
+        self.w.ghost = mask.reshape(self.B, self.n) & (self.teacher_kind == "fantasma")
+        self.w.ghost_hide[:] = 0.0
+        self.counted[teacher_mask(self.B * self.n, self.n)] = 0.0
 
     @property
     def t(self) -> float:
@@ -68,8 +87,6 @@ class NumpyRun:
         raw = w.senses()
         flat = raw.reshape(N, -1)
         objs = {k: v.reshape((N,) + v.shape[2:]) for k, v in w.objects().items()}
-        if self.agent == "guidato":
-            brain.good = np.repeat(w.good, n)
         program = brain.step(flat, self.reward, objs)
         self.usage += np.bincount(program, minlength=N_PROGRAMS)
         if self.counts is not None:  # chi vince in B, rispetto a quale colore domina la vista
@@ -79,24 +96,25 @@ class NumpyRun:
         has, _, near, ang = brain.att.seen(objs)
         thrust, steer = self.motor(program.reshape(B, n), raw, has.reshape(B, n), near.reshape(B, n),
                                    ang.reshape(B, n), brain.p["motor"].reshape(B, n, *brain.p["motor"].shape[1:]))
-        if self.agent == "guidato":  # sa anche dov'è la zona: quando esplora ci va
+        guided = np.full((B, n), self.agent == "guidato") | getattr(brain, "teacher", np.zeros(N, bool)).reshape(B, n)
+        if guided.any():  # il guidato (e il maestro) sa anche dov'è la zona: quando esplora ci va
             to = w.zone_centres()[w.zone][:, None, :] - w.pos
             ang = (np.arctan2(to[..., 1], to[..., 0]) - w.heading + np.pi) % (2 * np.pi) - np.pi
-            go = (program.reshape(B, n) == EXPLORE) & (np.hypot(to[..., 0], to[..., 1]) > cfg.zone_half)
+            go = guided & (program.reshape(B, n) == EXPLORE) & (np.hypot(to[..., 0], to[..., 1]) > cfg.zone_half)
             steer = np.where(go, np.clip(2.0 * ang, -1.0, 1.0), steer)
         before = (len(w.taken), dict(w.deaths), len(w.matings), len(w.inversions), len(w.zone_changes))
         out = w.step(thrust, steer, brain.bite.reshape(B, n))
         new = w.taken[before[0]:]
         for (_, bb, ii, _, ok) in new:
             self.by["good_by" if ok else "bad_by"][bb * n + ii] += 1
-        self.series["good_taken"].append(sum(1 for x in new if x[4]))
-        self.series["bad_taken"].append(sum(1 for x in new if not x[4]))
+        self.series["good_taken"].append(sum(self.counted[x[1] * n + x[2]] for x in new if x[4]))
+        self.series["bad_taken"].append(sum(self.counted[x[1] * n + x[2]] for x in new if not x[4]))
         self.series["starved"].append(w.deaths["fame"] - before[1]["fame"])
         self.series["aged"].append(w.deaths["vecchiaia"] - before[1]["vecchiaia"])
         self.series["matings"].append(len(w.matings) - before[2])
         self.series["inversion"].append(len(w.inversions) > before[3])
         self.series["zone_change"].append(len(w.zone_changes) > before[4])
-        self.reward = (out["pleasure"] - out["pain"]).reshape(N)
+        self.reward = np.stack([out["pleasure"], out["pain"], out["spent"]], -1).reshape(N, 3)
         for b, i, j in out["mates"]:
             self.pairs[b] = (brain.genome[b * n + i].copy(), brain.genome[b * n + j].copy())
         dead = out["dead"].reshape(N)
@@ -111,7 +129,7 @@ class NumpyRun:
                         ga, gb = self.pairs[b]
                     else:
                         ga, gb = (brain.genome[b * n + x] for x in self.rng.integers(0, n, 2))
-                    child[k] = mutate(cross(ga[None], gb[None], self.rng), self.rng)[0]
+                    child[k] = mutate(inherit(ga[None], gb[None], self.rng), self.rng)[0]
             brain.reborn(dead, child)
             if self.counts is not None:
                 self.counts[dead] = 0.0
@@ -124,16 +142,19 @@ class NumpyRun:
     def world_of(self, b: int) -> dict:
         w = self.w
         out = {k: getattr(w, k)[b] for k in ("pos", "heading", "speed", "energy", "age", "charging", "taste", "pain",
-                                             "good", "zone", "bpos", "bcolor", "bon", "rest")}
+                                             "good", "zone", "bpos", "bcolor", "bbig", "bon", "rest", "ghost",
+                                             "ghost_hide")}
         out.update(t=w.t, next_inv=w.next_inversion, next_zone=w.next_zone)
         return out
 
     def brain_of(self, i: int) -> dict:
         b = self.brain
-        keys = ("genome", "w_e", "w_v", "program", "pi", "bite", "p_bite", "delta", "teach", "proto", "pred",
-                "win_rate", "state_b", "mem", "w_gate", "c_in", "u_c", "u_l", "code", "unc", "d_slow")
+        keys = ("genome", "w_e", "w_v", "value", "program", "pi", "bite", "p_bite", "delta", "teach", "proto", "pred",
+                "win_rate", "state_b", "mem", "w_gate", "c_in", "u_c", "u_l", "code", "unc", "d_slow", "teacher",
+                "obs_err", "o_pl", "o_pa", "o_assoc", "o_e", "o_err", "o_out")
         out = {k: np.asarray(getattr(b, k))[i] for k in keys if hasattr(b, k)}
-        out.update(att_target=b.att.target[i], att_w=b.att.w[i], att_new=b.att.new[i])
+        out.update(att_target=b.att.target[i], att_new=b.att.new[i], att_prob=b.att.prob[i],
+                   att_has=b.att.has_pos[i], att_parts=b.att.parts[i])
         bb, j = divmod(i, self.n)
         out.update(f_act=self.motor.activity[bb, j], f_in=getattr(self.motor, "inputs", np.zeros((self.B, self.n, 14)))[bb, j])
         if hasattr(b, "a"):
@@ -151,6 +172,16 @@ class NumpyRun:
     def flat(self, name):
         return np.asarray(self.series[name], dtype=float)
 
+    def teaching(self) -> tuple[bool, float]:
+        """(c'è il maestro, quanto imparano ancora da lui: la media di |δ| sulla
+        sua vita, tra chi lo osserva)."""
+        b = self.brain
+        t = getattr(b, "teacher", None)
+        if t is None or not t.any():
+            return False, 0.0
+        on = ~t & t[np.arange(len(t)) // self.n * self.n]
+        return True, float(b.obs_err[on].mean()) if on.any() else 0.0
+
 
 def brain_kwargs(agent: str, cfg: PileConfig, lesions=()) -> dict:
     """Gli argomenti per costruire il cervello: quanti oggetti può guardare,
@@ -164,9 +195,12 @@ def brain_kwargs(agent: str, cfg: PileConfig, lesions=()) -> dict:
 
 
 def make_run(agent="sezioni", phase="A", enclosures=200, seed=0, lesions=(), cfg: PileConfig | None = None,
-             engine="gpu"):
-    """La corsa sul motore richiesto (la GPU se c'è, altrimenti il processore)."""
+             engine="gpu", teacher: str = ""):
+    """La corsa sul motore richiesto (la GPU se c'è, altrimenti il processore).
+    `teacher`: un maestro in ogni recinto (solo con il cervello a sezioni),
+    "fantasma" o "visibile" (vedi `TEACHERS`; True = fantasma)."""
     cfg = cfg or PileConfig()
+    teacher = "fantasma" if teacher is True else (teacher or "")
     if engine == "gpu":
         from ..gpu import available
 
@@ -174,13 +208,15 @@ def make_run(agent="sezioni", phase="A", enclosures=200, seed=0, lesions=(), cfg
             from ..gpu.pile import PileGpu
 
             return PileGpu(cfg, agent, phase, enclosures, seed, lesions,
-                           genomes=start_genomes(agent, phase, enclosures * cfg.beings, seed, cfg, lesions))
-    return NumpyRun(cfg, agent, phase, enclosures, seed, lesions)
+                           genomes=start_genomes(agent, phase, enclosures * cfg.beings, seed, cfg, lesions),
+                           teacher=teacher)
+    return NumpyRun(cfg, agent, phase, enclosures, seed, lesions, teacher)
 
 
 def run(agent: str = "sezioni", phase: str = "A", enclosures: int = 200, minutes: float = 20.0, seed: int = 0,
-        lesions=(), cfg: PileConfig | None = None, log=None, every: float = 300.0, engine: str = "gpu") -> dict:
-    r = make_run(agent, phase, enclosures, seed, lesions, cfg, engine)
+        lesions=(), cfg: PileConfig | None = None, log=None, every: float = 300.0, engine: str = "gpu",
+        teacher: str = "") -> dict:
+    r = make_run(agent, phase, enclosures, seed, lesions, cfg, engine, teacher)
     dt = r.cfg.dt
     steps = int(round(minutes * 60.0 / dt))
     block = int(round(every / dt))
@@ -221,6 +257,12 @@ def counts_of(r):
     return r.counts
 
 
+def counted_of(r) -> float:
+    """Quanti esseri entrano nelle misure (il maestro no)."""
+    c = r.state["misc"]["counted"] if hasattr(r, "state") else r.counted
+    return float(np.asarray(c).sum())
+
+
 def measures(r) -> dict:
     """Le misure (docs/SPEC_ARENA_PILE.md, "Le misure"), dalle serie passo per passo."""
     dt = r.cfg.dt
@@ -230,7 +272,7 @@ def measures(r) -> dict:
         return {}
     t = (np.arange(steps) + 1) * dt
     minutes = steps * dt / 60.0
-    beings = r.B * r.n
+    beings = counted_of(r)
     total = good + bad
     out = {"pile al minuto": round(float(total.sum()) / minutes / beings, 3),
            "buone": round(float(good.sum() / max(total.sum(), 1)), 3),
@@ -296,6 +338,11 @@ def main() -> None:
     ap.add_argument("--confronto", action="store_true", help="i tre agenti e le lesioni del cervello a sezioni")
     ap.add_argument("--motore", choices=("gpu", "numpy"), default="gpu")
     ap.add_argument("--prova", default=None, help="un salvataggio: prova le sue reti una a una, ognuna da sola")
+    ap.add_argument("--buone", choices=("colore", "grandezza"), default="colore",
+                    help="che cosa rende buona una pila (con grandezza il colore non conta)")
+    ap.add_argument("--maestro", choices=TEACHERS, default="",
+                    help="un maestro guidato a mano in ogni recinto; gli altri imparano anche dalla sua vita. "
+                         "fantasma: nessuno lo vede e mangia la sua copia delle pile (non toglie niente agli altri)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     show = lambda r: print(json.dumps({k: v for k, v in r.items() if k != "storia"}, ensure_ascii=False), flush=True)
@@ -315,11 +362,13 @@ def main() -> None:
         for agent, les in (("guidato", ()), ("attore-critico", ()), ("sezioni", ()), ("sezioni", ("B",)),
                            ("sezioni", ("D",)), ("sezioni", ("C",)), ("sezioni", ("L",)), ("sezioni", ("U",)),
                            ("sezioni", ("V",)), ("sezioni", ("S",))):
-            show(run(agent, "A", args.recinti, args.minuti, args.seed, les, engine=args.motore))
+            show(run(agent, "A", args.recinti, args.minuti, args.seed, les, PileConfig(good_by=args.buone),
+                     engine=args.motore))
         return
     lesions = tuple(x for x in args.lesioni.split(",") if x)
     log = (lambda s: print(s, flush=True))
-    show(run(args.agente, args.fase, args.recinti, args.minuti, args.seed, lesions, log=log, engine=args.motore))
+    show(run(args.agente, args.fase, args.recinti, args.minuti, args.seed, lesions, PileConfig(good_by=args.buone),
+             log=log, engine=args.motore, teacher=args.maestro))
 
 
 if __name__ == "__main__":

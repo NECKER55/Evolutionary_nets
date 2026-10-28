@@ -48,17 +48,30 @@ ENERGY, WATCHED, TASTE, PAIN = 27, 28, 29, 30
 N_SENSES = len(SENSES)
 
 
-def sense(cfg, pos, heading, bpos, bcolor, bon, energy, taste, pain, xp=np):
+def ghost_view(bon, ghost, ghost_hide, xp=np):
+    """Che cosa vede ognuno quando c'è un maestro fantasma (`ghost` (B, n)):
+    le pile (B, n, K) (quelle che il fantasma ha mangiato spariscono solo per
+    lui, `ghost_hide` (B, K) > 0) e gli altri esseri (B, n, n): il fantasma
+    non lo vede nessuno."""
+    if ghost is None:
+        return bon[:, None, :], None
+    bon_each = bon[:, None, :] & ~(ghost[:, :, None] & (ghost_hide[:, None, :] > 0.0))
+    return bon_each, ghost[:, None, :]
+
+
+def sense(cfg, pos, heading, bpos, bcolor, bon, energy, taste, pain, xp=np, ghost=None, ghost_hide=None):
     """I sensi di ogni essere, (B, n, N_SENSES), tutti tra 0 e 1: la stessa
-    funzione per NumPy e JAX (`xp`)."""
+    funzione per NumPy e JAX (`xp`). `ghost`, `ghost_hide`: il maestro
+    fantasma (vedi `ghost_view`)."""
     wrap = lambda a: (a + np.pi) % (2.0 * np.pi) - np.pi
     B, n = heading.shape
-    eye = xp.eye(n, dtype=bool)[None]
+    bon_each, hidden = ghost_view(bon, ghost, ghost_hide, xp)
+    eye = xp.eye(n, dtype=bool)[None] if hidden is None else xp.eye(n, dtype=bool)[None] | hidden
     chans = []
     # Occhi: pile (rosso, giallo) e la luce sul muso degli altri (blu), se sono rivolti verso di me.
     db = bpos[:, None, :, :] - pos[:, :, None, :]
     ab = wrap(xp.arctan2(db[..., 1], db[..., 0]) - heading[:, :, None])
-    nb = xp.clip(1.0 - xp.hypot(db[..., 0], db[..., 1]) / cfg.eye_range, 0.0, 1.0) * bon[:, None, :]
+    nb = xp.clip(1.0 - xp.hypot(db[..., 0], db[..., 1]) / cfg.eye_range, 0.0, 1.0) * bon_each
     de = pos[:, None, :, :] - pos[:, :, None, :]
     ae = wrap(xp.arctan2(de[..., 1], de[..., 0]) - heading[:, :, None])
     back = wrap(xp.arctan2(-de[..., 1], -de[..., 0]) - heading[:, None, :])
@@ -102,7 +115,7 @@ def sense(cfg, pos, heading, bpos, bcolor, bon, energy, taste, pain, xp=np):
     wall_dir = xp.asarray(np.array([-np.pi / 2, 0.0, np.pi / 2, np.pi]))
     a_wall = wrap(wall_dir[None, None, :] - heading[..., None])
     on_e = (xp.hypot(de[..., 0], de[..., 1]) < 2.0 * cfg.radius) & ~eye
-    on_b = (xp.hypot(db[..., 0], db[..., 1]) < cfg.radius + cfg.battery_radius) & bon[:, None, :]
+    on_b = (xp.hypot(db[..., 0], db[..., 1]) < cfg.radius + cfg.battery_radius) & bon_each
     ang = xp.concatenate([a_wall, ae, ab], -1)
     on = xp.concatenate([wall_on, on_e, on_b], -1)
     q = np.pi / 4
@@ -130,7 +143,11 @@ class PileConfig:
     battery_life: float = 40.0  # s: una pila non presa si spegne e ricompare altrove (le cattive non si accumulano)
     zone_half: float = 100.0  # mezza larghezza di una zona
     zone_margin: float = 110.0  # distanza del centro della zona dai muri
-    inversion_every: float = 300.0  # s: rosso e giallo si scambiano i ruoli
+    inversion_every: float = 300.0  # s: rosso e giallo (o grande e piccola) si scambiano i ruoli
+    # Che cosa rende buona una pila: il colore ("colore") o la grandezza
+    # ("grandezza"; allora il colore non conta). Le pile sono rosse o gialle, e
+    # grandi o piccole, a caso.
+    good_by: str = "colore"
     zone_every: float = 200.0  # s: la zona delle pile cambia
     take_speed: float = 0.3  # per mordere una pila: velocità sotto questa quota della massima
     mouth: float = 25.0  # gradi: si morde solo una pila davanti al muso
@@ -188,6 +205,7 @@ class PileWorld:
         self.zone = self.rng.integers(0, 4, B)
         self.bpos = np.zeros((B, K, 2))
         self.bcolor = np.zeros((B, K), dtype=int)
+        self.bbig = np.zeros((B, K), dtype=int)  # 1 = pila grande
         self.bon = np.zeros((B, K), dtype=bool)
         self.bwait = self.rng.uniform(0.0, cfg.respawn, (B, K))
         self.bage = np.zeros((B, K))
@@ -196,6 +214,10 @@ class PileWorld:
         # Accoppiamento.
         self.pair_time = np.zeros((B, n, n))
         self.rest = np.zeros((B, n))
+        # Il maestro fantasma (se c'è): non lo vede nessuno, e le pile che mangia
+        # spariscono solo per lui (per `ghost_hide` secondi o finché ricompaiono).
+        self.ghost = np.zeros((B, n), dtype=bool)
+        self.ghost_hide = np.zeros((B, K))
         # Contatori e registro degli eventi (per le misure).
         self.taken = []  # (t, recinto, essere, colore, buona)
         self.deaths = {"fame": 0, "vecchiaia": 0}
@@ -223,27 +245,34 @@ class PileWorld:
         lo, hi = self.cfg.battery_radius, self.cfg.size - self.cfg.battery_radius
         self.bpos[b, k] = np.clip(centre + self.rng.uniform(-h, h, (len(b), 2)), lo, hi)
         self.bcolor[b, k] = self.rng.integers(0, 2, len(b))
+        self.bbig[b, k] = self.rng.integers(0, 2, len(b))
         self.bon[b, k] = True
         self.bage[b, k] = self.rng.uniform(0.0, 0.5 * self.cfg.battery_life, len(b))  # non scadono tutte insieme
+        self.ghost_hide[b, k] = 0.0  # una pila nuova: la vede anche il fantasma
 
     # --- I sensi ---------------------------------------------------------------------
 
     def senses(self) -> np.ndarray:
         """(B, n, N_SENSES), tutti tra 0 e 1 (vedi `sense`)."""
         return sense(self.cfg, self.pos, self.heading, self.bpos, self.bcolor, self.bon, self.energy, self.taste,
-                     self.pain)
+                     self.pain, ghost=self.ghost, ghost_hide=self.ghost_hide)
 
     def objects(self) -> dict:
         """Gli oggetti in vista di ogni essere (vedi `objects_of`)."""
-        return objects_of(self.pos, self.heading, self.bpos, self.bcolor, self.bon, self.cfg)
+        return objects_of(self.pos, self.heading, self.speed, self.bpos, self.bcolor, self.bbig, self.bon,
+                          self.battery_good(), self.cfg, ghost=self.ghost, ghost_hide=self.ghost_hide)
+
+    def battery_good(self) -> np.ndarray:
+        """(B, K): quali pile sono buone adesso."""
+        return battery_good(self.cfg, self.bcolor, self.bbig, self.good)
 
     # --- Un passo --------------------------------------------------------------------
 
     def step(self, thrust: np.ndarray, steer: np.ndarray, bite=None) -> dict:
         """thrust (B, n) in [-1, 1] (indietro più piano), steer (B, n) in [-1, 1],
         bite (B, n) bool: si morde. Restituisce ciò che è successo in questo
-        passo: piacere e dolore (B, n), chi è morto (B, n), accoppiamenti
-        [(recinto, a, b)]."""
+        passo: piacere e dolore (B, n), l'energia spesa (B, n, in pile buone:
+        una pila buona = 1), chi è morto (B, n), accoppiamenti [(recinto, a, b)]."""
         cfg, dt = self.cfg, self.cfg.dt
         B, n = self.B, self.n
         bite = np.zeros((B, n), dtype=bool) if bite is None else np.asarray(bite, dtype=bool)
@@ -254,7 +283,8 @@ class PileWorld:
         u = np.stack([np.cos(self.heading), np.sin(self.heading)], -1)
         self.pos = np.clip(self.pos + u * self.speed[..., None] * dt, cfg.radius, cfg.size - cfg.radius)
         self.age += dt
-        self.energy -= (cfg.drain + cfg.move_cost * np.abs(thrust) + cfg.bite_cost * bite) * dt
+        spent = (cfg.drain + cfg.move_cost * np.abs(thrust) + cfg.bite_cost * bite) * dt
+        self.energy -= spent
         fade = np.exp(-dt / cfg.taste_tau)
         self.taste *= fade
         self.pain *= fade
@@ -273,22 +303,28 @@ class PileWorld:
         # Pile nuove e pile prese.
         self.bwait -= dt
         self.bage += dt
+        self.ghost_hide = np.maximum(self.ghost_hide - dt, 0.0)
         old = self.bon & (self.bage >= cfg.battery_life)
         self.bon[old] = False
         self.bwait[old] = cfg.respawn
         self._spawn(~self.bon & (self.bwait <= 0.0))
         d = self.bpos[:, None] - self.pos[:, :, None]  # (B, n, K, 2)
         front = np.abs(_wrap(np.arctan2(d[..., 1], d[..., 0]) - self.heading[:, :, None])) < np.radians(cfg.mouth)
+        bon_each, _ = ghost_view(self.bon, self.ghost, self.ghost_hide)
         close = (np.hypot(d[..., 0], d[..., 1]) < cfg.radius + cfg.battery_radius + cfg.bite_reach) \
-            & self.bon[:, None] & front
+            & bon_each & front
         free = ~moving & (self.charging <= 0.0) & bite
         for b, i in zip(*np.nonzero(free & close.any(-1))):
-            k = int(np.flatnonzero(close[b, i] & self.bon[b])[0]) if (close[b, i] & self.bon[b]).any() else -1
+            avail = close[b, i] & (self.bon[b] if not self.ghost[b, i] else True)
+            k = int(np.flatnonzero(avail)[0]) if avail.any() else -1
             if k < 0:
                 continue  # presa da un altro in questo passo
-            self.bon[b, k] = False
-            self.bwait[b, k] = cfg.respawn
-            ok = self.bcolor[b, k] == self.good[b]
+            if self.ghost[b, i]:
+                self.ghost_hide[b, k] = cfg.battery_life  # sparisce solo per lui
+            else:
+                self.bon[b, k] = False
+                self.bwait[b, k] = cfg.respawn
+            ok = bool(self.battery_good()[b, k])
             self.taken.append((self.t, b, i, int(self.bcolor[b, k]), bool(ok)))
             if ok:
                 self.charging[b, i] = cfg.good_energy
@@ -319,7 +355,7 @@ class PileWorld:
         self.deaths["vecchiaia"] += int((old & ~starved).sum())
         if dead.any():
             self.reborn(dead)
-        return {"pleasure": pleasure, "pain": hurt, "dead": dead, "mates": mates}
+        return {"pleasure": pleasure, "pain": hurt, "spent": spent / cfg.good_energy, "dead": dead, "mates": mates}
 
     def reborn(self, mask):
         """Il corpo degli esseri `mask` (B, n) rinasce: posto e direzione a caso,
@@ -347,7 +383,8 @@ class PileWorld:
         dist = np.hypot(d[..., 0], d[..., 1])
         ang = np.abs(_wrap(np.arctan2(d[..., 1], d[..., 0]) - self.heading[:, :, None]))
         facing = ang < np.radians(cfg.mate_angle)
-        ready = (self.energy >= cfg.mate_energy) & (self.rest <= 0.0) & (np.abs(self.speed) <= cfg.take_speed * cfg.speed)
+        ready = (self.energy >= cfg.mate_energy) & (self.rest <= 0.0) & (np.abs(self.speed) <= cfg.take_speed * cfg.speed) \
+            & ~self.ghost
         ok = facing & facing.transpose(0, 2, 1) & (dist < cfg.mate_distance) & ready[:, :, None] & ready[:, None, :]
         ok &= ~np.eye(n, dtype=bool)
         self.pair_time = np.where(ok, self.pair_time + dt, 0.0)
@@ -367,27 +404,49 @@ class PileWorld:
 # --- Gli oggetti in vista (per l'attenzione) ----------------------------------------
 
 
-def objects_of(pos, heading, bpos, bcolor, bon, cfg, xp=np):
+FEATURES = ("rosso", "giallo", "blu", "grande", "piccolo", "si muove")  # ciò che si vede di un oggetto
+N_FEATURES = len(FEATURES)
+
+
+def battery_good(cfg, bcolor, bbig, good):
+    """(B, K): una pila è buona se ha il colore buono (o la grandezza buona)."""
+    return (bbig if cfg.good_by == "grandezza" else bcolor) == good[:, None]
+
+
+def objects_of(pos, heading, speed, bpos, bcolor, bbig, bon, bgood, cfg, xp=np, ghost=None, ghost_hide=None):
     """Gli oggetti che ogni essere vede, per l'attenzione: prima le pile (K),
     poi gli altri esseri (n). Per ognuno: visibile (dentro il ventaglio degli
     occhi e la portata; un essere solo se è rivolto verso di me, come la luce
-    sul muso), colore, vicinanza (1 = addosso, 0 = al limite della vista),
-    angolo rispetto al muso (rad, positivo = destra). Forme (B, n, K + n)."""
+    sul muso), le sue caratteristiche (`FEATURES`: colore, grandezza, se si
+    muove), vicinanza (1 = addosso, 0 = al limite della vista), angolo
+    rispetto al muso (rad, positivo = destra), e se è una pila buona (solo
+    per il guidato e le misure: un cervello non lo sa). Forme (B, n, K + n).
+    `ghost`, `ghost_hide`: il maestro fantasma (vedi `ghost_view`)."""
     B, n = heading.shape
+    K = bpos.shape[1]
     opos = xp.concatenate([bpos, pos], axis=1)
-    ocol = xp.concatenate([bcolor, xp.full((B, n), BLUE, dtype=bcolor.dtype)], axis=1)
-    on = xp.concatenate([bon, xp.ones((B, n), dtype=bool)], axis=1)
+    bon_each, hidden = ghost_view(bon, ghost, ghost_hide, xp)
+    others = xp.ones((B, n, n), dtype=bool) if hidden is None else ~xp.broadcast_to(hidden, (B, n, n))
+    on = xp.concatenate([xp.broadcast_to(bon_each, (B, n, K)), others], axis=2)  # (B, n, M): chi vede che cosa
+    f_batt = xp.stack([bcolor == RED, bcolor == YELLOW, xp.zeros((B, K), dtype=bool), bbig == 1, bbig == 0,
+                       xp.zeros((B, K), dtype=bool)], -1)
+    moving = xp.abs(speed) > 0.05 * cfg.speed
+    f_being = xp.stack([xp.zeros((B, n), dtype=bool), xp.zeros((B, n), dtype=bool), xp.ones((B, n), dtype=bool),
+                        xp.zeros((B, n), dtype=bool), xp.zeros((B, n), dtype=bool), moving], -1)
+    feat = xp.concatenate([f_batt, f_being], 1).astype(float)  # (B, M, F)
     d = opos[:, None, :, :] - pos[:, :, None, :]
     dist = xp.hypot(d[..., 0], d[..., 1])
     ang = (xp.arctan2(d[..., 1], d[..., 0]) - heading[:, :, None] + np.pi) % (2 * np.pi) - np.pi
     near = xp.clip(1.0 - dist / cfg.eye_range, 0.0, 1.0)
-    K = bpos.shape[1]
     self_or_back = xp.concatenate([xp.zeros((B, n, K), dtype=bool), xp.eye(n, dtype=bool)[None].repeat(B, 0)], 2)
     dk = d[:, :, K:, :]  # verso gli altri esseri: [b, i, j]; l'altro (j) è rivolto verso di me?
     back = (xp.arctan2(-dk[..., 1], -dk[..., 0]) - heading[:, None, :] + np.pi) % (2 * np.pi) - np.pi
     facing_me = xp.concatenate([xp.ones((B, n, K), dtype=bool), xp.abs(back) < np.radians(cfg.face_visible)], 2)
-    vis = on[:, None, :] & (near > 0.0) & (xp.abs(ang) < SECTORS[-1]) & ~self_or_back & facing_me
-    return {"vis": vis, "col": xp.broadcast_to(ocol[:, None, :], vis.shape), "near": near, "ang": ang}
+    vis = on & (near > 0.0) & (xp.abs(ang) < SECTORS[-1]) & ~self_or_back & facing_me
+    good = xp.concatenate([bgood, xp.zeros((B, n), dtype=bool)], 1)
+    shape = vis.shape
+    return {"vis": vis, "feat": xp.broadcast_to(feat[:, None], shape + (N_FEATURES,)), "near": near, "ang": ang,
+            "good": xp.broadcast_to(good[:, None], shape)}
 
 
 # --- I programmi di movimento e il circuito motore (la sezione F) -------------------

@@ -333,6 +333,11 @@ lascialo, esplora); tracce strette (E e cancello di D si marcano solo da
 neuroni sopra 0,5); soglia adattiva su δ per tutto ciò che impara tranne
 il critico. Dettagli e risultati: docs/SPEC_ARENA_PILE.md.
 
+**Costanti come geni (2026-10-28):** ogni costante del cervello è un gene
+(`sections.Genes`): nella fase A uguale per tutti, nella fase B la tara
+l'evoluzione. Nel genoma ci sono anche i pesi di partenza e le connessioni
+di C; il figlio eredita il genoma intero di uno dei genitori.
+
 **Non ancora fatto:** l'anello all'indietro da D ed E verso B, i valori
 innati nella fase A (sono a zero di proposito; evolvono nella fase B), il
 riposo come riproduzione vera dei ricordi (per ora L si avvicina a C a
@@ -510,3 +515,14 @@ punto.
    precisi e previsione di cosa farà il corpo.
 9. **Bisogni, memoria dei luoghi, attenzione, anelli all'indietro:** da
    aggiungere più avanti.
+
+
+## O, il valore degli oggetti (2026-10-29)
+
+Una sezione in più: due neuroni ("quanto vale ciò che guardo", "quanto vale
+ciò che ho preso") e, per ogni caratteristica percepibile più lo sfondo, due
+sinapsi che imparano (piacere e dolore, separati) con la loro incertezza.
+Impara dagli esiti (Rescorla-Wagner alla fine di ogni episodio di piacere o
+dolore), anche da quelli del maestro; la fame si applica quando si legge il
+valore. La leggono il critico, E e l'attenzione, che non impara più niente
+da sola. Dettagli e misure: SPEC_ARENA_PILE.md.

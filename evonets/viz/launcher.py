@@ -367,6 +367,15 @@ class Launcher(Screen):
                               help="A: si rinasce col cervello di partenza. B: coi geni di una coppia.")
         self.p_lesion = Choice("Lesione", [("", "nessuna")] + [(k, f"senza {k}") for k in "BDCLUV"],
                                help="Solo per il cervello a sezioni: toglierne una per vedere a cosa serve.")
+        self.p_good = Choice("Pile buone per", [("colore", "colore (rosse o gialle)"),
+                                                ("grandezza", "grandezza (grandi o piccole; il colore non conta)")],
+                             help="Che cosa distingue le pile buone: serve a provare che si impara qualunque cosa.")
+        self.p_teacher = Choice("Maestro", [("", "no"),
+                                            ("fantasma", "fantasma: nessuno lo vede, mangia la sua copia delle pile"),
+                                            ("visibile", "visibile: un compagno vero (si mangia le pile buone)")],
+                                help="Solo per il cervello a sezioni: il primo di ogni recinto, guidato a mano; gli "
+                                     "altri imparano il valore delle cose (O) anche da ciò che succede a lui. M lo "
+                                     "toglie o lo rimette.")
         self.p_encl = Number("Recinti", 200, step=50, low=1,
                              help="Recinti che girano insieme (GPU); se ne guarda uno alla volta.")
         self.p_beings = Number("Esseri per recinto", 6, step=1, low=1, help="Quanti esseri in ogni recinto.")
@@ -384,7 +393,8 @@ class Launcher(Screen):
         self.fields = [self.mode, self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.cap,
                        self.chance, self.seed,
                        self.gens, self.exam_every, self.select, self.load, self.save]
-        self.pile_fields = [self.task, self.p_agent, self.p_phase, self.p_lesion, self.p_encl, self.p_beings,
+        self.pile_fields = [self.task, self.p_agent, self.p_phase, self.p_lesion, self.p_good, self.p_teacher, self.p_encl,
+                            self.p_beings,
                             self.chance, self.seed, self.gens, self.load, self.save]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
@@ -428,7 +438,7 @@ class Launcher(Screen):
         disattivano e mostrano i valori del file; tornando a "nessuno" riprendono
         quelli scelti a mano."""
         fields = (self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.chance, self.seed,
-                  self.p_agent, self.p_phase, self.p_lesion, self.p_encl, self.p_beings)
+                  self.p_agent, self.p_phase, self.p_lesion, self.p_good, self.p_encl, self.p_beings)
         if path is not None and getattr(self, "_mine", None) is None:
             self._mine = [f.value if isinstance(f, Number) else f.index for f in fields]
         if path is None and getattr(self, "_mine", None) is not None:
@@ -442,7 +452,7 @@ class Launcher(Screen):
             self._show_saved(path)
         self.net.enabled = self.agents.enabled = self.chance.enabled = self.task.enabled = path is None
         self.sim.enabled = self.genome.enabled = path is None
-        for f in (self.p_agent, self.p_phase, self.p_lesion, self.p_encl, self.p_beings):
+        for f in (self.p_agent, self.p_phase, self.p_lesion, self.p_good, self.p_teacher, self.p_encl, self.p_beings):
             f.enabled = path is None
         if path is not None:
             self.save.value, self.save.edited = path, False
@@ -458,6 +468,7 @@ class Launcher(Screen):
             self.p_phase.select(meta["phase"])
             self.p_lesion.select(meta["lesions"][0] if meta.get("lesions") else "")
             self.p_encl.value, self.p_beings.value = meta["enclosures"], meta["beings"]
+            self.p_good.select(meta.get("good_by", "colore"))
             self.chance.select("fixed")
             self.seed.value = meta["seed"]
             return
@@ -559,11 +570,11 @@ class Launcher(Screen):
             return
         if self.chance.value == "random":
             self.seed.value = secrets.randbelow(2**31)
-        cfg = PileConfig(beings=self.p_beings.fixed())
+        cfg = PileConfig(beings=self.p_beings.fixed(), good_by=self.p_good.value)
         lesions = (self.p_lesion.value,) if self.p_lesion.value and self.p_agent.value == "sezioni" else ()
         try:
             run = make_run(self.p_agent.value, self.p_phase.value, self.p_encl.fixed(), self.seed.fixed(), lesions,
-                           cfg)
+                           cfg, teacher=self.p_teacher.value if self.p_agent.value == "sezioni" else "")
         except Exception as err:
             self.message, self.error = f"non riesco ad avviare l'arena delle pile: {err}", True
             return

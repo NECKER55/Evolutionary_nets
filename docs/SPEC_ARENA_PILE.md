@@ -163,6 +163,196 @@ proporzionato al danno, selezione dei programmi "appiccicosa" (senza, un
 esploratore a caso cambiava programma ogni 0,25 s e non arrivava mai a una
 pila).
 
+## O, il valore degli oggetti, e S che lo legge (2026-10-29)
+
+**Perché.** Il critico non distingueva le pile: per un allievo dal
+comportamento quasi casuale "vedo una buona" e "vedo una cattiva" portano
+quasi alla stessa cosa, e la parte che legge C impara dall'ultimo episodio
+(solo il 52% dei critici preferiva la buona). Il valore delle cose va
+imparato a parte, in un modo che non dipenda da quanto bene ci si comporta.
+
+**O** (`sections.o_*`, docstring del modulo): per ogni caratteristica
+percepibile, più lo sfondo, quanto piacere e quanto dolore porta (separati).
+Impara alla fine di ogni episodio (piacere o dolore sentiti dal corpo), con
+Rescorla-Wagner sulle caratteristiche che si avevano in mente prima
+dell'esito (traccia di `trace_o` = 0,5 s, più D): le caratteristiche
+competono, il passo è diviso per quanta traccia c'è (senza, i pesi
+rimbalzavano) e moltiplicato per l'incertezza di Pearce e Hall. Il valore
+letto è piacere × fame di adesso − dolore. Due neuroni di uscita ("quanto
+vale ciò che guardo", "ciò che ho preso") vanno al critico e a E. Dal maestro
+O impara con la stessa regola, sui suoi episodi. Lesione "O".
+
+**S non impara più**: ogni posizione somma la salienza innata, il valore
+(`sal_value`), l'importanza (piacere + dolore, `sal_import`: anche il
+pericolo attira) e l'incertezza (`sal_unc`) che O dà dell'oggetto.
+
+**Risultati** (200 recinti, sonda per essere su chi ha più di 1 minuto):
+
+| | O preferisce la buona | buona − cattiva (mediana) |
+|---|---|---|
+| colore, 2 e 5 minuti | 84%, 90% | +0,12, +0,45 |
+| 30 s dopo l'inversione | 13% | −0,41 |
+| 5 minuti dopo | 89% | +0,45 |
+| grandezza (il colore non conta) | 83%, 90%, 88% | come sopra; colore ~0,1 |
+
+Con pile buone e cattive nella mappa, la probabilità dello sguardo va alle
+buone: senza O 0,49 (quota di buone 0,48); con O 0,62-0,66 (quota 0,46).
+
+Comportamento (15 minuti; nelle misure non entra il primo di ogni recinto):
+
+| | pile buone | pile al minuto | morti di fame al minuto |
+|---|---|---|---|
+| con O | **58,2%** | 3,13 | 0,212 |
+| senza O (lesione O) | 52,5% | 3,46 | 0,192 |
+| con O, S che non lo legge (lesione S) | 52,5% | 3,33 | 0,199 |
+| maestro fantasma, senza osservare | 58,1% | 3,33 | 0,174 |
+| maestro fantasma e osservazione | 58,3% | **3,75** | **0,133** |
+
+- Il guadagno passa dall'attenzione: senza che S legga O si torna al 52,5%.
+- Osservare il maestro riduce l'errore di O sui suoi episodi (da 0,51 a
+  0,20) e fa mangiare di più e morire di fame meno; la quota di buone non
+  cambia.
+- Resta lento il riadattamento dopo l'inversione: O si rovescia in qualche
+  minuto, non in secondi.
+- Con il critico che insegna (0,5) va ancora peggio che senza (53,8%): con
+  il maestro il critico non è più forzato a 0,5.
+
+## Il maestro: imparare il valore osservando (2026-10-28)
+
+**Che cos'è.** Opzione "Maestro" nel menu (o `--maestro`): il primo essere di
+ogni recinto decide come il guidato (sa quali pile sono buone e dov'è la
+zona; ha la stessa fovea degli altri, che è solo ciò che guarda, senza pesi).
+Si vede in oro con la corona; nelle misure non entra. Il tasto M lo toglie
+(al suo posto nasce un giovane, che non si conta) o lo rimette. Con il
+maestro il critico insegna (`critic_mix` 0,5).
+
+**Fantasma o visibile.** Il maestro "fantasma" (quello di partenza) vive
+nello stesso recinto (stesse pile, zona, inversioni) ma nessuno lo vede o lo
+urta, e la pila che mangia sparisce solo per lui (`ghost_hide`): non toglie
+niente agli allievi. Quello "visibile" è un compagno vero, e si mangia le
+pile buone.
+
+**Il meccanismo** (`sections.watch`): a ogni passo il critico di ogni
+allievo fa un passo TD anche sulla vita del maestro del suo recinto, come se
+gli guardasse dentro. La situazione del maestro (fovea, energia) viene
+codificata con le connessioni dell'allievo (B, D, C, che qui non imparano);
+ciò che il maestro ha sentito (piacere, dolore, energia spesa) viene valutato
+con i geni dell'allievo. I pesi del critico sono gli stessi, la traccia è
+propria; la velocità è `eta_v` × `observe` (gene). Dall'osservazione imparano
+solo le sinapsi che dicono che cos'è l'oggetto (identità nella fovea e in D,
+il codice C). Nella schermata: "quanto imparano ancora da lui", la media di
+|δ| sulla sua vita, con la sua curva.
+
+**Due correzioni trovate provando.**
+- I due apprendimenti cambiano gli stessi pesi: la previsione del passo
+  prima va ricalcolata con i pesi di adesso, altrimenti nascono sorprese
+  finte che si alimentano (valori a 200 invece che a 12).
+- Con tutti gli ingressi il critico imparava combinazioni tipiche della vita
+  del maestro, che nella vita dell'allievo davano il segno sbagliato:
+  dall'osservazione si impara il valore degli oggetti, non quello della
+  situazione di un altro.
+
+**Risultati** (100-200 recinti, 10 minuti):
+
+| | pile buone (allievi) | errore sulla vita del maestro |
+|---|---|---|
+| senza maestro | 54-55% | — |
+| maestro, senza osservare | 34-38% | 0,26 |
+| maestro e osservazione | 35% | 0,18 |
+
+- La sola presenza del maestro abbassa gli allievi: si mangia lui le pile
+  buone (concorrenza).
+- L'osservazione funziona sulla vita del maestro (l'errore scende), ma non
+  cambia il comportamento.
+- Con il maestro fantasma (niente concorrenza; 200 recinti, 10 minuti,
+  critico 0,5): senza osservare 51,2%, osservando 50,7%, osservando tre
+  volte di più 51,8%. L'errore sulla vita del maestro scende solo del 10%
+  circa (dall'osservazione imparano solo le sinapsi dell'identità).
+- Il motivo è a monte: anche senza maestro solo il 52% dei critici dà più
+  valore alla pila buona che alla cattiva (al 65% se la parte che legge C
+  impara 10 volte più piano, ma con differenze minime). Il critico, così
+  com'è, non distingue in modo affidabile le pile.
+
+## Attenzione generale: mappa di priorità e oggetti con più caratteristiche (2026-10-28)
+
+**Il mondo.** Le pile sono rosse o gialle **e** grandi o piccole, a caso; i
+compagni sono blu e si muovono. Ogni oggetto ha le sue caratteristiche
+(`sim.pile.FEATURES`: rosso, giallo, blu, grande, piccolo, si muove).
+L'opzione `good_by` decide che cosa rende buona una pila: il colore (come
+prima) o la grandezza (allora il colore non conta). Nel menu: "Pile buone
+per"; da riga di comando `--buone grandezza`.
+
+**L'attenzione (S) è una mappa di priorità fatta di posizioni**, come il
+collicolo superiore: 9 neuroni-direzione che coprono il campo visivo, ognuno
+con l'oggetto più vicino nella sua direzione; un oggetto nuovo accende la
+sua posizione, non nasce nessun neurone. Ogni neurone somma la salienza
+innata, le caratteristiche dell'oggetto per **pesi imparati uguali in ogni
+posizione** (si impara "ciò che ha questa caratteristica", ovunque sia) e
+l'**incertezza** (Pearce e Hall: le caratteristiche che di recente hanno dato
+sorprese attirano). I pesi imparano con δ, l'incertezza con |δ|; i valori di
+partenza sono geni. La fovea porta tutte le caratteristiche dell'oggetto
+attento, e C le legge come identità.
+
+**Prove controllate** (200 recinti, preferenza imparata per la
+caratteristica buona del proprio recinto, esseri oltre 1 minuto):
+
+| | grandezza | colore |
+|---|---|---|
+| pile buone per grandezza, dopo 5 minuti | **+0,47** | +0,01 |
+| subito dopo l'inversione | −0,53 | 0,00 |
+| 5 minuti dopo l'inversione | **+0,34** | −0,01 |
+| pile buone per colore, dopo 5 minuti | −0,01 | **+0,49** |
+
+L'attenzione impara la caratteristica che conta, qualunque sia, e ignora le
+altre; dopo un'inversione si riadatta (in qualche minuto). I compagni
+(vistosi, in movimento, ma inutili qui) non la catturano.
+
+## Il critico rifatto, e perché per ora non insegna (2026-10-28)
+
+**Cosa è cambiato**
+- **Valore legato al corpo**: il piacere di una pila va da 0,2 (sazi) a 1,8
+  (affamati) volte il suo valore; l'energia spesa (muoversi, mordere) dà un
+  dispiacere nella stessa scala (spendere l'energia di una pila dispiace
+  quanto mangiarne una piace). Il mondo ora dice anche quanta energia si è
+  spesa a ogni passo.
+- **Tre critici con orizzonti diversi** (2, 8, 30 s di partenza, geni): in
+  natura zone e neuroni a dopamina diversi scontano il futuro in modo
+  diverso. Un orizzonte unico era legato ai tempi di questo mondo.
+- **Ingressi stabili**: fovea, D, C (con velocità propria, alta: il valore di
+  un oggetto in un colpo), energia, B con peso 0,2.
+- **Quanto pesa il critico** nella sorpresa che insegna è un gene
+  (`critic_mix`).
+
+**Cosa abbiamo trovato**
+- Con i comportamenti di chi impara il valore **non è prevedibile**: anche la
+  migliore previsione lineare possibile dagli stessi ingressi, calcolata a
+  posteriori, ha correlazione 0,004 con ciò che arriva davvero. Dopo aver
+  guardato una pila buona la si mangia entro 8 s solo l'8% delle volte
+  (cattiva: 5%).
+- Con il comportamento del guidato sì: correlazione 0,375 dalla sola fovea
+  e dall'energia, e una pila buona guardata è mangiata entro 8 s nel 46% dei
+  casi. Gli ingressi del critico sono quelli giusti; manca un comportamento
+  abbastanza coerente da essere previsto.
+- Quindi oggi ogni peso del critico peggiora (0: 59,5% di pile buone, 69%
+  prima dell'inversione; 0,25: 54%; 1: 52,5%). Il valore legato alla fame
+  invece aiuta (senza critico si passa dal 55% al 59,5%). Il peso di
+  partenza è 0: il critico impara, ma non insegna finché la fase B non lo
+  alza.
+
+## Le costanti diventano geni; figli da un genitore solo (2026-10-28)
+
+Tutte le costanti del cervello che avevo scelto a mano (circa 50: tempi,
+velocità, soglie, pesi della salienza innata, forza dell'arbitraggio, ogni
+quanto si decide...) sono geni (`sections.Genes`), una per essere. Nella fase
+A valgono i valori di partenza per tutti; nella fase B le tara l'evoluzione.
+Restano fissi solo la struttura (quanti neuroni e connessioni) e i limiti di
+sicurezza. Ogni essere decide al suo ritmo (`decide_every` è un gene).
+
+**Figli senza mescolamento**: il figlio ha il genoma intero di uno dei due
+genitori della coppia (a caso), più la mutazione. Prima ogni gene veniva da
+un genitore a caso, e questo spezzava i blocchi (un prototipo di B metà del
+padre e metà della madre).
+
 ## Arbitraggio, genoma con pesi e connessioni, salvataggi (2026-10-28)
 
 **Arbitraggio (U).** Con molte sorprese (k = U/3) il voto di C conta fino

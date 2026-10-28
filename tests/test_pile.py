@@ -10,9 +10,9 @@ from evonets.net.sections import (
     ActorCritic,
     Sections,
     Sizes,
-    cross,
     decode,
     default_genome,
+    inherit,
     mutate,
 )
 from evonets.sim.pile import N_SENSES, SENSES, PileConfig, PileWorld
@@ -195,7 +195,7 @@ def test_fast_memory_codes_follow_the_object_more_than_the_context():
 
 
 def test_the_stable_core_gives_two_situations_two_different_winners():
-    b = Sections(1, 0.05, seed=0, sizes=Sizes(conscience=2.0))
+    b = Sections(1, 0.05, seed=0)
     p1 = np.zeros((1, b.proto.shape[2]))
     p2 = p1.copy()
     p1[0, :5], p2[0, 5:10] = 1.0, 1.0
@@ -215,12 +215,13 @@ def test_the_actor_critic_learns_which_program_pays():
     n = 50
     a = ActorCritic(n, 0.05, seed=0)
     raw = np.zeros((n, N_SENSES))
-    reward = np.zeros(n)
-    objs = {"vis": np.zeros((n, 1), bool), "col": np.zeros((n, 1), int), "near": np.zeros((n, 1)),
-            "ang": np.zeros((n, 1))}  # niente in vista
+    reward = np.zeros((n, 3))  # piacere, dolore, energia spesa
+    objs = {"vis": np.zeros((n, 1), bool), "feat": np.zeros((n, 1, 6)), "near": np.zeros((n, 1)),
+            "ang": np.zeros((n, 1)), "good": np.zeros((n, 1), bool)}  # niente in vista
     for _ in range(4000):
         prog = a.step(raw, reward, objs)
-        reward = np.where(prog == 3, 0.05, 0.0)  # solo "esplora" rende
+        reward = np.zeros((n, 3))
+        reward[:, 0] = np.where(prog == 3, 0.05, 0.0)  # solo "esplora" rende
     assert a.pi[:, 3].mean() > 0.5  # da 0,2 (a caso)
 
 
@@ -232,20 +233,21 @@ def test_every_lesion_runs():
 
 def test_genomes_cross_mutate_and_stay_in_their_limits():
     rng = np.random.default_rng(0)
-    a, b = default_genome()[None], default_genome()[None] + 1.0
-    child = cross(a, b, rng)
-    assert ((child == a) | (child == b)).all()
+    a, b = np.tile(default_genome(), (50, 1)), np.tile(default_genome(), (50, 1)) + 1.0
+    child = inherit(a, b, rng)
+    assert all((c == a[0]).all() or (c == b[0]).all() for c in child)  # ogni figlio da un genitore solo, intero
+    assert 5 < sum((c == a[0]).all() for c in child) < 45
     g = mutate(np.tile(default_genome(), (5, 1)), rng, sigma=5.0)
     assert g.shape == (5, N_BASE)
     assert (np.abs(decode(g)["innate"]) <= INNATE_CAP).all()
 
 
 def test_the_genome_carries_starting_weights_and_connections_and_birth_uses_them():
-    """Nel genoma ci sono i pesi di partenza (B, E, V, salienza) e le
+    """Nel genoma ci sono i pesi di partenza (B, E, V, O) e le
     connessioni di C; alla nascita il cervello riparte da lì, non da ciò che
     il genitore aveva imparato."""
     b = Sections(3, 0.05, seed=0)
-    assert set(b.blocks) == {"proto", "c_in", "e0", "v0", "s0"}
+    assert set(b.blocks) == {"proto", "c_in", "e0", "v0", "o0"}
     assert (b.c_in.sum(-1) == b.s.c_fan_in).all()  # 4 connessioni per neurone di C, dal genoma
     g = b.genome.copy()
     sl, shape = b.blocks["e0"]
@@ -262,17 +264,17 @@ def test_the_genome_carries_starting_weights_and_connections_and_birth_uses_them
 def test_arbitration_gives_the_fast_memory_more_say_after_surprises():
     b = Sections(2, 0.05, seed=0)
     raw = np.zeros((2, N_SENSES))
-    objs = {"vis": np.zeros((2, 1), bool), "col": np.zeros((2, 1), int), "near": np.zeros((2, 1)),
-            "ang": np.zeros((2, 1))}
-    b.step(raw, np.zeros(2), objs)
+    objs = {"vis": np.zeros((2, 1), bool), "feat": np.zeros((2, 1, 6)), "near": np.zeros((2, 1)),
+            "ang": np.zeros((2, 1)), "good": np.zeros((2, 1), bool)}
+    b.step(raw, np.zeros((2, 3)), objs)
     b.unc[:] = [0.0, 3.0]  # il secondo ha appena avuto molte sorprese
-    b.step(raw, np.zeros(2), objs)
+    b.step(raw, np.zeros((2, 3)), objs)
     k = b.votes["k"]
     assert k[0] == 0.0 and k[1] == 1.0
     les = Sections(2, 0.05, seed=0, sizes=Sizes(lesions=frozenset("R")))
-    les.step(raw, np.zeros(2), objs)
+    les.step(raw, np.zeros((2, 3)), objs)
     les.unc[:] = 3.0
-    les.step(raw, np.zeros(2), objs)
+    les.step(raw, np.zeros((2, 3)), objs)
     assert (les.votes["k"] == 0.0).all()  # senza arbitraggio: com'era prima
 
 
@@ -396,3 +398,148 @@ def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkey
     menu.explore()
     assert app.current.testing
     pygame.quit()
+
+
+
+def test_every_brain_constant_is_a_gene_that_changes_behaviour():
+    """Le costanti sono geni, una per essere: cambiando il gene cambia il
+    comportamento (qui: ogni quanto si decide)."""
+    from evonets.net.sections import GENE_NAMES, Genes
+
+    assert {"decide_every", "sal_near", "c_max", "u_fast", "gate_bias", "arb_fast"} <= set(GENE_NAMES)
+    b = ActorCritic(2, 0.05, seed=0)
+    k = GENE_NAMES.index("decide_every")
+    b.genome[1, k] = np.log(2.0)  # il secondo decide ogni 2 s invece che ogni 0,5
+    b.p = decode(b.genome)
+    raw = np.zeros((2, N_SENSES))
+    objs = {"vis": np.zeros((2, 1), bool), "feat": np.zeros((2, 1, 6)), "near": np.zeros((2, 1)),
+            "ang": np.zeros((2, 1)), "good": np.zeros((2, 1), bool)}
+    decisions = np.zeros(2)
+    for _ in range(80):  # 4 s
+        decisions += b._tick()
+    assert decisions[0] == 8 and decisions[1] == 2
+    assert Genes().gate_bias < 0 and decode(np.tile(default_genome(), (1, 1)))["gate_bias"][0] < 0  # con il segno
+
+
+def test_o_learns_whatever_feature_matters_and_attention_follows():
+    """Se le pile buone si riconoscono dalla grandezza (il colore non conta), O
+    impara la grandezza buona e ignora il colore; e quando nella mappa ci sono
+    pile buone e cattive, lo sguardo va più spesso alle buone."""
+    from evonets.evo.pile_test import make_run
+    from evonets.net.sections import MAP, N_FEATURES, o_read, priority_map
+
+    r = make_run("sezioni", "A", 20, 0, (), PileConfig(good_by="grandezza"), "numpy")
+    b, K = r.brain, r.cfg.batteries
+    r.advance(int(200 / r.cfg.dt))
+    good = np.repeat(r.w.good, r.n)
+    old = r.w.age.ravel() > 60
+
+    def V(colour, big):
+        f = np.zeros((b.n, 1, N_FEATURES))
+        i = np.arange(b.n)
+        f[i, 0, colour], f[i, 0, 3 + (1 - big)] = 1.0, 1.0
+        return o_read(b.o_pl, b.o_pa, b.o_assoc, f, r.w.energy.ravel() / r.cfg.energy_max, b.p)[0][:, 0]
+
+    size = (V(0, good) + V(1, good) - V(0, 1 - good) - V(1, 1 - good)) / 2
+    colour = (V(0, 1) + V(0, 0) - V(1, 1) - V(1, 0)) / 2
+    assert np.mean(size[old] > 0) > 0.65 and np.median(size[old]) > 3 * abs(np.median(colour[old]))
+    mass, share = [], []
+    for _ in range(300):
+        r.step()
+        objs = {k: v.reshape((b.n,) + v.shape[2:]) for k, v in r.w.objects().items()}
+        has, obj, _, _ = priority_map(objs, MAP)
+        ok = objs["good"][np.arange(b.n)[:, None], obj]
+        g, bd = has & (obj < K) & ok, has & (obj < K) & ~ok
+        both = g.any(1) & bd.any(1)
+        pg, pb = (b.att.prob * g).sum(1), (b.att.prob * bd).sum(1)
+        both &= pg + pb > 0
+        mass += list(pg[both] / (pg + pb)[both])
+        share += list(g.sum(1)[both] / (g.sum(1) + bd.sum(1))[both])
+    assert np.mean(mass) > np.mean(share) + 0.05
+
+
+def test_the_priority_map_is_made_of_positions_not_objects():
+    """S: un neurone per direzione, ognuno con l'oggetto più vicino in quella
+    direzione; un oggetto nuovo non aggiunge neuroni."""
+    from evonets.net.sections import MAP, priority_map
+
+    vis = np.array([[True, True, True]])
+    ang = np.radians(np.array([[-50.0, -50.0, 40.0]]))  # due a sinistra (allo stesso angolo), uno a destra
+    near = np.array([[0.2, 0.9, 0.5]])
+    feat = np.eye(3)[None, :, :].repeat(1, 0)
+    feat = np.concatenate([feat, np.zeros((1, 3, 3))], 2)
+    has, obj, f, nr = priority_map({"vis": vis, "ang": ang, "near": near, "feat": feat}, MAP)
+    assert has.shape == (1, MAP) and has.sum() == 2
+    left = np.flatnonzero(has[0])[0]
+    assert obj[0, left] == 1  # il più vicino dei due
+
+
+def test_the_teacher_acts_like_the_guided_one_and_is_not_counted():
+    """Il maestro (il primo di ogni recinto) mangia quasi solo pile buone; le
+    misure contano solo gli allievi; toglierlo lo fa rinascere come un giovane."""
+    from evonets.evo.pile_test import make_run
+
+    r = make_run("sezioni", "A", 8, 0, (), PileConfig(), "numpy", teacher=True)
+    r.advance(int(120 / r.cfg.dt))
+    first = np.arange(r.B * r.n) % r.n == 0
+    g, b = r.by["good_by"][first].sum(), r.by["bad_by"][first].sum()
+    assert g > 5 and g / (g + b) > 0.85
+    assert r.counted[first].sum() == 0 and r.counted[~first].all()
+    counted = sum(r.by["good_by"][~first]) + sum(r.by["bad_by"][~first])
+    assert r.flat("good_taken").sum() + r.flat("bad_taken").sum() == counted
+    on, err = r.teaching()
+    assert on and err > 0
+    r.set_teacher(False)
+    assert not r.brain.teacher.any() and r.teaching() == (False, 0.0)
+    assert (r.brain.w_e[first] == r.brain.start("e0", first)).all()  # rinato
+
+
+def test_watching_the_teacher_teaches_o_what_happens_to_him():
+    """O di chi osserva il maestro prevede meglio i suoi episodi (piacere e
+    dolore) di quello di chi non lo osserva, senza esplodere."""
+    from evonets.evo.pile_test import make_run
+    from evonets.net.sections import GENE_NAMES, decode
+
+    errs = []
+    for observe in (1e-9, 1.0):
+        r = make_run("sezioni", "A", 8, 0, (), PileConfig(), "numpy", teacher=True)
+        r.brain.genome[:, GENE_NAMES.index("observe")] = np.log(observe)
+        r.brain.p = decode(r.brain.genome)
+        r.advance(int(120 / r.cfg.dt))
+        errs.append(r.teaching()[1])
+        assert np.abs(r.brain.o_pl).max() < 5
+    assert errs[1] < errs[0]
+
+
+def test_the_teacher_survives_a_save():
+    from evonets.evo.pile_saves import export_state, import_state
+    from evonets.evo.pile_test import make_run
+
+    r = make_run("sezioni", "A", 2, 0, (), PileConfig(), "numpy", teacher=True)
+    r.advance(10)
+    st = export_state(r)
+    r2 = make_run("sezioni", "A", 2, 0, (), PileConfig(), "numpy")
+    import_state(r2, st)
+    assert r2.teaching()[0] and (r2.counted == r.counted).all()
+
+
+def test_the_ghost_teacher_is_unseen_and_eats_its_own_copy():
+    """Il maestro fantasma: nessuno lo vede, e la pila che mangia sparisce solo per lui."""
+    from evonets.sim.pile import PileWorld
+
+    cfg = PileConfig(beings=2, batteries=1)
+    w = PileWorld(cfg, 1, 0)
+    w.ghost[0, 0] = True
+    w.bon[:] = True
+    w.bwait[:] = 99.0
+    w.bage[:] = 0.0
+    w.bpos[0, 0] = (250.0, 250.0)
+    w.pos[0] = [(250.0 - cfg.radius - cfg.battery_radius - 2, 250.0), (200.0, 250.0)]
+    w.heading[0] = [0.0, 0.0]
+    objs = w.objects()
+    assert not objs["vis"][0, 1, 1 + 0]  # il secondo non vede il fantasma
+    assert objs["vis"][0, 0, 1 + 1] or True  # il fantasma vede gli altri (se sono rivolti verso di lui)
+    w.step(np.zeros((1, 2)), np.zeros((1, 2)), np.array([[True, False]]))
+    assert w.bon[0, 0]  # per gli altri la pila c'è ancora
+    assert w.ghost_hide[0, 0] > 0 and not w.objects()["vis"][0, 0, 0]  # per lui no
+    assert w.objects()["vis"][0, 1, 0]

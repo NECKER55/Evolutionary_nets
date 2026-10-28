@@ -25,14 +25,16 @@ from .pile_test import SERIES, NumpyRun, make_run
 
 FORMAT = 1
 WORLD_KEYS = ("pos", "heading", "speed", "energy", "age", "charging", "taste", "pain", "good", "zone", "bpos",
-              "bcolor", "bon", "bwait", "bage", "pair_time", "rest")
+              "bcolor", "bbig", "bon", "bwait", "bage", "pair_time", "rest", "ghost", "ghost_hide")
 MOTOR_KEYS = {"wander": "wander", "escape": "escape", "f_in": "inputs", "f_act": "activity"}
 BRAIN_ATTR = {"att_target": ("att", "target"), "att_inhib": ("att", "inhib"), "att_inhib_t": ("att", "inhib_t"),
-              "att_prev_vis": ("att", "prev_vis"), "att_novelty": ("att", "novelty"), "att_w": ("att", "w"),
-              "att_e": ("att", "e"), "att_new": ("att", "new"), "a_slow": ("a", "slow")}
-BRAIN_KEYS = ("genome", "program", "pi", "bite", "p_bite", "w_e", "e_e", "w_v", "e_v", "v_prev", "fresh", "delta",
+              "att_prev_vis": ("att", "prev_vis"), "att_novelty": ("att", "novelty"),
+              "att_new": ("att", "new"), "a_slow": ("a", "slow")}
+BRAIN_KEYS = ("genome", "program", "pi", "bite", "p_bite", "w_e", "e_e", "w_v", "e_v", "v_prev", "value", "trust", "fresh", "delta",
               "teach", "proto", "pred", "win_rate", "state_b", "prev_b", "mem", "w_gate", "e_gate", "c_in", "u_c",
-              "e_c", "u_l", "code", "d_fast", "d_slow", "t_slow", "unc")
+              "e_c", "u_l", "code", "d_fast", "d_slow", "t_slow", "unc", "teacher", "obs_err", "o_pl", "o_pa",
+              "o_assoc", "o_e", "ep_on", "ep_pl", "ep_pa", "ep_e", "o_err", "o_out")
+OBSERVING = ("teacher", "obs_err")
 BY = ("good_by", "bad_by", "deaths_by")
 
 
@@ -63,7 +65,7 @@ def export_state(run) -> dict:
         v = getattr(run.motor, attr, None)
         if v is not None:
             world[key] = np.asarray(v)
-    brain = {"clock": np.float64(b.clock)}
+    brain = {"clock": np.asarray(b.clock)}
     for k in BRAIN_KEYS:
         if hasattr(b, k):
             brain[k] = np.asarray(getattr(b, k))
@@ -77,7 +79,7 @@ def export_state(run) -> dict:
     pair, has = np.zeros((run.B, 2, G)), np.zeros(run.B, dtype=bool)
     for k, (ga, gb) in run.pairs.items():
         pair[k], has[k] = (ga, gb), True
-    misc = {"reward": run.reward, "usage": run.usage, "pair": pair, "has_pair": has, **run.by}
+    misc = {"reward": run.reward, "usage": run.usage, "pair": pair, "has_pair": has, "counted": run.counted, **run.by}
     return {"world": world, "brain": brain, "misc": misc, "series": {k: run.flat(k) for k in SERIES}}
 
 
@@ -114,7 +116,8 @@ def import_state(run, state: dict, parts=("world", "brain", "misc", "series")) -
                 setattr(run.motor, attr, np.array(ws[key]))
     if "brain" in parts:
         bs = state["brain"]
-        b.clock = float(bs.get("clock", 0.0))
+        if "clock" in bs:
+            b.clock = np.broadcast_to(np.asarray(bs["clock"], dtype=float), b.clock.shape).copy()
         for k in BRAIN_KEYS:
             if k in bs and hasattr(b, k):
                 _check("brain", k, np.shape(getattr(b, k)), np.shape(bs[k]))
@@ -131,6 +134,8 @@ def import_state(run, state: dict, parts=("world", "brain", "misc", "series")) -
         run.reward, run.usage = np.array(ms["reward"]), np.array(ms["usage"])
         run.pairs = {k: (ms["pair"][k, 0].copy(), ms["pair"][k, 1].copy()) for k in np.flatnonzero(ms["has_pair"])}
         run.by = {k: np.array(ms[k]) for k in BY if k in ms}
+        if "counted" in ms:
+            run.counted = np.array(ms["counted"])
     if "series" in parts:
         run.series = {k: list(np.asarray(state["series"][k])) for k in SERIES}
 
@@ -146,7 +151,8 @@ def _check(part, key, want, got):
 
 def meta_of(run) -> dict:
     return {"agent": run.agent, "phase": run.phase, "lesions": sorted(run.lesions), "enclosures": run.B,
-            "beings": run.n, "seed": run.seed, "minutes": round(run.t / 60.0, 2), "engine": type(run).__name__}
+            "beings": run.n, "seed": run.seed, "minutes": round(run.t / 60.0, 2), "engine": type(run).__name__,
+            "good_by": run.cfg.good_by, "teacher": getattr(run, "teacher_kind", "fantasma")}
 
 
 def save(run, path) -> None:
@@ -182,10 +188,11 @@ def read(path) -> tuple[dict, dict]:
 def load(path, engine: str = "gpu", cfg: PileConfig | None = None):
     """La corsa salvata in `path`, pronta a continuare (regole attuali)."""
     meta, state = read(path)
-    cfg = cfg or PileConfig(beings=meta["beings"])
+    cfg = cfg or PileConfig(beings=meta["beings"], good_by=meta.get("good_by", "colore"))
     run = make_run(meta["agent"], meta["phase"], meta["enclosures"], meta["seed"], tuple(meta["lesions"]), cfg,
                    engine)
     import_state(run, state)
+    run.teacher_kind = meta.get("teacher", "fantasma")
     return run
 
 
@@ -198,11 +205,13 @@ def alone(source, engine: str = "gpu", seed: int = 1):
     else:
         meta, state = meta_of(source), export_state(source)
     N = meta["enclosures"] * meta["beings"]
-    cfg = PileConfig(beings=1)
+    cfg = PileConfig(beings=1, good_by=meta.get("good_by", "colore"))
     run = make_run(meta["agent"], "A", N, seed, tuple(meta["lesions"]), cfg, engine)
     # Ciò che riguarda il recinto di prima (chi si guardava, chi era appena
-    # comparso) ricomincia; resta ciò che si è imparato (anche la salienza).
-    brain = {k: v for k, v in state["brain"].items() if k == "att_w" or not (k.startswith("att_") or k == "counts")}
+    # comparso) ricomincia; resta ciò che si è imparato (anche O). Da soli
+    # non c'è nessun maestro.
+    brain = {k: v for k, v in state["brain"].items()
+             if not (k.startswith("att_") or k == "counts" or k in OBSERVING)}
     import_state(run, {"brain": brain}, parts=("brain",))
     run.origin = meta
     return run
