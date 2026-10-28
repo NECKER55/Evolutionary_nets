@@ -123,28 +123,40 @@ def test_the_guided_being_chooses_and_survives():
 # --- Il cervello a sezioni, pezzo per pezzo --------------------------------------------
 
 
-def test_working_memory_holds_after_an_event_and_fades():
+def test_working_memory_holds_the_last_object_after_it_is_gone_and_fades():
+    from evonets.net.sections import FOVEA
+
     b = Sections(1, 0.05, seed=0)
-    pattern = np.zeros((1, b.nb))
-    pattern[0, 3] = 1.0
-    b._d(pattern, np.ones(1), np.zeros(1))  # un evento: il cancello si apre
+    seen = np.zeros((1, len(FOVEA)))
+    seen[0, 1], seen[0, 3], seen[0, -1] = 1.0, 0.9, 1.0  # un oggetto giallo, vicino, appena guardato
+    b._d(seen, np.zeros(1))  # il cancello si apre
     for _ in range(int(2.0 / 0.05)):
-        held = b._d(np.zeros((1, b.nb)), np.zeros(1), np.zeros(1)).copy()  # senza ingresso
-    assert held[0, 3] > 0.4  # dopo 2 s c'è ancora (τ = 4 s)
+        held = b._d(np.zeros((1, len(FOVEA))), np.zeros(1)).copy()  # sparito: fovea vuota
+    assert held[0, 1] > 0.4  # dopo 2 s si sa ancora che era giallo (τ = 4 s)
     for _ in range(int(20.0 / 0.05)):
-        held = b._d(np.zeros((1, b.nb)), np.zeros(1), np.zeros(1))
-    assert held[0, 3] < 0.05
+        held = b._d(np.zeros((1, len(FOVEA))), np.zeros(1))
+    assert held[0, 1] < 0.05
 
 
-def test_fast_memory_gives_sparse_codes_that_tell_situations_apart():
+def test_fast_memory_codes_follow_the_object_more_than_the_context():
+    """C: lo stesso oggetto con contesti diversi accende quasi gli stessi
+    neuroni; oggetti diversi nello stesso contesto, neuroni diversi."""
+    from evonets.net.sections import FOVEA
+
     b = Sections(1, 0.05, seed=0)
     rng = np.random.default_rng(0)
-    codes = []
-    for _ in range(2):
-        x = (rng.random((1, b.nb)) > 0.7).astype(float)
-        codes.append(b._c(x, np.zeros_like(x)).copy())
-    assert all(c.sum() == b.s.c_winners for c in codes)
-    assert (codes[0] * codes[1]).sum() < b.s.c_winners  # due situazioni diverse: codici diversi
+
+    def code(colour, context):
+        fov = np.zeros((1, len(FOVEA)))
+        fov[0, colour], fov[0, 3] = 1.0, 0.8
+        return b._c(context, fov.copy(), fov).copy()
+
+    ctx = [(rng.random((1, b.nb)) > 0.6).astype(float) for _ in range(2)]
+    same_object = (code(1, ctx[0]) * code(1, ctx[1])).sum()
+    other_object = (code(1, ctx[0]) * code(0, ctx[0])).sum()
+    assert code(1, ctx[0]).sum() >= 1
+    assert same_object == code(1, ctx[0]).sum()  # lo stesso oggetto: esattamente gli stessi neuroni
+    assert other_object < same_object
 
 
 def test_the_stable_core_gives_two_situations_two_different_winners():
@@ -169,8 +181,10 @@ def test_the_actor_critic_learns_which_program_pays():
     a = ActorCritic(n, 0.05, seed=0)
     raw = np.zeros((n, N_SENSES))
     reward = np.zeros(n)
+    objs = {"vis": np.zeros((n, 1), bool), "col": np.zeros((n, 1), int), "near": np.zeros((n, 1)),
+            "ang": np.zeros((n, 1))}  # niente in vista
     for _ in range(4000):
-        prog = a.step(raw, reward)
+        prog = a.step(raw, reward, objs)
         reward = np.where(prog == 3, 0.05, 0.0)  # solo "esplora" rende
     assert a.pi[:, 3].mean() > 0.5  # da 0,2 (a caso)
 
@@ -254,8 +268,12 @@ def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkey
         for _ in range(3):
             screen.update()
             screen.draw(app.screen)
-        screen.hover = ("section", "V")
-        screen.draw(app.screen)  # anche la spiegazione sotto il mouse
+        from evonets.net.sections import N_A
+
+        for hover in (("section", "V"), ("section", "S"), ("A", 0), ("A", N_A - 1), ("arena",)) + (
+                (("B", 0), ("D", 0), ("C", 0), ("E", 0)) if agent == "sezioni" else ()):
+            screen.hover = hover
+            screen.draw(app.screen)  # anche la spiegazione sotto il mouse
         screen.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE, mod=0))
         assert app.current is menu
     pygame.quit()

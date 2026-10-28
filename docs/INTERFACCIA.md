@@ -124,7 +124,11 @@ La schermata (`evonets/viz/pile_view.py`):
   i voti verso E: spesse C, sottili L), E (i 5 programmi, barra =
   probabilità, cornice gialla = quello in corso), F (il movimento fisso di
   ciascuno), V (δ: verde meglio del previsto, rosso peggio; linee viola
-  verso chi impara) e U (l'incertezza). Verde = rafforza, rosso =
+  verso chi impara), U (l'incertezza) e S (l'attenzione: i pesi imparati
+  per colore, verde = attira lo sguardo, rosso = lo respinge). In A, sotto i
+  sensi, la fovea: colore, vicinanza e lato dell'oggetto attento; nel
+  recinto un anello azzurro e una linea indicano l'oggetto su cui l'essere
+  seguito è concentrato. Verde = rafforza, rosso =
   indebolisce, grigio = fisso.
 - **Il mouse su qualsiasi cosa** apre una spiegazione: cosa fa la sezione, a
   cosa risponde quel neurone (per B anche quale colore domina la vista quando

@@ -327,6 +327,12 @@ con la dopamina). Alternativa da provare per D: un piccolo **reservoir**
 (rete ricorrente fissa e casuale, Jaeger, Maass) che tiene l'eco di ciò che
 è successo.
 
+**Aggiunti (2026-10-28):** l'attenzione con salienza innata e imparata e
+la fovea in A; F generico sull'oggetto attento (avvicinati, allontanati,
+lascialo, esplora); tracce strette (E e cancello di D si marcano solo da
+neuroni sopra 0,5); soglia adattiva su δ per tutto ciò che impara tranne
+il critico. Dettagli e risultati: docs/SPEC_ARENA_PILE.md.
+
 **Non ancora fatto:** l'anello all'indietro da D ed E verso B, i valori
 innati nella fase A (sono a zero di proposito; evolvono nella fase B), il
 riposo come riproduzione vera dei ricordi (per ora L si avvicina a C a

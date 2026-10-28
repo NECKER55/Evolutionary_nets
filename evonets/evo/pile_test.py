@@ -21,7 +21,7 @@ import time
 
 import numpy as np
 
-from ..net.sections import AGENTS, GENE_NAMES, N_GENOME, Sections, Sizes, cross, decode, mutate
+from ..net.sections import AGENTS, EXPLORE, GENE_NAMES, N_GENOME, Sections, Sizes, cross, decode, mutate
 from ..sim.pile import EYES, N_PROGRAMS, PROGRAMS, Motor, PileConfig, PileWorld
 
 WINDOWS = ((-30, 0), (0, 15), (15, 30), (30, 60), (60, 90))  # s rispetto all'inversione
@@ -44,7 +44,7 @@ class NumpyRun:
         self.w = PileWorld(cfg, enclosures, seed)
         self.B, self.n = self.w.B, self.w.n
         N = self.B * self.n
-        kw = {"sizes": Sizes(lesions=frozenset(lesions))} if agent == "sezioni" else {}
+        kw = brain_kwargs(agent, cfg, lesions)
         self.brain = AGENTS[agent](N, cfg.dt, seed, genomes=start_genomes(agent, phase, N, seed, cfg.dt), **kw)
         self.motor = Motor((self.B, self.n), np.random.default_rng([seed, 2]))
         self.rng = np.random.default_rng([seed, 3])
@@ -63,19 +63,22 @@ class NumpyRun:
         N = B * n
         raw = w.senses()
         flat = raw.reshape(N, -1)
+        objs = {k: v.reshape((N,) + v.shape[2:]) for k, v in w.objects().items()}
         if self.agent == "guidato":
             brain.good = np.repeat(w.good, n)
-        program = brain.step(flat, self.reward)
+        program = brain.step(flat, self.reward, objs)
         self.usage += np.bincount(program, minlength=N_PROGRAMS)
         if self.counts is not None:  # chi vince in B, rispetto a quale colore domina la vista
             eye = flat[:, EYES].reshape(N, 3, 3).max(-1)
             seen = np.where(eye.max(1) > 0.2, eye.argmax(1), 3)
             self.counts[np.arange(N), brain.winner(), seen] += 1.0
-        thrust, steer = self.motor(program.reshape(B, n), raw, cfg.dt)
+        has, _, near, ang = brain.att.seen(objs)
+        thrust, steer = self.motor(program.reshape(B, n), raw, has.reshape(B, n), near.reshape(B, n),
+                                   ang.reshape(B, n), cfg.dt)
         if self.agent == "guidato":  # sa anche dov'è la zona: quando esplora ci va
             to = w.zone_centres()[w.zone][:, None, :] - w.pos
             ang = (np.arctan2(to[..., 1], to[..., 0]) - w.heading + np.pi) % (2 * np.pi) - np.pi
-            go = (program.reshape(B, n) == 3) & (np.hypot(to[..., 0], to[..., 1]) > cfg.zone_half)
+            go = (program.reshape(B, n) == EXPLORE) & (np.hypot(to[..., 0], to[..., 1]) > cfg.zone_half)
             steer = np.where(go, np.clip(2.0 * ang, -1.0, 1.0), steer)
         before = (len(w.taken), dict(w.deaths), len(w.matings), len(w.inversions), len(w.zone_changes))
         out = w.step(thrust, steer)
@@ -120,9 +123,10 @@ class NumpyRun:
 
     def brain_of(self, i: int) -> dict:
         b = self.brain
-        keys = ("genome", "w_e", "w_v", "program", "pi", "delta", "proto", "pred", "win_rate", "state_b", "mem",
-                "w_gate", "c_in", "u_c", "u_l", "code", "unc")
+        keys = ("genome", "w_e", "w_v", "program", "pi", "delta", "teach", "proto", "pred", "win_rate", "state_b",
+                "mem", "w_gate", "c_in", "u_c", "u_l", "code", "unc", "d_slow")
         out = {k: np.asarray(getattr(b, k))[i] for k in keys if hasattr(b, k)}
+        out.update(att_target=b.att.target[i], att_w=b.att.w[i], att_new=b.att.new[i])
         if hasattr(b, "a"):
             out["a_slow"] = b.a.slow[i]
         if self.counts is not None:
@@ -137,6 +141,17 @@ class NumpyRun:
 
     def flat(self, name):
         return np.asarray(self.series[name], dtype=float)
+
+
+def brain_kwargs(agent: str, cfg: PileConfig, lesions=()) -> dict:
+    """Gli argomenti per costruire il cervello: quanti oggetti può guardare,
+    le lesioni del cervello a sezioni, quante pile (per il guidato)."""
+    kw = {"objects": cfg.batteries + cfg.beings}
+    if agent == "sezioni":
+        kw["sizes"] = Sizes(lesions=frozenset(lesions))
+    if agent == "guidato":
+        kw["batteries"] = cfg.batteries
+    return kw
 
 
 def make_run(agent="sezioni", phase="A", enclosures=200, seed=0, lesions=(), cfg: PileConfig | None = None,
@@ -277,7 +292,7 @@ def main() -> None:
     if args.confronto:
         for agent, les in (("guidato", ()), ("attore-critico", ()), ("sezioni", ()), ("sezioni", ("B",)),
                            ("sezioni", ("D",)), ("sezioni", ("C",)), ("sezioni", ("L",)), ("sezioni", ("U",)),
-                           ("sezioni", ("V",))):
+                           ("sezioni", ("V",)), ("sezioni", ("S",))):
             show(run(agent, "A", args.recinti, args.minuti, args.seed, les, engine=args.motore))
         return
     lesions = tuple(x for x in args.lesioni.split(",") if x)

@@ -16,8 +16,8 @@ import time
 import numpy as np
 import pygame
 
-from ..net.sections import FAST, N_A
-from ..sim.pile import N_PROGRAMS, N_SENSES, PROGRAMS, SECTORS, RAYS
+from ..net.sections import FAST, FOVEA, N_A, fovea_of
+from ..sim.pile import N_PROGRAMS, N_SENSES, PROGRAMS, RAYS, SECTORS, objects_of
 from .launcher import Screen
 from .render import BG, BORDER, DIM, PLAYER, TARGET, TEXT
 
@@ -31,28 +31,36 @@ ZONE_C = (40, 46, 34)
 SPEEDS = (1, 3, 6, 12, 24, 48)  # volte il tempo reale
 SHORT = ("rosso sx", "rosso c", "rosso dx", "giallo sx", "giallo c", "giallo dx", "blu sx", "blu c", "blu dx",
          "muro sx", "muro c", "muro dx", "contatto", "energia", "mi guardano", "gusto", "dolore")
-PROG_SHORT = ("→ rosso", "→ giallo", "→ blu", "esplora", "evita")
+PROG_SHORT = ("avvicinati", "allontanati", "lascialo", "esplora")
+F_SHORT = ("vai verso", "vai via", "guarda altro", "vaga")
+FOVEA_SHORT = ("fov. rosso", "fov. giallo", "fov. blu", "fov. vicino", "fov. sinistra", "fov. destra", "fov. nuovo")
 
 SECTION_HELP = {
     "A": ("A  interfaccia dei sensi (fissa)",
           "Cosa sentono i sensi adesso: barra piena = valore, tacca chiara = quanto è appena salito ('cosa è "
-          "cambiato'). Non impara: è come la retina."),
+          "cambiato'). Sotto, la fovea: colore, vicinanza e lato del solo oggetto attento. Non impara: è come la "
+          "retina."),
     "B": ("B  nucleo stabile: cosa c'è",
           "16 neuroni in gara: vincono i 3 più simili a ciò che arriva. Ognuno si specializza da solo, piano, su "
           "una situazione che si ripete (nessuno nasce 'rosso'). Le linee verso A: a cosa risponde."),
-    "D": ("D  memoria di lavoro: cosa è appena successo",
-          "Una copia di B che resta accesa per qualche secondo dopo un evento (una pila presa, un colore che "
-          "compare). Il cancello decide quando scrivere: è l'unica cosa che impara."),
+    "D": ("D  memoria di lavoro: che cosa ho appena guardato",
+          "Una copia della fovea, scritta quando entra un oggetto nuovo, che resta per qualche secondo anche "
+          "quando l'oggetto non si vede più: quando arriva il gusto o il dolore, D sa ancora che cosa si è preso. "
+          "Il cancello decide quando scrivere: è l'unica cosa che impara."),
     "C": ("C  memoria veloce (e L, lenta)",
-          "64 neuroni con ingressi fissi e casuali da B e D (come il corpo a fungo degli insetti): ogni "
-          "situazione ne accende 4. Le loro uscite verso E imparano in un colpo e dimenticano in minuti. L è la "
+          "64 neuroni con ingressi fissi e casuali, soprattutto dall'oggetto (fovea e D) e un po' dal contesto (B), "
+          "come il corpo a fungo degli insetti con gli odori: lo stesso oggetto accende sempre gli stessi. Le loro uscite verso E imparano in un colpo e dimenticano in minuti. L è la "
           "stessa uscita, cento volte più lenta: tiene solo ciò che vale sempre."),
     "E": ("E  selezione: cosa faccio",
           "5 programmi in gara; la barra è la probabilità di sceglierlo. Vince uno alla volta, con un po' di "
           "caso (esplorazione). Impara con δ: si rafforza ciò che ha portato meglio del previsto."),
     "F": ("F  motore: come lo faccio (fisso)",
-          "Ogni programma è un movimento innato: girarsi verso un colore e avvicinarsi, vagare, girarsi via. Più "
-          "il riflesso che fa girare via dai muri."),
+          "Ogni programma è un movimento innato sull'oggetto attento, di cui F sa solo dove sta: andarci "
+          "(rallentando da vicino), andare via, guardare altro, vagare. Più il riflesso che fa girare via dai muri."),
+    "S": ("S  attenzione: su cosa mi concentro",
+          "Un oggetto alla volta (pila o compagno), scelto per salienza: innata (vicino, appena comparso, un po' "
+          "di inerzia, e chi è stato appena lasciato si ignora per 3 s) più imparata (un peso per colore, che δ "
+          "cambia: ciò che ha portato sorprese positive cattura lo sguardo). Le barre sono i pesi imparati."),
     "V": ("V  critico: va meglio o peggio del previsto?",
           "Prevede quanto bene arriverà da B, D, C. δ = ciò che arriva meno ciò che prevedeva: positivo = meglio "
           "del previsto. È il maestro interno: le linee viola lo portano a chi impara."),
@@ -269,6 +277,13 @@ class PileScreen(Screen):
             pygame.draw.circle(s, col, c, rad, 0 if j == i else 2)
             tip = w["pos"][j] + cfg.radius * 1.4 * np.array([np.cos(w["heading"][j]), np.sin(w["heading"][j])])
             pygame.draw.circle(s, BLUE_C, P(tip), 3)
+        # L'oggetto su cui l'essere seguito è concentrato: un anello e una linea.
+        has, _, _, _, t = self._attended(w, self.view[1])
+        if has:
+            K = cfg.batteries
+            obj = w["bpos"][t] if t < K else w["pos"][t - K]
+            pygame.draw.line(s, ME_C, P(me), P(obj), 1)
+            pygame.draw.circle(s, ME_C, P(obj), max(8, int((cfg.battery_radius + 6) * sc)), 2)
         s.set_clip(None)
         pygame.draw.rect(s, BORDER, box, 2)
         self.targets.append((box, ("arena",)))
@@ -310,7 +325,7 @@ class PileScreen(Screen):
         i = self.follow
         senses = raw[i]
         fast = np.clip(senses[list(FAST)] - br["a_slow"], 0.0, 1.0) if "a_slow" in br else np.zeros(len(FAST))
-        a = np.concatenate([senses, fast])
+        a = np.concatenate([senses, fast, self._fovea(world, br)])
         agent = self.run.agent
         title = {"sezioni": "Il cervello a sezioni dell'essere seguito",
                  "attore-critico": "Attore-critico: A -> E e V (niente sezioni in mezzo)",
@@ -327,11 +342,12 @@ class PileScreen(Screen):
         A_pos = self._section_A(s, xs["A"], top, a)
         E_pos = self._section_E(s, xs["E"], top + 40, br, agent)
         self._section_F(s, xs["F"], E_pos, br, agent)
+        self._section_S(s, xs["E"], E_pos[-1][1] + 70, br)
         if agent == "guidato":
-            self._links(s, [(A_pos[k], E_pos[p], 0.8, FIXED) for k, p in ((0, 0), (1, 0), (2, 0), (3, 1), (4, 1),
-                                                                         (5, 1))])
-            s.blit(self.app.small.render("regola scritta a mano: insegue il colore buono (lo sa), evita il "
-                                         "cattivo davanti, altrimenti va verso la zona (la sa)", True, DIM),
+            fov = N_SENSES + len(FAST)
+            self._links(s, [(A_pos[fov + k], E_pos[0], 0.8, FIXED) for k in range(3)])
+            s.blit(self.app.small.render("regola scritta a mano: guarda la pila buona (sa qual è), ci va; "
+                                         "le altre le lascia; senza, va verso la zona (la sa)", True, DIM),
                    (self._arena_rect().right + 40, s.get_height() - 40))
             return
         if agent == "attore-critico":
@@ -339,18 +355,54 @@ class PileScreen(Screen):
             self._weights_to_E(s, br["w_e"], [A_pos[k] for k in range(N_A)], f, E_pos)
             self._section_V(s, area.x + 420, area.bottom - 120, br, [E_pos[p] for p in range(N_PROGRAMS)])
             return
+        self._fovea_pos = A_pos[N_A - len(FOVEA):]
         B_pos = self._section_B(s, xs["B"], top, br, A_pos, a)
-        D_pos = self._section_D(s, xs["D"], top, br, B_pos)
+        D_pos = self._section_D(s, xs["D"], top, br, self._fovea_pos)
         C_pos = self._section_C(s, xs["C"], top, br, B_pos, D_pos, E_pos)
-        nb = len(B_pos)
         f = np.concatenate([br["state_b"], br["mem"], [1.0]])
         self._weights_to_E(s, br["w_e"], B_pos + D_pos, f, E_pos, limit=10)
         self._section_V(s, xs["C"] + 20, area.bottom - 120, br,
-                        [C_pos[0], E_pos[0], D_pos[nb // 2]])
+                        [C_pos[0], E_pos[0], D_pos[len(D_pos) // 2]])
         self._legend(s, area)
 
     LABELS = {"A": "A sensi", "B": "B cosa c'è", "D": "D appena", "C": "C/L ricordi", "E": "E scelta",
-              "F": "F motore", "V": "V critico (δ)", "U": "U"}
+              "F": "F motore", "V": "V critico (δ)", "U": "U", "S": "S attenzione"}
+
+    def _objects(self, world):
+        """Gli oggetti in vista nel recinto guardato (1, n, M)."""
+        cfg = self.cfg
+        return objects_of(world["pos"][None], world["heading"][None], world["bpos"][None],
+                          np.asarray(world["bcolor"])[None], np.asarray(world["bon"], bool)[None], cfg)
+
+    def _attended(self, world, br):
+        """(c'è, colore, vicinanza, angolo, indice) dell'oggetto attento dall'essere seguito."""
+        t = int(br.get("att_target", -1))
+        if t < 0:
+            return False, 0, 0.0, 0.0, -1
+        o = self._objects(world)
+        i = self.follow
+        return True, int(o["col"][0, i, t]), float(o["near"][0, i, t]), float(o["ang"][0, i, t]), t
+
+    def _fovea(self, world, br):
+        has, col, near, ang, _ = self._attended(world, br)
+        return fovea_of(np.array([col]), np.array([near]), np.array([ang]), np.array([has]),
+                        np.array([float(br.get("att_new", 0.0))]))[0]
+
+    def _section_S(self, s, x, y, br):
+        app = self.app
+        self._label(s, "S", x - 4, y - 22)
+        r = pygame.Rect(x, y, 200, 48)
+        pygame.draw.rect(s, (30, 34, 46), r)
+        pygame.draw.rect(s, BORDER, r, 1)
+        w = br.get("att_w", np.zeros(3))
+        for k, (name, col) in enumerate((("rosso", RED_C), ("giallo", YELLOW_C), ("blu", BLUE_C))):
+            yy = r.y + 6 + k * 14
+            s.blit(app.small.render(name, True, col), (r.x + 6, yy - 2))
+            mid = r.x + 120
+            v = float(np.clip(w[k] / 3.0, -1.0, 1.0))
+            pygame.draw.line(s, BORDER, (mid, yy), (mid, yy + 10), 1)
+            pygame.draw.rect(s, POS if v > 0 else NEG, (min(mid, mid + int(70 * v)), yy + 2, abs(int(70 * v)), 7))
+        self.targets.append((r, ("section", "S")))
 
     def _links(self, s, links):
         """Collegamenti semplici: (da, a, forza 0-1, colore)."""
@@ -369,12 +421,17 @@ class PileScreen(Screen):
         self._label(s, "A", x, top - 20, 200)
         pos = []
         fast_of = {c: k for k, c in enumerate(FAST)}
-        row = 30
-        for k in range(N_SENSES):
-            y = top + k * row
+        row = 21
+        fov = N_SENSES + len(FAST)
+        names = list(SHORT) + list(FOVEA_SHORT)
+        rows = list(range(N_SENSES)) + [fov + k for k in range(len(FOVEA))]
+        colours = [RED_C] * 3 + [YELLOW_C] * 3 + [BLUE_C] * 3 + [TEXT] * 8 + [RED_C, YELLOW_C, BLUE_C] + [ME_C] * 4
+        fovea_pos = []
+        for r_, k in enumerate(rows):
+            y = top + r_ * row + (8 if r_ >= N_SENSES else 0)
             v = float(a[k])
-            col = (RED_C, RED_C, RED_C, YELLOW_C, YELLOW_C, YELLOW_C, BLUE_C, BLUE_C, BLUE_C)[k] if k < 9 else TEXT
-            s.blit(app.small.render(SHORT[k], True, lerp(DIM, col, 0.4 + 0.6 * v)), (x, y))
+            col = colours[r_]
+            s.blit(app.small.render(names[r_], True, lerp(DIM, col, 0.4 + 0.6 * v)), (x, y))
             bar = pygame.Rect(x + 92, y + 2, 90, 9)
             pygame.draw.rect(s, (40, 44, 58), bar)
             pygame.draw.rect(s, lerp((60, 64, 80), col, 0.3 + 0.7 * v), (bar.x, bar.y, int(bar.w * v), bar.h))
@@ -382,10 +439,10 @@ class PileScreen(Screen):
                 fv = float(a[N_SENSES + fast_of[k]])
                 pygame.draw.rect(s, (230, 230, 240), (bar.x, bar.bottom + 2, int(bar.w * fv), 3))
             pygame.draw.circle(s, lerp((50, 54, 70), col, v), (x + 196, y + 6), 5)
-            pos.append((x + 196, y + 6))
-            self.targets.append((pygame.Rect(x, y - 2, 200, row - 4), ("A", k)))
+            (pos if r_ < N_SENSES else fovea_pos).append((x + 196, y + 6))
+            self.targets.append((pygame.Rect(x, y - 2, 200, row - 2), ("A", k)))
         # I canali "cosa è cambiato" hanno la stessa riga del loro senso (tacca chiara).
-        return pos + [pos[c] for c in FAST]
+        return pos + [pos[c] for c in FAST] + fovea_pos
 
     def _section_B(self, s, x, top, br, A_pos, a):
         self._label(s, "B", x - 10, top - 20, 80)
@@ -417,13 +474,14 @@ class PileScreen(Screen):
             self.targets.append((pygame.Rect(p[0] - 10, p[1] - 10, 20, 20), ("B", j)))
         return pos
 
-    def _section_D(self, s, x, top, br, B_pos):
+    def _section_D(self, s, x, top, br, fovea_pos):
+        """D: l'ultimo oggetto guardato, una copia della fovea che resta."""
         self._label(s, "D", x - 10, top - 20, 80)
         mem = br["mem"]
         pos = []
-        for j, bp in enumerate(B_pos):
-            p = (x + 20, bp[1])
-            pygame.draw.line(s, FIXED, bp, p, 1)  # B -> D: copia (fissa)
+        for j, fp in enumerate(fovea_pos):
+            p = (x + 20, fp[1])
+            pygame.draw.line(s, (60, 66, 84), fp, p, 1)  # fovea -> D: copia (fissa, quando il cancello si apre)
             v = float(mem[j]) if j < len(mem) else 0.0
             pygame.draw.circle(s, lerp((40, 44, 58), (140, 210, 250), v), p, 7)
             pygame.draw.circle(s, BORDER, p, 7, 1)
@@ -440,7 +498,7 @@ class PileScreen(Screen):
         for j in range(n):
             p = (x + 14 + (j % cols) * 18, top + 60 + (j // cols) * 18)
             pos.append(p)
-        src = B_pos + D_pos
+        src = self._fovea_pos + D_pos + B_pos  # l'ordine degli ingressi di C: fovea, D, B (contesto)
         lit = np.flatnonzero(code > 0)
         for j in lit:  # ingressi fissi e casuali dei neuroni accesi
             for k in np.flatnonzero(c_in[j] > 0):
@@ -504,11 +562,10 @@ class PileScreen(Screen):
         for p_, (ex, ey) in enumerate(E_pos):
             on = p_ == prog
             pygame.draw.line(s, PLAYER if on else FIXED, (ex + 110, ey), (x, ey), 2 if on else 1)
-            r = pygame.Rect(x, ey - 10, 70, 20)
+            r = pygame.Rect(x, ey - 10, 92, 20)
             pygame.draw.rect(s, (30, 34, 46), r)
             pygame.draw.rect(s, PLAYER if on else BORDER, r, 1)
-            s.blit(app.small.render(("tassia", "tassia", "tassia", "vagare", "girarsi")[p_], True,
-                                    TEXT if on else DIM), (r.x + 6, r.y + 3))
+            s.blit(app.small.render(F_SHORT[p_], True, TEXT if on else DIM), (r.x + 6, r.y + 3))
             self.targets.append((r, ("section", "F")))
 
     def _section_V(self, s, x, y, br, targets):
@@ -564,7 +621,11 @@ class PileScreen(Screen):
                     "settori) e i tre raggi per i muri; il puntino blu è la luce sul muso. Clic: segui un altro."]
         if kind == "A":
             k = key[1]
-            return [f"A · {SHORT[k]}", SECTION_HELP["A"][1], f"valore adesso: {raw[i, k]:.2f}"]
+            if k < N_SENSES:
+                return [f"A · {SHORT[k]}", SECTION_HELP["A"][1], f"valore adesso: {raw[i, k]:.2f}"]
+            f = k - (N_A - len(FOVEA))
+            return [f"A · fovea: {FOVEA[f]}", "La fovea descrive solo l'oggetto su cui l'essere è concentrato "
+                    "(anello azzurro nel recinto).", f"valore adesso: {self._fovea(world, br)[f]:.2f}"]
         if kind == "B":
             j = key[1]
             proto = br.get("proto")
@@ -582,12 +643,12 @@ class PileScreen(Screen):
             return out
         if kind == "D":
             j = key[1]
-            return [f"D · copia del neurone {j + 1} di B", SECTION_HELP["D"][1], f"tenuto adesso: {br['mem'][j]:.2f}"]
+            return [f"D · ricordo: {FOVEA[j]}", SECTION_HELP["D"][1], f"tenuto adesso: {br['mem'][j]:.2f}"]
         if kind == "C":
             j = key[1]
             votes = ", ".join(f"{PROG_SHORT[p]} {br['u_c'][p, j]:+.2f}/{br['u_l'][p, j]:+.2f}"
                               for p in range(N_PROGRAMS))
-            return [f"C · neurone {j + 1}", "Ingressi fissi da 4 neuroni a caso di B e D. Voti verso E (C veloce / "
+            return [f"C · neurone {j + 1}", "Ingressi fissi da 4 canali a caso tra fovea, D e B. Voti verso E (C veloce / "
                     "L lenta):", votes, "acceso adesso" if br["code"][j] > 0 else "spento adesso"]
         if kind == "E":
             p_ = key[1]

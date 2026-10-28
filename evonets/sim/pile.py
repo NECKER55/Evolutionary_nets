@@ -187,6 +187,10 @@ class PileWorld:
         out[..., 16] = self.pain
         return out
 
+    def objects(self) -> dict:
+        """Gli oggetti in vista di ogni essere (vedi `objects_of`)."""
+        return objects_of(self.pos, self.heading, self.bpos, self.bcolor, self.bon, self.cfg)
+
     def _watched(self):
         """(B, n): un altro essere vicino ha il muso verso di me."""
         cfg = self.cfg
@@ -320,18 +324,48 @@ class PileWorld:
         return out
 
 
+# --- Gli oggetti in vista (per l'attenzione) ----------------------------------------
+
+
+def objects_of(pos, heading, bpos, bcolor, bon, cfg, xp=np):
+    """Gli oggetti che ogni essere vede, per l'attenzione: prima le pile (K),
+    poi gli altri esseri (n). Per ognuno: visibile (dentro il ventaglio degli
+    occhi e la portata; un essere solo se è rivolto verso di me, come la luce
+    sul muso), colore, vicinanza (1 = addosso, 0 = al limite della vista),
+    angolo rispetto al muso (rad, positivo = destra). Forme (B, n, K + n)."""
+    B, n = heading.shape
+    opos = xp.concatenate([bpos, pos], axis=1)
+    ocol = xp.concatenate([bcolor, xp.full((B, n), BLUE, dtype=bcolor.dtype)], axis=1)
+    on = xp.concatenate([bon, xp.ones((B, n), dtype=bool)], axis=1)
+    d = opos[:, None, :, :] - pos[:, :, None, :]
+    dist = xp.hypot(d[..., 0], d[..., 1])
+    ang = (xp.arctan2(d[..., 1], d[..., 0]) - heading[:, :, None] + np.pi) % (2 * np.pi) - np.pi
+    near = xp.clip(1.0 - dist / cfg.eye_range, 0.0, 1.0)
+    K = bpos.shape[1]
+    self_or_back = xp.concatenate([xp.zeros((B, n, K), dtype=bool), xp.eye(n, dtype=bool)[None].repeat(B, 0)], 2)
+    dk = d[:, :, K:, :]  # verso gli altri esseri: [b, i, j]; l'altro (j) è rivolto verso di me?
+    back = (xp.arctan2(-dk[..., 1], -dk[..., 0]) - heading[:, None, :] + np.pi) % (2 * np.pi) - np.pi
+    facing_me = xp.concatenate([xp.ones((B, n, K), dtype=bool), xp.abs(back) < np.radians(cfg.face_visible)], 2)
+    vis = on[:, None, :] & (near > 0.0) & (xp.abs(ang) < SECTORS[-1]) & ~self_or_back & facing_me
+    return {"vis": vis, "col": xp.broadcast_to(ocol[:, None, :], vis.shape), "near": near, "ang": ang}
+
+
 # --- I programmi di movimento (la sezione F, fissa) ---------------------------------
 
-PROGRAMS = ("verso il rosso", "verso il giallo", "verso il blu", "esplora", "evita")
+PROGRAMS = ("avvicinati", "allontanati", "lascialo", "esplora")
 N_PROGRAMS = len(PROGRAMS)
 
 
 class Motor:
-    """F: dai programmi alle ruote, innato e uguale per tutti. Ogni programma è
-    un movimento semplice guidato dai sensi (come le tassie degli animali):
-    girarsi verso un colore e avvicinarsi rallentando, vagare, girarsi via da
-    ciò che si ha davanti. Un riflesso fisso fa girare via dai muri: sceglie
-    da che parte girare e ci resta finché davanti non è libero (senza, in un
+    """F: dai programmi alle ruote, innato e uguale per tutti. I programmi non
+    sanno che cosa sia un oggetto: agiscono sull'oggetto su cui l'essere è
+    concentrato (l'attenzione, nel cervello), di cui conoscono solo dove sta.
+    Avvicinati: girarsi verso di lui e andarci, rallentando da vicino (per
+    poter prendere la pila o fermarsi davanti a un compagno); allontanati:
+    girarsi via e andare; lascialo: l'attenzione passa ad altro (lo decide il
+    cervello) e intanto si vaga; esplora: vagare. Senza oggetto, avvicinati e
+    allontanati vagano. Un riflesso fisso fa girare via dai muri: sceglie da
+    che parte girare e ci resta finché davanti non è libero (senza, in un
     angolo oscillava tra le due parti per sempre, spingendo contro i muri)."""
 
     def __init__(self, shape, rng: np.random.Generator):
@@ -339,40 +373,25 @@ class Motor:
         self.wander = np.zeros(shape)
         self.escape = np.zeros(shape)  # verso della fuga dal muro in corso (0 = nessuna)
 
-    def __call__(self, program: np.ndarray, senses: np.ndarray, dt: float):
-        eye = senses[..., EYES].reshape(senses.shape[:-1] + (3, 3))  # colore × (sinistra, centro, destra)
-        thrust = np.zeros(program.shape)
-        steer = np.zeros(program.shape)
-        for c in range(3):
-            m = program == c
-            if not m.any():
-                continue
-            e = eye[..., c, :]
-            seen = e.max(-1) > 0.0
-            near = e.max(-1)
-            # Verso il lato che lo vede di più; se è già al centro, solo piccole correzioni.
-            centred = e[..., 1] >= np.maximum(e[..., 0], e[..., 2])
-            turn = np.clip(np.where(centred, 0.5, 4.0) * (e[..., 2] - e[..., 0]), -1.0, 1.0)
-            # Visto: avvicinati, rallentando da vicino (per poter prendere la pila
-            # o fermarsi davanti a un compagno). Non visto: gira sul posto e cerca.
-            th = np.where(seen, np.clip(1.2 * (1.0 - near), 0.15, 1.0), 0.2)
-            st = np.where(seen, turn, 0.8)
-            thrust = np.where(m, th, thrust)
-            steer = np.where(m, st, steer)
+    def __call__(self, program, senses, has, near, ang, dt):
+        """program, has (c'è un oggetto attento), near, ang: (B, n)."""
         self.wander = 0.9 * self.wander + 0.3 * self.rng.normal(0.0, 1.0, self.wander.shape)
-        m = program == 3
-        thrust = np.where(m, 0.8, thrust)
-        steer = np.where(m, np.clip(self.wander, -1.0, 1.0), steer)
-        m = program == 4
-        lr = eye.sum(-2)  # quanto si vede a sinistra, centro, destra (tutti i colori)
-        away = np.where(lr[..., 0] > lr[..., 2], 1.0, -1.0)
-        thrust = np.where(m, 0.6, thrust)
-        steer = np.where(m, away, steer)
-        # Riflesso: un muro davanti fa girare dalla parte più libera e frenare.
-        ray = senses[..., 9:12]
-        wall = ray.max(-1) > 0.5
-        free_side = np.where(ray[..., 0] < ray[..., 2], -1.0, 1.0)
-        self.escape = np.where(wall, np.where(self.escape == 0.0, free_side, self.escape), 0.0)
-        steer = np.where(wall, self.escape, steer)
-        thrust = thrust * (1.0 - 0.7 * np.clip(ray[..., 1] - 0.3, 0.0, 1.0))
+        thrust, steer, self.escape = motor_rule(program, senses, has, near, ang, self.wander, self.escape, np)
         return thrust, steer
+
+
+def motor_rule(program, senses, has, near, ang, wander, escape, xp):
+    """La regola di F, uguale per NumPy e JAX (`xp`). `escape`: il verso della
+    fuga dal muro in corso. Restituisce (spinta, sterzo, nuovo escape)."""
+    roam_th, roam_st = 0.8, xp.clip(wander, -1.0, 1.0)
+    go = (program == 0) & has
+    away = (program == 1) & has
+    thrust = xp.where(go, xp.clip(1.2 * (1.0 - near), 0.15, 1.0), xp.where(away, 0.7, roam_th))
+    steer = xp.where(go, xp.clip(3.0 * ang, -1.0, 1.0), xp.where(away, xp.where(ang > 0, -1.0, 1.0), roam_st))
+    ray = senses[..., 9:12]
+    wall = ray.max(-1) > 0.5
+    free_side = xp.where(ray[..., 0] < ray[..., 2], -1.0, 1.0)
+    escape = xp.where(wall, xp.where(escape == 0.0, free_side, escape), 0.0)
+    steer = xp.where(wall, escape, steer)
+    thrust = thrust * (1.0 - 0.7 * xp.clip(ray[..., 1] - 0.3, 0.0, 1.0))
+    return thrust, steer, escape

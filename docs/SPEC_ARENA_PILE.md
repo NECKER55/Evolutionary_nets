@@ -163,6 +163,82 @@ proporzionato al danno, selezione dei programmi "appiccicosa" (senza, un
 esploratore a caso cambiava programma ogni 0,25 s e non arrivava mai a una
 pila).
 
+## C legge che cosa si guarda, D ricorda che cosa si è preso (2026-10-28)
+
+**Diagnosi.** Dopo un'inversione C non cambiava idea: ogni incontro con lo
+stesso colore accendeva neuroni di C diversi, quindi ciò che si imparava
+una volta non valeva la volta dopo. Tre cause, corrette una per una:
+
+1. C leggeva tutto lo stato di B e D (muri, energia, compagni...). Ora
+   legge **che cos'è** l'oggetto guardato (il colore nella fovea) e quello
+   ricordato in D (peso 0,5), più poco contesto da B (peso 0,1); non dove
+   sta (vicinanza e lato cambiano di continuo).
+2. "Vincono i 4 più attivi": tra una decina di neuroni pari merito vinceva
+   il caso. Ora si accendono **tutti quelli sopra soglia**: lo stesso oggetto
+   accende sempre gli stessi (per essere: circa 11 per colore, 1,6 in comune
+   tra rosso e giallo).
+3. C accumulava lentamente e senza limite: dopo 5 minuti di giallo buono un
+   dolore valeva un ventesimo. Ora è veloce e satura (±0,3 per neurone):
+   conta l'ultima esperienza.
+
+D ora tiene **l'ultimo oggetto guardato** (una copia della fovea, scritta
+quando entra un oggetto nuovo), anche quando non si vede più.
+
+Con più neuroni accesi alcune regole sono diventate instabili (numeri che
+esplodevano): ora il passo di C è diviso per i neuroni accesi, il critico è
+normalizzato sulla traccia, δ satura a ±3, i pesi hanno un tetto.
+
+**Effetto sul singolo essere** (dopo il suo primo dolore dopo
+l'inversione): il voto di C per avvicinarsi al colore ora cattivo scende da
++1,33 a +0,27, la probabilità di avvicinarsi dal 90% al 64%. Non si
+ribalta: E, L e la salienza, lenti, spingono ancora verso il vecchio colore.
+
+**Nelle medie** (200 recinti, 25 minuti) l'effetto è piccolo: sezioni 60%
+prima dell'inversione, 39% subito dopo, 47% dopo 90 s; senza C 61%, 40%,
+45%. Il guidato resta all'80% per il limite del corpo (95% delle sue pile
+cattive sono prese per strada mentre punta una buona).
+
+## Attenzione, tracce strette, soglia sulla sorpresa (2026-10-28)
+
+**Cosa è cambiato.**
+
+- **F non sa più i colori.** I programmi sono *avvicinati*, *allontanati*,
+  *lascialo*, *esplora*, e agiscono sull'**oggetto attento**, di cui F sa
+  solo dove sta.
+- **Attenzione.** Ogni essere è concentrato su un oggetto (pila o
+  compagno), scelto per salienza: innata (vicinanza, novità, un po' di
+  inerzia, inibizione del ritorno per 3 s dopo *lascialo*) più imparata (un
+  peso per colore, che δ cambia: attenzione guidata dal valore). La scelta
+  ha un po' di caso. Nel guidato la salienza bara (sa il colore buono).
+- **Fovea**: in A, 7 canali sul solo oggetto attento (colore, vicinanza,
+  lato, "nuovo").
+- **Tracce strette** (solo nel cervello a sezioni): E e il cancello di D si
+  marcano solo da neuroni accesi sopra 0,5.
+- **Soglia adattiva**: insegna solo la parte di |δ| sopra la sorpresa media
+  degli ultimi minuti; il critico impara da tutto δ.
+- Nuova lesione "S": salienza solo innata.
+
+**Risultati** (GPU, 200 recinti × 6 esseri, 25 minuti):
+
+| agente | pile/min | buone | morti di fame/min | prima dell'inversione | 0-15 s dopo | 15-30 | 30-60 | 60-90 |
+|---|---|---|---|---|---|---|---|---|
+| guidato | 2,61 | 80% | 0,000 | 78% | 93% | 80% | 78% | 78% |
+| attore-critico | 2,24 | 50% | 0,14 | 51% | 49% | 50% | 50% | 49% |
+| sezioni | 2,08 | 53% | 0,18 | 64% | 38% | 39% | 42% | 45% |
+| sezioni senza B / D / C / L / V | 1,92-2,21 | 52-54% | 0,18 | 63-64% | 36-41% | 39-40% | 41-42% | 44-46% |
+| sezioni senza U | 2,75 | 54% | 0,14 | 60% | 41% | 44% | 46% | 48% |
+| sezioni senza S (salienza imparata) | 2,00 | 52% | 0,17 | 55% | 44% | 44% | 47% | 49% |
+
+- L'attore-critico, con la fovea al posto dei programmi colorati, **non
+  distingue più i colori** (50%).
+- Il cervello a sezioni sì (64% prima dell'inversione), e B ora porta più
+  informazione sul colore (0,44 invece di 0,26): la fovea l'ha resa utile.
+- Ma la scelta viene **soprattutto dalla salienza imparata** (senza S: 55%):
+  imparano a *guardare* il colore buono più che a lasciare quello cattivo.
+  B, C, D, L ancora non cambiano niente se tolte.
+- Dopo l'inversione si disimpara ancora lentamente, e si muore di più di
+  fame: si prendono meno pile (2,1 al minuto contro 2,9 di prima).
+
 ## Risultati dopo la correzione del riflesso (fase A, GPU, 200 recinti × 6 esseri, 25 minuti)
 
 **Difetto trovato (2026-10-28):** il riflesso dei muri girava verso il lato

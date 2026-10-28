@@ -91,37 +91,15 @@ def senses(cfg: P.PileConfig, w: dict) -> jnp.ndarray:
     return jnp.concatenate(out, -1)
 
 
-def motor(cfg, program, raw, wander, escape, key):
-    """F: come `sim.pile.Motor`."""
-    eye = raw[..., P.EYES].reshape(raw.shape[:-1] + (3, 3))
-    thrust = jnp.zeros(program.shape, F)
-    steer = jnp.zeros(program.shape, F)
-    for c in range(3):
-        e = eye[..., c, :]
-        seen = e.max(-1) > 0.0
-        near = e.max(-1)
-        centred = e[..., 1] >= jnp.maximum(e[..., 0], e[..., 2])
-        turn = jnp.clip(jnp.where(centred, 0.5, 4.0) * (e[..., 2] - e[..., 0]), -1.0, 1.0)
-        th = jnp.where(seen, jnp.clip(1.2 * (1.0 - near), 0.15, 1.0), 0.2)
-        st = jnp.where(seen, turn, 0.8)
-        m = program == c
-        thrust = jnp.where(m, th, thrust)
-        steer = jnp.where(m, st, steer)
+def motor(cfg, program, raw, has, near, ang, wander, escape, key):
+    """F: la stessa regola di `sim.pile.motor_rule`."""
     wander = 0.9 * wander + 0.3 * jax.random.normal(key, wander.shape, F)
-    m = program == 3
-    thrust = jnp.where(m, 0.8, thrust)
-    steer = jnp.where(m, jnp.clip(wander, -1.0, 1.0), steer)
-    lr = eye.sum(-2)
-    m = program == 4
-    thrust = jnp.where(m, 0.6, thrust)
-    steer = jnp.where(m, jnp.where(lr[..., 0] > lr[..., 2], 1.0, -1.0), steer)
-    ray = raw[..., 9:12]
-    wall = ray.max(-1) > 0.5
-    free_side = jnp.where(ray[..., 0] < ray[..., 2], -1.0, 1.0)
-    escape = jnp.where(wall, jnp.where(escape == 0.0, free_side, escape), 0.0)
-    steer = jnp.where(wall, escape, steer)
-    thrust = thrust * (1.0 - 0.7 * jnp.clip(ray[..., 1] - 0.3, 0.0, 1.0))
+    thrust, steer, escape = P.motor_rule(program, raw, has, near, ang, wander, escape, jnp)
     return thrust, steer, wander, escape
+
+
+def objects(cfg, w):
+    return P.objects_of(w["pos"], w["heading"], w["bpos"], w["bcolor"], w["bon"], cfg, xp=jnp)
 
 
 def world_step(cfg: P.PileConfig, w: dict, thrust, steer, key):
@@ -236,21 +214,27 @@ def world_step(cfg: P.PileConfig, w: dict, thrust, steer, key):
 
 # --- I cervelli ----------------------------------------------------------------------
 
-LEARNER_KEYS = ("a_slow", "w_e", "e_e", "w_v", "e_v", "v_prev", "fresh", "program", "pi", "delta")
-SECTION_KEYS = ("proto", "pred", "win_rate", "state_b", "prev_b", "mem", "w_gate", "e_gate", "c_in", "u_c", "e_c",
-                "u_l", "code", "d_fast", "d_slow", "unc", "counts")
+ATT_KEYS = ("att_target", "att_inhib", "att_inhib_t", "att_prev_vis", "att_novelty", "att_w", "att_e", "att_new")
 
 
-def init_brain(agent: str, N: int, dt: float, seed: int, genomes=None, sizes: S.Sizes | None = None) -> dict:
+def init_brain(agent: str, N: int, dt: float, seed: int, cfg: P.PileConfig, genomes=None,
+               sizes: S.Sizes | None = None) -> dict:
     """Lo stato di partenza, dalla versione NumPy (stessa partenza)."""
-    kw = {"sizes": sizes} if agent == "sezioni" else {}
+    from ..evo.pile_test import brain_kwargs
+
+    kw = brain_kwargs(agent, cfg, sizes.lesions if sizes else ())
+    if agent == "sezioni" and sizes is not None:
+        kw["sizes"] = sizes
     b = S.AGENTS[agent](N, dt, seed, genomes=genomes, **kw)
-    out = {"genome": b.genome, "clock": np.float32(0.0)}
-    if agent == "guidato":  # solo il programma in corso (per lo schermo)
-        out.update(program=np.zeros(N, np.int32), pi=np.zeros((N, S.N_PROGRAMS)))
+    at = b.att
+    out = {"genome": b.genome, "clock": np.float32(0.0), "program": b.program.astype(np.int32), "pi": b.pi,
+           "att_target": at.target.astype(np.int32), "att_inhib": at.inhib.astype(np.int32),
+           "att_inhib_t": at.inhib_t, "att_prev_vis": at.prev_vis, "att_novelty": at.novelty, "att_w": at.w,
+           "att_e": at.e, "att_new": at.new}
+    if agent == "guidato":
         return out
     out.update(a_slow=b.a.slow, w_e=b.w_e, e_e=b.e_e, w_v=b.w_v, e_v=b.e_v, v_prev=b.v_prev, fresh=b.fresh,
-               program=b.program.astype(np.int32), pi=b.pi, delta=b.delta)
+               delta=b.delta, teach=b.teach)
     if agent == "sezioni":
         out.update(proto=b.proto, pred=b.pred, win_rate=b.win_rate, state_b=b.state_b, prev_b=b.prev_b, mem=b.mem,
                    w_gate=b.w_gate, e_gate=b.e_gate, c_in=b.c_in, u_c=b.u_c, e_c=b.e_c, u_l=b.u_l, code=b.code,
@@ -268,19 +252,67 @@ def decode(genome):
     return out
 
 
-def _interface(br, raw, dt):
+def _attend(br, objs, decide, dt, key, extra=None):
+    """L'attenzione: come `sections.Attention.update`."""
+    A = S.SALIENCE
+    vis, col, near = objs["vis"], objs["col"], objs["near"]
+    n, m = vis.shape
+    idx = jnp.arange(n)
+    br["att_novelty"] = br["att_novelty"] * np.exp(-dt / 0.5) + (vis & ~br["att_prev_vis"])
+    br["att_prev_vis"] = vis
+    br["att_inhib_t"] = jnp.maximum(br["att_inhib_t"] - dt, 0.0)
+    target = br["att_target"]
+    lost = (target >= 0) & ~vis[idx, jnp.maximum(target, 0)]
+    target = jnp.where(lost, -1, target)
+    br["att_new"] = br["att_new"] * np.exp(-dt / A["new_tau"])
+    br["att_e"] = br["att_e"] * np.exp(-dt / 2.0)
+    choose = (decide | (target < 0)) & vis.any(1)
+    colour = jax.nn.one_hot(col, 3)
+    slots = jnp.arange(m)[None]
+    score = (A["near"] * near + A["novelty"] * br["att_novelty"] + (colour * br["att_w"][:, None, :]).sum(-1)
+             + A["stick"] * (slots == target[:, None])
+             - A["inhibit"] * ((slots == br["att_inhib"][:, None]) & (br["att_inhib_t"] > 0)[:, None]))
+    if extra is not None:
+        score = score + extra
+    z = jnp.where(vis, score / A["temperature"], -1e9)
+    p = jax.nn.softmax(z, axis=1) * vis
+    p = p / jnp.maximum(p.sum(1, keepdims=True), 1e-12)
+    sel = jax.random.categorical(key, z, axis=1).astype(jnp.int32)
+    sel = jnp.where(choose, sel, target)
+    changed = choose & (sel != target)
+    br["att_new"] = jnp.where(changed, 1.0, br["att_new"])
+    br["att_target"] = sel
+    dev = colour[idx, jnp.maximum(sel, 0)] - (p[:, :, None] * colour).sum(1)
+    br["att_e"] = br["att_e"] + jnp.where(choose[:, None], dev, 0.0)
+
+
+def _seen(br, objs):
+    idx, t = jnp.arange(br["att_target"].shape[0]), jnp.maximum(br["att_target"], 0)
+    return br["att_target"] >= 0, objs["col"][idx, t], objs["near"][idx, t], objs["ang"][idx, t]
+
+
+def _leave(br, mask):
+    br["att_inhib"] = jnp.where(mask, br["att_target"], br["att_inhib"])
+    br["att_inhib_t"] = jnp.where(mask, S.SALIENCE["inhibit_time"], br["att_inhib_t"])
+    br["att_target"] = jnp.where(mask, -1, br["att_target"])
+
+
+def _interface(br, raw, objs, dt):
     keep = np.exp(-dt / 0.3)
     x = raw[:, list(S.FAST)]
     fast = jnp.clip(x - br["a_slow"], 0.0, 1.0)
     br["a_slow"] = keep * br["a_slow"] + (1.0 - keep) * x
-    return jnp.concatenate([raw, fast], 1)
+    has, col, near, ang = _seen(br, objs)
+    fov = S.fovea_of(col, near, ang, has, br["att_new"], xp=jnp)
+    return jnp.concatenate([raw, fast, fov], 1)
 
 
 def _td(br, p, f_v, reward, dt, use_critic=True):
     gamma = jnp.exp(-dt / p["horizon"])
     value = (br["w_v"] * f_v).sum(1)
     delta = jnp.where(br["fresh"], 0.0, reward + gamma * value - br["v_prev"]) if use_critic else reward
-    norm = 1.0 + (f_v**2).sum(1)
+    delta = jnp.clip(delta, -S.DELTA_MAX, S.DELTA_MAX)
+    norm = 1.0 + (f_v**2).sum(1) + (br["e_v"] * f_v).sum(1)
     br["w_v"] = br["w_v"] + (p["eta_v"] * delta / norm)[:, None] * br["e_v"]
     br["e_v"] = (gamma * np.exp(-dt / 1.0))[:, None] * br["e_v"] + f_v
     br["v_prev"] = (br["w_v"] * f_v).sum(1)
@@ -289,14 +321,11 @@ def _td(br, p, f_v, reward, dt, use_critic=True):
     return delta
 
 
-def _act(br, logits, f_e, delta, eta, temp, dt, key, code=None):
+def _act(br, logits, f_e, teach, eta, temp, dt, decide, key, f_tag=None, code=None):
     np_ = S.N_PROGRAMS
     norm = 1.0 + (f_e**2).sum(1)
-    br["w_e"] = br["w_e"] + (eta * delta / norm)[:, None, None] * br["e_e"]
+    br["w_e"] = jnp.clip(br["w_e"] + (eta * teach / norm)[:, None, None] * br["e_e"], -S.WEIGHT_MAX, S.WEIGHT_MAX)
     br["e_e"] = br["e_e"] * np.exp(-dt / 2.0)
-    clock = br["clock"] + dt
-    decide = clock >= S._Learner.decide_every - 1e-6
-    br["clock"] = jnp.where(decide, 0.0, clock)
     z = (logits + S._Learner.stick * jax.nn.one_hot(br["program"], np_)) / temp[:, None]
     pi = jax.nn.softmax(z, axis=1)
     choice = jax.random.categorical(key, z, axis=1).astype(jnp.int32)
@@ -304,16 +333,21 @@ def _act(br, logits, f_e, delta, eta, temp, dt, key, code=None):
     br["program"] = jnp.where(decide, choice, br["program"])
     br["pi"] = jnp.where(decide, pi, br["pi"])
     dev = (chosen - pi) * decide
-    br["e_e"] = br["e_e"] + dev[:, :, None] * f_e[:, None, :]
+    tag = f_e if f_tag is None else f_tag
+    br["e_e"] = br["e_e"] + dev[:, :, None] * tag[:, None, :]
     if code is not None:
         br["e_c"] = br["e_c"] + dev[:, :, None] * code[:, None, :]
+    _leave(br, decide & (br["program"] == S.LEAVE))
     return br["program"]
 
 
-def _sections(br, p, raw, reward, dt, sz: S.Sizes, les: frozenset, key):
-    a = _interface(br, raw, dt)
+def _sections(br, p, raw, objs, reward, dt, sz: S.Sizes, les: frozenset, decide, key):
+    k_att, k_act = jax.random.split(key)
+    _attend(br, objs, decide, dt, k_att)
+    a = _interface(br, raw, objs, dt)
+    fov = a[:, -len(S.FOVEA):]
     r = reward + (p["innate"] * raw).sum(1) * dt
-    dprev = br["delta"]
+    teach_prev = br["teach"]
     n = raw.shape[0]
     # B
     if "B" in les:
@@ -326,7 +360,7 @@ def _sections(br, p, raw, reward, dt, sz: S.Sizes, les: frozenset, key):
         y = y / jnp.maximum(y.max(1, keepdims=True), 1e-9)
         err = a - jnp.einsum("nab,nb->na", br["pred"], br["prev_b"])
         br["pred"] = br["pred"] + sz.eta_predict * dt * err[:, :, None] * br["prev_b"][:, None, :]
-        rate = (p["eta_b"] * dt * (1.0 + sz.surprise_boost * jnp.abs(dprev)))[:, None, None]
+        rate = (p["eta_b"] * dt * (1.0 + sz.surprise_boost * jnp.minimum(jnp.abs(br["delta"]), 1.0)))[:, None, None]
         br["proto"] = br["proto"] + rate * y[:, :, None] * ((a[:, None, :] - br["proto"]) + sz.predict * err[:, None, :])
         br["win_rate"] = br["win_rate"] + (dt / 30.0) * ((y > 0) / sz.b_winners - br["win_rate"])
         br["prev_b"] = br["state_b"]
@@ -334,62 +368,74 @@ def _sections(br, p, raw, reward, dt, sz: S.Sizes, les: frozenset, key):
         b = br["state_b"]
     # D
     if "D" in les:
-        m = jnp.zeros_like(b)
+        m = jnp.zeros_like(fov)
     else:
-        event = a[:, P.N_SENSES:].max(1)
-        br["w_gate"] = br["w_gate"] + (sz.eta_gate * dprev)[:, None] * br["e_gate"]
-        g = jax.nn.sigmoid(sz.gate_event * event + (br["w_gate"] * b).sum(1) + sz.gate_bias)
-        br["e_gate"] = np.exp(-dt / 2.0) * br["e_gate"] + (g * (1.0 - g))[:, None] * b
+        br["w_gate"] = jnp.clip(br["w_gate"] + (sz.eta_gate * teach_prev)[:, None] * br["e_gate"],
+                                -2 * S.WEIGHT_MAX, 2 * S.WEIGHT_MAX)
+        g = jax.nn.sigmoid(sz.gate_event * fov[:, -1] + (br["w_gate"] * fov).sum(1) + sz.gate_bias)
+        br["e_gate"] = np.exp(-dt / 2.0) * br["e_gate"] + (g * (1.0 - g))[:, None] * jnp.where(fov > sz.tag, fov, 0.0)
         keep = jnp.exp(-dt / p["tau_d"])[:, None]
-        br["mem"] = (1.0 - g)[:, None] * keep * br["mem"] + g[:, None] * b
+        br["mem"] = (1.0 - g)[:, None] * keep * br["mem"] + g[:, None] * fov
         m = br["mem"]
     # C
     if "C" in les:
         c = jnp.zeros((n, sz.c), F)
     else:
-        h = jnp.concatenate([b, m], 1)
+        h = jnp.concatenate([fov[:, :S.IDENTITY], sz.memory * m[:, :S.IDENTITY], sz.context * b], 1)
         z = jnp.einsum("ncj,nj->nc", br["c_in"], h)
-        _, top = jax.lax.top_k(z, sz.c_winners)
-        c = jax.nn.one_hot(top, sz.c).sum(1) * (z > 1e-6)
+        c = (z >= S.c_threshold(fov, sz, xp=jnp)[:, None]).astype(F)
     br["code"] = c
     one = jnp.ones((n, 1), F)
     delta = _td(br, p, jnp.concatenate([b, m, c, one], 1), r, dt, use_critic="V" not in les)
+    br["d_fast"] = br["d_fast"] + (dt / 20.0) * (jnp.abs(delta) - br["d_fast"])
+    br["d_slow"] = br["d_slow"] + (dt / 200.0) * (jnp.abs(delta) - br["d_slow"])
     if "U" not in les:
-        br["d_fast"] = br["d_fast"] + (dt / 20.0) * (jnp.abs(delta) - br["d_fast"])
-        br["d_slow"] = br["d_slow"] + (dt / 200.0) * (jnp.abs(delta) - br["d_slow"])
         br["unc"] = jnp.clip(br["d_fast"] / jnp.maximum(br["d_slow"], 1e-6) - 1.0, 0.0, 3.0)
+    teach = jnp.sign(delta) * jnp.maximum(jnp.abs(delta) - sz.floor * br["d_slow"], 0.0)
+    br["teach"] = teach
     boost = 1.0 + p["surprise_rate"] * br["unc"]
-    br["u_c"] = br["u_c"] + (p["eta_c"] * boost * delta)[:, None, None] * br["e_c"] - br["u_c"] * (dt / sz.forget)
+    step = p["eta_c"] * boost * teach / (1.0 + c.sum(1))
+    br["u_c"] = jnp.clip(br["u_c"] + step[:, None, None] * br["e_c"] - br["u_c"] * (dt / sz.forget), -sz.c_max, sz.c_max)
     br["e_c"] = br["e_c"] * np.exp(-dt / 2.0)
     if "L" not in les:
         rest = (raw[:, 13] > sz.rest_energy) & (raw[:, 15] > 0.1)
         br["u_l"] = br["u_l"] + (p["eta_l"] * dt * rest)[:, None, None] * (br["u_c"] - br["u_l"])
+    if "S" not in les:
+        br["att_w"] = jnp.clip(br["att_w"] + (p["eta_att"] * boost * teach)[:, None] * br["att_e"], -5.0, 5.0)
     f_e = jnp.concatenate([b, m, one], 1)
+    f_tag = jnp.concatenate([jnp.where(b > sz.tag, b, 0.0), jnp.where(m > sz.tag, m, 0.0), one], 1)
     logits = (br["w_e"] * f_e[:, None, :]).sum(-1) + jnp.einsum("npc,nc->np", br["u_c"], c)
     if "L" not in les:
         logits = logits + jnp.einsum("npc,nc->np", br["u_l"], c)
     temp = p["temperature"] * (1.0 + p["surprise_explore"] * br["unc"])
-    prog = _act(br, logits, f_e, delta, p["eta_e"] * boost, temp, dt, key, code=c)
+    prog = _act(br, logits, f_e, teach, p["eta_e"] * boost, temp, dt, decide, k_act, f_tag=f_tag, code=c)
     eye = raw[:, P.EYES].reshape(n, 3, 3).max(-1)
     seen = jnp.where(eye.max(1) > 0.2, eye.argmax(1), 3)
     br["counts"] = br["counts"].at[jnp.arange(n), br["state_b"].argmax(1), seen].add(1.0)
     return prog
 
 
-def _actor_critic(br, p, raw, reward, dt, key):
-    a = _interface(br, raw, dt)
+def _actor_critic(br, p, raw, objs, reward, dt, decide, key):
+    k_att, k_act = jax.random.split(key)
+    _attend(br, objs, decide, dt, k_att)
+    a = _interface(br, raw, objs, dt)
     f = jnp.concatenate([a, jnp.ones((raw.shape[0], 1), F)], 1)
     delta = _td(br, p, f, reward + (p["innate"] * raw).sum(1) * dt, dt)
+    br["teach"] = delta
     logits = (br["w_e"] * f[:, None, :]).sum(-1)
-    return _act(br, logits, f, delta, p["eta_e"], p["temperature"], dt, key)
+    return _act(br, logits, f, delta, p["eta_e"], p["temperature"], dt, decide, k_act)
 
 
-def _guided(raw, good):
-    eye = raw[:, P.EYES].reshape(-1, 3, 3)
-    idx = jnp.arange(raw.shape[0])
-    g, bd = eye[idx, good], eye[idx, 1 - good]
-    bad_ahead = (bd[:, 1] > 0.6) & (bd[:, 1] > g[:, 1])
-    return jnp.where(bad_ahead, 4, jnp.where(g.max(-1) > 0.0, good, 3)).astype(jnp.int32)
+def _guided(br, objs, good, batteries, decide, dt, key):
+    is_good = objs["col"] == good[:, None]
+    battery = jnp.arange(objs["col"].shape[1])[None] < batteries
+    _attend(br, objs, decide, dt, key, extra=jnp.where(is_good & battery, 10.0, -10.0))
+    has, col, _, _ = _seen(br, objs)
+    ok = has & (col == good)
+    prog = jnp.where(ok, S.APPROACH, S.EXPLORE).astype(jnp.int32)
+    _leave(br, has & ~ok)
+    br["program"], br["pi"] = prog, jax.nn.one_hot(prog, S.N_PROGRAMS)
+    return prog
 
 
 def _reborn(br, dead, child, agent, sz, key):
@@ -397,11 +443,17 @@ def _reborn(br, dead, child, agent, sz, key):
     br = dict(br)
     if child is not None:
         br["genome"] = jnp.where(dead[:, None], child, br["genome"])
-    if agent == "guidato":
-        return br
+
     def zero(x):
         return jnp.where(dead.reshape((-1,) + (1,) * (x.ndim - 1)), jnp.zeros_like(x), x)
-    for k in ("a_slow", "w_e", "e_e", "w_v", "e_v", "v_prev"):
+
+    for k in ("att_inhib_t", "att_prev_vis", "att_novelty", "att_w", "att_e", "att_new"):
+        br[k] = zero(br[k])
+    br["att_target"] = jnp.where(dead, -1, br["att_target"])
+    br["att_inhib"] = jnp.where(dead, -1, br["att_inhib"])
+    if agent == "guidato":
+        return br
+    for k in ("a_slow", "w_e", "e_e", "w_v", "e_v", "v_prev", "delta", "teach"):
         br[k] = zero(br[k])
     br["fresh"] = br["fresh"] | dead
     if agent == "sezioni":
@@ -428,21 +480,27 @@ def make_run(cfg: P.PileConfig, agent: str, phase: str, sizes: S.Sizes):
         k_brain, k_motor, k_world, k_child, k_reborn = jax.random.split(key, 5)
         raw = senses(cfg, w)
         flat = raw.reshape(N, -1)
+        objs = {k: v.reshape((N,) + v.shape[2:]) for k, v in objects(cfg, w).items()}
         p = decode(br["genome"])
         reward = misc["reward"]
+        clock = br["clock"] + dt
+        decide = clock >= S.Agent.decide_every - 1e-6
+        br["clock"] = jnp.where(decide, 0.0, clock)
         if agent == "guidato":
-            prog = _guided(flat, jnp.repeat(w["good"], n))
-            br["program"], br["pi"] = prog, jax.nn.one_hot(prog, S.N_PROGRAMS)
+            prog = _guided(br, objs, jnp.repeat(w["good"], n), cfg.batteries, decide, dt, k_brain)
         elif agent == "attore-critico":
-            prog = _actor_critic(br, p, flat, reward, dt, k_brain)
+            prog = _actor_critic(br, p, flat, objs, reward, dt, decide, k_brain)
         else:
-            prog = _sections(br, p, flat, reward, dt, sizes, les, k_brain)
-        thrust, steer, wander, escape = motor(cfg, prog.reshape(B, n), raw, w["wander"], w["escape"], k_motor)
+            prog = _sections(br, p, flat, objs, reward, dt, sizes, les, decide, k_brain)
+        has, _, near, ang = _seen(br, objs)
+        shape = (B, n)
+        thrust, steer, wander, escape = motor(cfg, prog.reshape(shape), raw, has.reshape(shape), near.reshape(shape),
+                                              ang.reshape(shape), w["wander"], w["escape"], k_motor)
         if agent == "guidato":  # sa anche dov'è la zona
             to = centres[w["zone"]][:, None, :] - w["pos"]
-            ang = _wrap(jnp.arctan2(to[..., 1], to[..., 0]) - w["heading"])
-            go = (prog.reshape(B, n) == 3) & (jnp.hypot(to[..., 0], to[..., 1]) > cfg.zone_half)
-            steer = jnp.where(go, jnp.clip(2.0 * ang, -1.0, 1.0), steer)
+            zang = _wrap(jnp.arctan2(to[..., 1], to[..., 0]) - w["heading"])
+            go = (prog.reshape(shape) == S.EXPLORE) & (jnp.hypot(to[..., 0], to[..., 1]) > cfg.zone_half)
+            steer = jnp.where(go, jnp.clip(2.0 * zang, -1.0, 1.0), steer)
         w = dict(w, wander=wander, escape=escape)
         w, out = world_step(cfg, w, thrust, steer, k_world)
         misc["reward"] = (out["pleasure"] - out["pain"]).reshape(N)
@@ -494,7 +552,7 @@ class PileGpu:
         B, n = enclosures, cfg.beings
         self.B, self.n = B, n
         world = init_world(cfg, B, seed)
-        brain = init_brain(agent, B * n, cfg.dt, seed, genomes, self.sizes)
+        brain = init_brain(agent, B * n, cfg.dt, seed, cfg, genomes, self.sizes)
         misc = dict(reward=np.zeros(B * n), usage=np.zeros(S.N_PROGRAMS), pair=np.zeros((B, 2, S.N_GENOME)),
                     has_pair=np.zeros(B, bool))
         to = lambda x: jnp.asarray(x, F) if np.asarray(x).dtype.kind == "f" else jnp.asarray(x)
