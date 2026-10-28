@@ -74,14 +74,14 @@ class NumpyRun:
             self.counts[np.arange(N), brain.winner(), seen] += 1.0
         has, _, near, ang = brain.att.seen(objs)
         thrust, steer = self.motor(program.reshape(B, n), raw, has.reshape(B, n), near.reshape(B, n),
-                                   ang.reshape(B, n), cfg.dt)
+                                   ang.reshape(B, n), brain.p["motor"].reshape(B, n, *brain.p["motor"].shape[1:]))
         if self.agent == "guidato":  # sa anche dov'è la zona: quando esplora ci va
             to = w.zone_centres()[w.zone][:, None, :] - w.pos
             ang = (np.arctan2(to[..., 1], to[..., 0]) - w.heading + np.pi) % (2 * np.pi) - np.pi
             go = (program.reshape(B, n) == EXPLORE) & (np.hypot(to[..., 0], to[..., 1]) > cfg.zone_half)
             steer = np.where(go, np.clip(2.0 * ang, -1.0, 1.0), steer)
         before = (len(w.taken), dict(w.deaths), len(w.matings), len(w.inversions), len(w.zone_changes))
-        out = w.step(thrust, steer)
+        out = w.step(thrust, steer, brain.bite.reshape(B, n))
         new = w.taken[before[0]:]
         self.series["good_taken"].append(sum(1 for x in new if x[4]))
         self.series["bad_taken"].append(sum(1 for x in new if not x[4]))
@@ -123,10 +123,12 @@ class NumpyRun:
 
     def brain_of(self, i: int) -> dict:
         b = self.brain
-        keys = ("genome", "w_e", "w_v", "program", "pi", "delta", "teach", "proto", "pred", "win_rate", "state_b",
-                "mem", "w_gate", "c_in", "u_c", "u_l", "code", "unc", "d_slow")
+        keys = ("genome", "w_e", "w_v", "program", "pi", "bite", "p_bite", "delta", "teach", "proto", "pred",
+                "win_rate", "state_b", "mem", "w_gate", "c_in", "u_c", "u_l", "code", "unc", "d_slow")
         out = {k: np.asarray(getattr(b, k))[i] for k in keys if hasattr(b, k)}
         out.update(att_target=b.att.target[i], att_w=b.att.w[i], att_new=b.att.new[i])
+        bb, j = divmod(i, self.n)
+        out.update(f_act=self.motor.activity[bb, j], f_in=getattr(self.motor, "inputs", np.zeros((self.B, self.n, 14)))[bb, j])
         if hasattr(b, "a"):
             out["a_slow"] = b.a.slow[i]
         if self.counts is not None:

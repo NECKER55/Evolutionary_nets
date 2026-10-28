@@ -46,7 +46,8 @@ def test_a_good_battery_charges_while_standing_still_and_a_bad_one_hurts():
     w.good[0] = 0
     put_battery(w, [115.0, 100.0], 0)
     e0 = w.energy[0, 0]
-    pleasure = w.step(np.full((1, 1), 0.1), np.zeros((1, 1)))["pleasure"].sum()  # piano: la prende
+    yes = np.ones((1, 1), dtype=bool)
+    pleasure = w.step(np.full((1, 1), 0.1), np.zeros((1, 1)), yes)["pleasure"].sum()  # piano, mordendo: la prende
     x = w.pos[0, 0, 0]
     for _ in range(int(3.0 / w.cfg.dt)):
         pleasure += w.step(np.full((1, 1), 1.0), np.zeros((1, 1)))["pleasure"].sum()  # spinge, ma mangia fermo
@@ -56,17 +57,51 @@ def test_a_good_battery_charges_while_standing_still_and_a_bad_one_hurts():
     put_battery(w, [w.pos[0, 0, 0] + 15.0, w.pos[0, 0, 1]], 1)
     w.heading[0, 0] = 0.0
     e1 = w.energy[0, 0]
-    out = w.step(np.zeros((1, 1)), np.zeros((1, 1)))
+    out = w.step(np.zeros((1, 1)), np.zeros((1, 1)), yes)
     assert out["pain"][0, 0] > 0 and w.pain[0, 0] == 1.0 and w.energy[0, 0] < e1 - w.cfg.bad_energy + 1e-9
     assert w.taken[-1][4] is False
 
 
-def test_only_a_battery_in_front_of_the_mouth_is_taken():
+def test_one_eats_only_by_biting_a_battery_in_front_of_the_mouth():
     w = world(n=1)
     w.pos[0, 0], w.heading[0, 0] = [100.0, 100.0], 0.0
+    yes, no = np.ones((1, 1), dtype=bool), np.zeros((1, 1), dtype=bool)
     put_battery(w, [100.0, 115.0], 0)  # di lato
-    w.step(np.zeros((1, 1)), np.zeros((1, 1)))
+    w.step(np.zeros((1, 1)), np.zeros((1, 1)), yes)
     assert w.bon[0, 0] and not w.taken
+    put_battery(w, [115.0, 100.0], 0)  # davanti, ma senza mordere: niente
+    w.step(np.zeros((1, 1)), np.zeros((1, 1)), no)
+    assert w.bon[0, 0] and not w.taken
+    e = w.energy[0, 0]
+    w.step(np.zeros((1, 1)), np.zeros((1, 1)), yes)  # mordendo sì
+    assert not w.bon[0, 0] and len(w.taken) == 1
+    assert w.energy[0, 0] < e  # mordere costa (la ricarica arriva nei passi dopo)
+
+
+def test_the_walls_have_colours_and_bumps_have_a_side():
+    w = world(n=2)
+    w.pos[0] = [[250.0, 10.5], [400.0, 400.0]]  # il primo contro il muro nord, guardandolo
+    w.heading[0] = [-np.pi / 2, 0.0]
+    s = w.senses()[0]
+    assert s[0, SENSES.index("occhio muro verde centro")] > 0.9  # nord = verde, addosso
+    assert s[0, SENSES.index("urto davanti")] == 1.0 and s[0, SENSES.index("urto sinistra")] == 0.0
+    assert s[1, SENSES.index("occhio muro viola centro")] > 0.0  # il secondo guarda a est: viola
+    w.heading[0, 0] = 0.0  # ora il muro nord è a sinistra
+    s = w.senses()[0]
+    assert s[0, SENSES.index("urto sinistra")] == 1.0 and s[0, SENSES.index("urto davanti")] == 0.0
+
+
+def test_the_innate_motor_circuit_turns_towards_the_object_and_slows_near_it():
+    from evonets.sim.pile import default_motor, motor_inputs, motor_net
+
+    W = default_motor()[None]
+    rays = np.zeros((1, 3))
+    go = lambda ang, near: motor_net(motor_inputs(np.array([0]), np.array([True]), np.array([near]),
+                                                  np.array([ang]), np.zeros(1), np.zeros(1), rays), W)
+    thrust, steer, _ = go(0.5, 0.2)
+    assert steer[0] > 0.5 and thrust[0] > 0.8  # a destra e lontano: gira a destra, va
+    thrust, steer, _ = go(-0.5, 0.95)
+    assert steer[0] < -0.5 and thrust[0] < 0.3  # a sinistra e vicino: gira a sinistra, piano
 
 
 def test_inversions_and_zone_changes():

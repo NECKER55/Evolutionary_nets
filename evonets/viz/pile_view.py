@@ -16,8 +16,9 @@ import time
 import numpy as np
 import pygame
 
-from ..net.sections import FAST, FOVEA, N_A, fovea_of
-from ..sim.pile import N_PROGRAMS, N_SENSES, PROGRAMS, RAYS, SECTORS, objects_of
+from ..net.sections import BITE, FAST, FOVEA, MOTOR, N_A, N_HEADS, fovea_of
+from ..sim.pile import (BUMP, ENERGY, F_INPUTS, F_NEURONS, N_PROGRAMS, N_SENSES, PAIN, PROGRAMS, RAY, RAYS, SECTORS,
+                        SENSES, TASTE, WALL_COLOURS, WATCHED, objects_of)
 from .launcher import Screen
 from .render import BG, BORDER, DIM, PLAYER, TARGET, TEXT
 
@@ -29,9 +30,12 @@ FIXED = (95, 100, 120)  # collegamenti fissi
 DELTA_C = (200, 120, 255)  # la sorpresa
 ZONE_C = (40, 46, 34)
 SPEEDS = (1, 3, 6, 12, 24, 48)  # volte il tempo reale
-SHORT = ("rosso sx", "rosso c", "rosso dx", "giallo sx", "giallo c", "giallo dx", "blu sx", "blu c", "blu dx",
-         "muro sx", "muro c", "muro dx", "contatto", "energia", "mi guardano", "gusto", "dolore")
-PROG_SHORT = ("avvicinati", "allontanati", "lascialo", "esplora")
+SHORT = tuple(n.replace("occhio ", "").replace("sinistra", "sx").replace("centro", "c").replace("destra", "dx")
+              for n in SENSES)
+WALL_C = ((90, 200, 110), (170, 110, 230), (240, 150, 60), (230, 230, 235))  # i muri: nord, est, sud, ovest
+EYE_ROWS = (("rosso", RED_C), ("giallo", YELLOW_C), ("blu", BLUE_C)) + tuple(
+    (f"muro {c}", col) for c, col in zip(WALL_COLOURS, WALL_C))
+PROG_SHORT = ("avvicinati", "allontanati", "lascialo", "esplora", "mordi")
 F_SHORT = ("vai verso", "vai via", "guarda altro", "vaga")
 FOVEA_SHORT = ("fov. rosso", "fov. giallo", "fov. blu", "fov. vicino", "fov. sinistra", "fov. destra", "fov. nuovo")
 
@@ -52,11 +56,14 @@ SECTION_HELP = {
           "come il corpo a fungo degli insetti con gli odori: lo stesso oggetto accende sempre gli stessi. Le loro uscite verso E imparano in un colpo e dimenticano in minuti. L è la "
           "stessa uscita, cento volte più lenta: tiene solo ciò che vale sempre."),
     "E": ("E  selezione: cosa faccio",
-          "5 programmi in gara; la barra è la probabilità di sceglierlo. Vince uno alla volta, con un po' di "
-          "caso (esplorazione). Impara con δ: si rafforza ciò che ha portato meglio del previsto."),
-    "F": ("F  motore: come lo faccio (fisso)",
-          "Ogni programma è un movimento innato sull'oggetto attento, di cui F sa solo dove sta: andarci "
-          "(rallentando da vicino), andare via, guardare altro, vagare. Più il riflesso che fa girare via dai muri."),
+          "4 programmi in gara (la barra è la probabilità di sceglierlo; vince uno alla volta, con un po' di caso) "
+          "e, a parte, se mordere (si mangia solo mordendo, e mordere costa). Impara con δ: si rafforza ciò che "
+          "ha portato meglio del previsto."),
+    "F": ("F  motore: come lo faccio (innato)",
+          "Un piccolo circuito di neuroni innati, come i circuiti motori del tronco encefalico: dal programma "
+          "scelto in E e da dove sta l'oggetto attento a 4 neuroni motori (gira a sinistra, a destra, avanti, "
+          "indietro), più il riflesso dei muri. Non impara nella vita; i suoi pesi sono geni (fase B). Il morso "
+          "lo decide E."),
     "S": ("S  attenzione: su cosa mi concentro",
           "Un oggetto alla volta (pila o compagno), scelto per salienza: innata (vicino, appena comparso, un po' "
           "di inerzia, e chi è stato appena lasciato si ignora per 3 s) più imparata (un peso per colore, che δ "
@@ -277,6 +284,9 @@ class PileScreen(Screen):
             pygame.draw.circle(s, col, c, rad, 0 if j == i else 2)
             tip = w["pos"][j] + cfg.radius * 1.4 * np.array([np.cos(w["heading"][j]), np.sin(w["heading"][j])])
             pygame.draw.circle(s, BLUE_C, P(tip), 3)
+        if bool(self.view[1].get("bite", False)):  # la bocca aperta: morde
+            tip = me + cfg.radius * 1.5 * np.array([np.cos(hd), np.sin(hd)])
+            pygame.draw.circle(s, (240, 120, 100), P(tip), 4)
         # L'oggetto su cui l'essere seguito è concentrato: un anello e una linea.
         has, _, _, _, t = self._attended(w, self.view[1])
         if has:
@@ -285,7 +295,11 @@ class PileScreen(Screen):
             pygame.draw.line(s, ME_C, P(me), P(obj), 1)
             pygame.draw.circle(s, ME_C, P(obj), max(8, int((cfg.battery_radius + 6) * sc)), 2)
         s.set_clip(None)
-        pygame.draw.rect(s, BORDER, box, 2)
+        for w_, (a0, a1) in enumerate((((box.left, box.top), (box.right, box.top)),
+                                       ((box.right, box.top), (box.right, box.bottom)),
+                                       ((box.left, box.bottom), (box.right, box.bottom)),
+                                       ((box.left, box.top), (box.left, box.bottom)))):
+            pygame.draw.line(s, WALL_C[w_], a0, a1, 4)  # i muri colorati: nord, est, sud, ovest
         self.targets.append((box, ("arena",)))
 
     def _stats(self, s):
@@ -335,11 +349,18 @@ class PileScreen(Screen):
                (area.x + 10, area.y + 26))
         top = area.y + 58
         # Le colonne, da sinistra a destra come scorre il segnale.
-        xs = {"A": area.x + 18, "B": area.x + 250, "D": area.x + 345, "C": area.x + 450, "E": area.x + 650,
-              "F": area.x + 790}
+        xs = {"A": area.x + 18, "B": area.x + 250, "D": area.x + 345, "C": area.x + 450, "E": area.x + 640,
+              "F": area.x + 775}
         if agent != "sezioni":
             xs["E"], xs["F"] = area.x + 420, area.x + 600
+        br = dict(br)
+        if "genome" in br:
+            br["motor_w"] = np.asarray(br["genome"])[MOTOR].reshape(len(F_NEURONS), len(F_INPUTS))
+        for k in ("f_in", "f_act"):
+            if k in world and np.ndim(world[k]) == 2:
+                br[k] = np.asarray(world[k])[i]
         A_pos = self._section_A(s, xs["A"], top, a)
+        self._reflex_pos = A_pos[RAY.start + 1]
         E_pos = self._section_E(s, xs["E"], top + 40, br, agent)
         self._section_F(s, xs["F"], E_pos, br, agent)
         self._section_S(s, xs["E"], E_pos[-1][1] + 70, br)
@@ -417,31 +438,69 @@ class PileScreen(Screen):
         self.targets.append((r, ("section", key)))
 
     def _section_A(self, s, x, top, a):
+        """A compatta: gli occhi come griglia (colore × sinistra, centro, destra),
+        poi raggi, urti, corpo e la fovea. Restituisce il punto di ogni canale."""
         app = self.app
-        self._label(s, "A", x, top - 20, 200)
-        pos = []
+        self._label(s, "A", x, top - 20)
+        pos = [(0, 0)] * N_SENSES
         fast_of = {c: k for k, c in enumerate(FAST)}
-        row = 21
-        fov = N_SENSES + len(FAST)
-        names = list(SHORT) + list(FOVEA_SHORT)
-        rows = list(range(N_SENSES)) + [fov + k for k in range(len(FOVEA))]
-        colours = [RED_C] * 3 + [YELLOW_C] * 3 + [BLUE_C] * 3 + [TEXT] * 8 + [RED_C, YELLOW_C, BLUE_C] + [ME_C] * 4
-        fovea_pos = []
-        for r_, k in enumerate(rows):
-            y = top + r_ * row + (8 if r_ >= N_SENSES else 0)
+        cell, row = 16, 18
+        gx = x + 92
+        for k, h in enumerate(("sx", "c", "dx")):
+            s.blit(app.small.render(h, True, DIM), (gx + k * (cell + 6) + 2, top - 4))
+        y = top + 12
+
+        def grid_row(name, col, first):
+            nonlocal y
+            s.blit(app.small.render(name, True, lerp(DIM, col, 0.5)), (x, y))
+            for j in range(3):
+                k = first + j
+                v = float(a[k])
+                r = pygame.Rect(gx + j * (cell + 6), y, cell, cell - 2)
+                pygame.draw.rect(s, lerp((34, 38, 50), col, v), r)
+                pygame.draw.rect(s, (60, 64, 80), r, 1)
+                if k in fast_of:
+                    fv = float(a[N_SENSES + fast_of[k]])
+                    pygame.draw.rect(s, (235, 235, 245), (r.x, r.bottom + 1, int(r.w * fv), 2))
+                pos[k] = (gx + 3 * (cell + 6) + 6, y + 7)
+                self.targets.append((r, ("A", k)))
+            y += row
+
+        for e, (name, col) in enumerate(EYE_ROWS):
+            grid_row(name, col, 3 * e)
+        y += 4
+        grid_row("distanza", (255, 150, 60), RAY.start)
+        grid_row("urto", (255, 110, 90), BUMP.start)
+        y += 4
+        for k, name, col in ((ENERGY, "energia", TEXT), (WATCHED, "mi guardano", BLUE_C), (TASTE, "gusto", POS),
+                             (PAIN, "dolore", NEG)):
             v = float(a[k])
-            col = colours[r_]
-            s.blit(app.small.render(names[r_], True, lerp(DIM, col, 0.4 + 0.6 * v)), (x, y))
-            bar = pygame.Rect(x + 92, y + 2, 90, 9)
+            s.blit(app.small.render(name, True, lerp(DIM, col, 0.4 + 0.6 * v)), (x, y))
+            bar = pygame.Rect(gx, y + 2, 3 * (cell + 6) - 6, 9)
             pygame.draw.rect(s, (40, 44, 58), bar)
             pygame.draw.rect(s, lerp((60, 64, 80), col, 0.3 + 0.7 * v), (bar.x, bar.y, int(bar.w * v), bar.h))
             if k in fast_of:
                 fv = float(a[N_SENSES + fast_of[k]])
-                pygame.draw.rect(s, (230, 230, 240), (bar.x, bar.bottom + 2, int(bar.w * fv), 3))
-            pygame.draw.circle(s, lerp((50, 54, 70), col, v), (x + 196, y + 6), 5)
-            (pos if r_ < N_SENSES else fovea_pos).append((x + 196, y + 6))
+                pygame.draw.rect(s, (235, 235, 245), (bar.x, bar.bottom + 1, int(bar.w * fv), 2))
+            pos[k] = (gx + 3 * (cell + 6) + 6, y + 7)
             self.targets.append((pygame.Rect(x, y - 2, 200, row - 2), ("A", k)))
-        # I canali "cosa è cambiato" hanno la stessa riga del loro senso (tacca chiara).
+            y += row
+        y += 6
+        fov = N_SENSES + len(FAST)
+        fovea_pos = []
+        colours = [RED_C, YELLOW_C, BLUE_C] + [ME_C] * 4
+        for f in range(len(FOVEA)):
+            v = float(a[fov + f])
+            s.blit(app.small.render(FOVEA_SHORT[f], True, lerp(DIM, colours[f], 0.4 + 0.6 * v)), (x, y))
+            bar = pygame.Rect(gx, y + 2, 3 * (cell + 6) - 6, 9)
+            pygame.draw.rect(s, (40, 44, 58), bar)
+            pygame.draw.rect(s, lerp((60, 64, 80), colours[f], 0.3 + 0.7 * v), (bar.x, bar.y, int(bar.w * v), bar.h))
+            fovea_pos.append((gx + 3 * (cell + 6) + 6, y + 7))
+            self.targets.append((pygame.Rect(x, y - 2, 200, row - 2), ("A", fov + f)))
+            y += row
+        for p in pos + fovea_pos:
+            pygame.draw.circle(s, (70, 76, 96), p, 2)
+        # I canali "cosa è cambiato" hanno il punto del loro senso (tacca chiara sotto).
         return pos + [pos[c] for c in FAST] + fovea_pos
 
     def _section_B(self, s, x, top, br, A_pos, a):
@@ -504,12 +563,12 @@ class PileScreen(Screen):
             for k in np.flatnonzero(c_in[j] > 0):
                 if k < len(src):
                     pygame.draw.line(s, FIXED, src[k], pos[j], 1)
-        for j in lit:  # uscite verso E: C (pieno) e L (sottile)
-            for p_ in range(N_PROGRAMS):
-                for w, width in ((u_c[p_, j], 2), (u_l[p_, j], 1)):
-                    if abs(w) > 0.02:
-                        col = lerp((50, 54, 70), POS if w > 0 else NEG, min(abs(w) * 3, 1.0))
-                        pygame.draw.line(s, col, pos[j], E_pos[p_], width)
+        # Uscite verso E dei neuroni accesi: solo le più forti, C (spesse) e L (sottili).
+        votes = [(abs(w), w, j, p_, width) for j in lit for p_ in range(N_HEADS)
+                 for w, width in ((u_c[p_, j], 2), (u_l[p_, j], 1)) if abs(w) > 0.02]
+        for _, w, j, p_, width in sorted(votes, reverse=True)[:16]:
+            col = lerp((50, 54, 70), POS if w > 0 else NEG, min(abs(w) * 3, 1.0))
+            pygame.draw.line(s, col, pos[j], E_pos[p_], width)
         for j, p in enumerate(pos):
             on = code[j] > 0
             pygame.draw.circle(s, (250, 230, 140) if on else (44, 48, 62), p, 6 if on else 4)
@@ -538,13 +597,14 @@ class PileScreen(Screen):
     def _section_E(self, s, x, top, br, agent):
         app = self.app
         self._label(s, "E", x - 4, top - 30, 110)
-        pi = br.get("pi", np.full(N_PROGRAMS, 1.0 / N_PROGRAMS))
+        pi = np.append(br.get("pi", np.full(N_PROGRAMS, 1.0 / N_PROGRAMS)), float(br.get("p_bite", 0.0)))
         prog = int(br.get("program", -1)) if "program" in br else -1
+        biting = bool(br.get("bite", False))
         pos = []
-        for p_ in range(N_PROGRAMS):
-            y = top + 20 + p_ * 80
+        for p_ in range(N_HEADS):
+            y = top + 20 + p_ * 64 + (14 if p_ == BITE else 0)
             r = pygame.Rect(x, y - 16, 110, 34)
-            on = p_ == prog
+            on = p_ == prog or (p_ == BITE and biting)
             pygame.draw.rect(s, (60, 54, 30) if on else (30, 34, 46), r)
             pygame.draw.rect(s, PLAYER if on else BORDER, r, 2 if on else 1)
             s.blit(app.small.render(PROG_SHORT[p_], True, TEXT if on else DIM), (r.x + 6, r.y + 3))
@@ -555,18 +615,48 @@ class PileScreen(Screen):
             self.targets.append((r, ("E", p_)))
         return pos
 
+    # Da quale programma (indice in E) viene ogni ingresso di F; None = riflesso o costante.
+    F_SOURCE = (0, 0, 0, 0, 1, 1, 1, 3, 3, 3, None, None, None, None)
+
     def _section_F(self, s, x, E_pos, br, agent):
+        """F: 4 neuroni motori; le linee dai programmi di E (e dal riflesso dei
+        muri) pesano quanto il loro contributo adesso; il morso va alla bocca."""
         app = self.app
-        self._label(s, "F", x - 4, E_pos[0][1] - 46, 90)
-        prog = int(br.get("program", -1)) if "program" in br else -1
-        for p_, (ex, ey) in enumerate(E_pos):
-            on = p_ == prog
-            pygame.draw.line(s, PLAYER if on else FIXED, (ex + 110, ey), (x, ey), 2 if on else 1)
-            r = pygame.Rect(x, ey - 10, 92, 20)
-            pygame.draw.rect(s, (30, 34, 46), r)
-            pygame.draw.rect(s, PLAYER if on else BORDER, r, 1)
-            s.blit(app.small.render(F_SHORT[p_], True, TEXT if on else DIM), (r.x + 6, r.y + 3))
-            self.targets.append((r, ("section", "F")))
+        self._label(s, "F", x - 4, E_pos[0][1] - 46)
+        W = br.get("motor_w")
+        x_in, act = br.get("f_in"), br.get("f_act")
+        if W is None or x_in is None:
+            return
+        pos = []
+        for o in range(len(F_NEURONS)):
+            p = (x + 14, E_pos[0][1] + o * 56)
+            pos.append(p)
+        contrib = W * x_in[None, :]
+        for o, p in enumerate(pos):
+            for i, src in enumerate(self.F_SOURCE):
+                v = contrib[o, i]
+                if abs(v) < 0.05:
+                    continue
+                start = (E_pos[src][0] + 110, E_pos[src][1]) if src is not None else self._reflex_pos
+                if src == 3 and int(br.get("program", 3)) == 2:
+                    start = (E_pos[2][0] + 110, E_pos[2][1])  # "lascialo" vaga come "esplora"
+                col = lerp((50, 54, 70), POS if v > 0 else NEG, min(abs(v), 1.0))
+                pygame.draw.line(s, col, start, p, 2)
+        for o, p in enumerate(pos):
+            v = float(act[o])
+            pygame.draw.circle(s, lerp((40, 44, 58), (250, 230, 140), v), p, 9)
+            pygame.draw.circle(s, BORDER, p, 9, 1)
+            s.blit(app.small.render(F_NEURONS[o].replace("gira a sinistra", "gira sx").replace("gira a destra", "gira dx"),
+                                    True, TEXT if v > 0.1 else DIM),
+                   (p[0] + 14, p[1] - 7))
+            self.targets.append((pygame.Rect(p[0] - 10, p[1] - 10, 80, 20), ("F", o)))
+        bx, by = E_pos[BITE]
+        mouth = (x + 14, by)
+        on = bool(br.get("bite", False))
+        pygame.draw.line(s, PLAYER if on else FIXED, (bx + 110, by), mouth, 2 if on else 1)
+        pygame.draw.circle(s, (240, 120, 100) if on else (40, 44, 58), mouth, 9)
+        pygame.draw.circle(s, BORDER, mouth, 9, 1)
+        s.blit(app.small.render("bocca", True, TEXT if on else DIM), (mouth[0] + 14, mouth[1] - 7))
 
     def _section_V(self, s, x, y, br, targets):
         app = self.app
@@ -647,13 +737,27 @@ class PileScreen(Screen):
         if kind == "C":
             j = key[1]
             votes = ", ".join(f"{PROG_SHORT[p]} {br['u_c'][p, j]:+.2f}/{br['u_l'][p, j]:+.2f}"
-                              for p in range(N_PROGRAMS))
+                              for p in range(N_HEADS))
             return [f"C · neurone {j + 1}", "Ingressi fissi da 4 canali a caso tra fovea, D e B. Voti verso E (C veloce / "
                     "L lenta):", votes, "acceso adesso" if br["code"][j] > 0 else "spento adesso"]
         if kind == "E":
             p_ = key[1]
-            pi = br.get("pi", np.full(N_PROGRAMS, 0.2))
+            if p_ == BITE:
+                return ["E · mordi", "Se mordere: si mangia solo mordendo una pila davanti al muso, e mordere costa "
+                        "un po' di energia. È una scelta che si impara: mordere questo oggetto?",
+                        f"probabilità adesso: {float(br.get('p_bite', 0.0)):.0%}"]
+            pi = br.get("pi", np.full(N_PROGRAMS, 0.25))
             return [f"E · {PROGRAMS[p_]}", SECTION_HELP["E"][1], f"probabilità adesso: {float(pi[p_]):.0%}"]
+        if kind == "F":
+            o = key[1]
+            W = np.asarray(br["genome"])[MOTOR].reshape(len(F_NEURONS), len(F_INPUTS)) if "genome" in br else None
+            x_in = np.asarray(world["f_in"])[i] if "f_in" in world and np.ndim(world["f_in"]) == 2 else br.get("f_in")
+            out = [f"F · {F_NEURONS[o]}", SECTION_HELP["F"][1]]
+            if W is not None and x_in is not None:
+                c = W[o] * x_in
+                top = [k for k in np.argsort(-np.abs(c)) if abs(c[k]) > 0.02][:4]
+                out.append("adesso lo spingono: " + (", ".join(f"{F_INPUTS[k]} {c[k]:+.2f}" for k in top) or "niente"))
+            return out
         return []
 
     def _tooltip(self, s):

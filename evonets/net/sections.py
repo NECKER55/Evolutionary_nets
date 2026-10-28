@@ -40,8 +40,11 @@ rappresentano emerge (si misura con `selectivity` e le lesioni).
 - V critico: TD, previsione da B, D, C; δ = r + γ·V(t) − V(t−1).
 - U incertezza: media recente di |δ| sulla media lunga; alza velocità di C ed
   E e l'esplorazione.
-- F motore: i programmi fissi di `sim.pile` (avvicinati, allontanati,
-  lascialo, esplora), sull'oggetto attento.
+- E sceglie anche se mordere (sì o no, a ogni decisione): si mangia solo
+  mordendo, e mordere costa un po'. C ed L votano anche sul morso.
+- F motore: un circuito innato di neuroni (`sim.pile.motor_net`) dai
+  programmi e dall'oggetto attento a 4 neuroni motori (gira a sinistra, a
+  destra, avanti, indietro); non impara nella vita, i suoi pesi sono geni.
 
 Due regole sull'apprendimento con δ, solo nel cervello a sezioni:
 - tracce strette: una sinapsi di E o del cancello di D si marca solo se il
@@ -60,9 +63,11 @@ from dataclasses import dataclass, field, fields
 
 import numpy as np
 
-from ..sim.pile import EYES, N_PROGRAMS, N_SENSES, SECTORS
+from ..sim.pile import ENERGY, EYES, N_FIN, N_FOUT, N_PROGRAMS, N_SENSES, PAIN, SECTORS, TASTE, default_motor
 
-FAST = (*range(EYES.start, EYES.stop), 15, 16)  # canali con la loro versione "cosa è cambiato": occhi, gusto, dolore
+FAST = (*range(EYES.start, EYES.stop), TASTE, PAIN)  # canali con la loro versione "cosa è cambiato": occhi, gusto, dolore
+N_HEADS = N_PROGRAMS + 1  # E sceglie un programma, e se mordere (l'ultima "testa")
+BITE = N_PROGRAMS
 FOVEA = ("oggetto rosso", "oggetto giallo", "oggetto blu", "oggetto vicino", "oggetto a sinistra",
          "oggetto a destra", "oggetto nuovo")
 N_A = N_SENSES + len(FAST) + len(FOVEA)
@@ -123,28 +128,32 @@ GENE_NAMES = tuple(f.name for f in fields(Genes))
 INNATE_CAP = 0.2  # tetto dei valori innati legati ai sensi (per secondo di senso pieno)
 DELTA_MAX = 3.0  # δ satura qui
 WEIGHT_MAX = 5.0  # nessun peso imparato oltre questo
-N_GENOME = len(GENE_NAMES) + N_SENSES  # i parametri, poi i valori innati per ogni senso
+N_MOTOR = N_FOUT * N_FIN
+N_GENOME = len(GENE_NAMES) + N_SENSES + N_MOTOR  # i parametri, i valori innati per ogni senso, i pesi di F
+INNATE = slice(len(GENE_NAMES), len(GENE_NAMES) + N_SENSES)
+MOTOR = slice(INNATE.stop, N_GENOME)
 
 
 def default_genome() -> np.ndarray:
     g = Genes()
     v = [np.log(getattr(g, k)) if k in Genes.LOG else getattr(g, k) for k in GENE_NAMES]
-    return np.concatenate([np.asarray(v, dtype=float), np.zeros(N_SENSES)])
+    return np.concatenate([np.asarray(v, dtype=float), np.zeros(N_SENSES), default_motor().ravel()])
 
 
 def decode(genome: np.ndarray) -> dict:
-    """(N, N_GENOME) -> {nome: (N,)} più "innate" (N, N_SENSES), nei loro limiti."""
+    """(N, N_GENOME) -> {nome: (N,)}, "innate" (N, N_SENSES) e "motor" (N, 4, 14), nei loro limiti."""
     out = {}
     for k, name in enumerate(GENE_NAMES):
         v = genome[:, k]
         out[name] = np.exp(v) if name in Genes.LOG else np.maximum(v, 0.0)
-    out["innate"] = np.clip(genome[:, len(GENE_NAMES):], -INNATE_CAP, INNATE_CAP)
+    out["innate"] = np.clip(genome[:, INNATE], -INNATE_CAP, INNATE_CAP)
+    out["motor"] = genome[:, MOTOR].reshape(-1, N_FOUT, N_FIN)
     return out
 
 
 def mutate(genome: np.ndarray, rng: np.random.Generator, sigma: float = 0.1) -> np.ndarray:
     g = genome + rng.normal(0.0, sigma, genome.shape)
-    g[:, len(GENE_NAMES):] = np.clip(g[:, len(GENE_NAMES):], -INNATE_CAP, INNATE_CAP)
+    g[:, INNATE] = np.clip(g[:, INNATE], -INNATE_CAP, INNATE_CAP)
     return g
 
 
@@ -274,6 +283,8 @@ class Agent:
         self.clock = 0.0
         self.program = np.full(n, EXPLORE)
         self.pi = np.full((n, N_PROGRAMS), 1.0 / N_PROGRAMS)
+        self.bite = np.zeros(n, dtype=bool)  # si morde (deciso a ogni decisione)
+        self.p_bite = np.full(n, 0.5)
 
     def _tick(self) -> bool:
         self.clock += self.dt
@@ -291,6 +302,7 @@ class Agent:
             self.genome[who] = genomes
             self.p = decode(self.genome)
         self.att.reset(who)
+        self.bite[who] = False
 
 
 class Guided(Agent):
@@ -311,9 +323,11 @@ class Guided(Agent):
         good = objs["col"] == self.good[:, None]
         battery = np.arange(objs["col"].shape[1])[None] < self.batteries
         self.att.update(objs, decide, extra=np.where(good & battery, 10.0, -10.0))
-        has, col, _, _ = self.att.seen(objs)
+        has, col, near, _ = self.att.seen(objs)
         ok = has & (col == self.good)
         self.program = np.where(ok, APPROACH, EXPLORE)
+        self.bite = ok & (near > 0.9)  # morde solo la buona, quando ce l'ha davanti
+        self.p_bite = self.bite.astype(float)
         self.att.leave(has & ~ok)  # non è la buona: la lascia
         self.pi = np.eye(N_PROGRAMS)[self.program]
         return self.program
@@ -326,8 +340,8 @@ class _Learner(Agent):
 
     def _init_actor_critic(self, n_e: int, n_v: int):
         n = self.n
-        self.w_e = np.zeros((n, N_PROGRAMS, n_e))
-        self.e_e = np.zeros((n, N_PROGRAMS, n_e))
+        self.w_e = np.zeros((n, N_HEADS, n_e))
+        self.e_e = np.zeros((n, N_HEADS, n_e))
         self.w_v = np.zeros((n, n_v))
         self.e_v = np.zeros((n, n_v))
         self.v_prev = np.zeros(n)
@@ -362,17 +376,20 @@ class _Learner(Agent):
         self.w_e = np.clip(self.w_e + (eta * teach / norm)[:, None, None] * self.e_e, -WEIGHT_MAX, WEIGHT_MAX)
         self.e_e *= np.exp(-dt / 2.0)
         if decide:
-            z = (logits + self.stick * np.eye(N_PROGRAMS)[self.program]) / temp[:, None]
+            z = (logits[:, :N_PROGRAMS] + self.stick * np.eye(N_PROGRAMS)[self.program]) / temp[:, None]
             z -= z.max(1, keepdims=True)
             pi = np.exp(z)
             pi /= pi.sum(1, keepdims=True)
             u = self.rng.random((self.n, 1))
             self.program = (np.cumsum(pi, 1) < u).sum(1).clip(0, N_PROGRAMS - 1)
             self.pi = pi
-            chosen = np.eye(N_PROGRAMS)[self.program]
+            # Il morso: sì o no (probabilità dalla sua testa).
+            self.p_bite = 1.0 / (1.0 + np.exp(-np.clip(logits[:, BITE] / temp, -30, 30)))
+            self.bite = self.rng.random(self.n) < self.p_bite
+            dev = np.concatenate([np.eye(N_PROGRAMS)[self.program] - pi, (self.bite - self.p_bite)[:, None]], 1)
             tag = f_e if f_tag is None else f_tag
-            self.e_e += (chosen - pi)[:, :, None] * tag[:, None, :]  # la scelta rispetto all'attesa
-            self._chose(chosen - pi)
+            self.e_e += dev[:, :, None] * tag[:, None, :]  # la scelta rispetto all'attesa
+            self._chose(dev)
             self.att.leave(self.program == LEAVE)
         return self.program
 
@@ -451,9 +468,9 @@ class Sections(_Learner):
         for j in range(s.c):
             pick = np.argsort(self.rng.random((n, 2 * IDENTITY + nb)), axis=1)[:, : s.c_fan_in]
             np.put_along_axis(self.c_in[:, j], pick, 1.0, axis=1)
-        self.u_c = np.zeros((n, N_PROGRAMS, s.c))
-        self.e_c = np.zeros((n, N_PROGRAMS, s.c))
-        self.u_l = np.zeros((n, N_PROGRAMS, s.c))
+        self.u_c = np.zeros((n, N_HEADS, s.c))
+        self.e_c = np.zeros((n, N_HEADS, s.c))
+        self.u_l = np.zeros((n, N_HEADS, s.c))
         self.code = np.zeros((n, s.c))
         # U e soglia: medie di |δ|.
         self.d_fast = np.zeros(n)
@@ -544,7 +561,7 @@ class Sections(_Learner):
         self.e_c *= np.exp(-dt / 2.0)
         if "L" not in self.les:
             # Riposo: carichi e fermi a ricaricarsi (il gusto della pila che si consuma).
-            rest = (raw[:, 13] > s.rest_energy) & (raw[:, 15] > 0.1)
+            rest = (raw[:, ENERGY] > s.rest_energy) & (raw[:, TASTE] > 0.1)
             self.u_l += (p["eta_l"] * dt * rest)[:, None, None] * (self.u_c - self.u_l)
         if "S" not in self.les:
             self.att.learn(teach, p["eta_att"] * boost)

@@ -6,12 +6,19 @@ riproducono incontrandosi muso contro muso. Molti recinti girano insieme
 Due tipi di pile, rosse e gialle: una ricarica, l'altra scarica un po' e fa
 male; ogni `inversion_every` secondi i ruoli si scambiano. Le pile compaiono
 in una di quattro zone (gli angoli), e ogni `zone_every` secondi la zona
-cambia. I sensi sono fissi (`SENSES`); il corpo ha due ruote (spinta e
-sterzo); prendere una pila è automatico a contatto e quasi fermi.
+cambia. I quattro muri hanno colori diversi (punti di riferimento).
 
-Il mondo non sa niente dei cervelli: riceve spinta e sterzo, restituisce i
-sensi e ciò che è successo (piacere, dolore, morti, accoppiamenti). Chi muore
-rinasce subito altrove; con che cervello lo decide chi guida gli esseri.
+I sensi sono fissi (`SENSES`, calcolati da `sense`, uguale per NumPy e JAX):
+occhi per colore e direzione (pile, compagni, muri), tre raggi di distanza,
+tre sensori d'urto, energia, "mi guardano", gusto, dolore. Il corpo ha
+motori elementari: girare, avanti/indietro, mordere. Si mangia solo
+mordendo: una pila davanti al muso, vicina, andando piano; mordere costa un
+po' di energia.
+
+Il mondo non sa niente dei cervelli: riceve sterzo, spinta e morso,
+restituisce i sensi e ciò che è successo (piacere, dolore, morti,
+accoppiamenti). Chi muore rinasce subito altrove; con che cervello lo decide
+chi guida gli esseri.
 """
 
 from dataclasses import dataclass
@@ -20,15 +27,91 @@ import numpy as np
 
 RED, YELLOW, BLUE = 0, 1, 2  # i colori: pile rosse, pile gialle, la luce sul muso degli esseri
 SECTORS = np.radians([-60.0, -20.0, 20.0, 60.0])  # occhi: sinistra, centro, destra
+SIGHT = np.radians([-40.0, 0.0, 40.0])  # dove guarda ogni settore (per i muri)
 RAYS = np.radians([-30.0, 0.0, 30.0])  # i raggi di distanza (infrarossi)
+WALLS = ("nord", "est", "sud", "ovest")  # y = 0, x = lato, y = lato, x = 0
+WALL_COLOURS = ("verde", "viola", "arancio", "bianco")
+SIDES = ("sinistra", "centro", "destra")
 
 # I sensi, nell'ordine dei canali. Occhi: colore × direzione, 1 = oggetto
-# addosso, 0 = lontano o assente.
-SENSES = tuple(f"occhio {c} {s}" for c in ("rosso", "giallo", "blu") for s in ("sinistra", "centro", "destra")) + (
-    "distanza sinistra", "distanza centro", "distanza destra", "contatto", "energia", "mi guardano", "gusto",
-    "dolore")
+# addosso, 0 = lontano o assente; per i muri, quanto è vicino il muro di
+# quel colore che si vede in quella direzione (almeno 0,1 se si vede).
+SENSES = (tuple(f"occhio {c} {s}" for c in ("rosso", "giallo", "blu") for s in SIDES)
+          + tuple(f"occhio muro {c} {s}" for c in WALL_COLOURS for s in SIDES)
+          + ("distanza sinistra", "distanza centro", "distanza destra", "urto sinistra", "urto davanti",
+             "urto destra", "energia", "mi guardano", "gusto", "dolore"))
 EYES = slice(0, 9)
+WALL_EYES = slice(9, 21)
+RAY = slice(21, 24)
+BUMP = slice(24, 27)
+ENERGY, WATCHED, TASTE, PAIN = 27, 28, 29, 30
 N_SENSES = len(SENSES)
+
+
+def sense(cfg, pos, heading, bpos, bcolor, bon, energy, taste, pain, xp=np):
+    """I sensi di ogni essere, (B, n, N_SENSES), tutti tra 0 e 1: la stessa
+    funzione per NumPy e JAX (`xp`)."""
+    wrap = lambda a: (a + np.pi) % (2.0 * np.pi) - np.pi
+    B, n = heading.shape
+    eye = xp.eye(n, dtype=bool)[None]
+    chans = []
+    # Occhi: pile (rosso, giallo) e la luce sul muso degli altri (blu), se sono rivolti verso di me.
+    db = bpos[:, None, :, :] - pos[:, :, None, :]
+    ab = wrap(xp.arctan2(db[..., 1], db[..., 0]) - heading[:, :, None])
+    nb = xp.clip(1.0 - xp.hypot(db[..., 0], db[..., 1]) / cfg.eye_range, 0.0, 1.0) * bon[:, None, :]
+    de = pos[:, None, :, :] - pos[:, :, None, :]
+    ae = wrap(xp.arctan2(de[..., 1], de[..., 0]) - heading[:, :, None])
+    back = wrap(xp.arctan2(-de[..., 1], -de[..., 0]) - heading[:, None, :])
+    ne = xp.clip(1.0 - xp.hypot(de[..., 0], de[..., 1]) / cfg.eye_range, 0.0, 1.0)
+    ne = ne * ~eye * (xp.abs(back) < np.radians(cfg.face_visible))
+    for c in (RED, YELLOW, BLUE):
+        for s in range(3):
+            if c == BLUE:
+                inside = (ae >= SECTORS[s]) & (ae < SECTORS[s + 1])
+                chans.append(xp.where(inside, ne, 0.0).max(axis=2))
+            else:
+                inside = (ab >= SECTORS[s]) & (ab < SECTORS[s + 1]) & (bcolor[:, None, :] == c)
+                chans.append(xp.where(inside, nb, 0.0).max(axis=2))
+
+    def wall_hits(angle):
+        """Distanza da ognuno dei 4 muri lungo la direzione `angle` (inf se non lo colpisce)."""
+        ux, uy = xp.cos(heading + angle), xp.sin(heading + angle)
+        x, y = pos[..., 0], pos[..., 1]
+        big = 1e9
+        north = xp.where(uy < 0, -y / xp.where(uy < 0, uy, -1.0), big)
+        east = xp.where(ux > 0, (cfg.size - x) / xp.where(ux > 0, ux, 1.0), big)
+        south = xp.where(uy > 0, (cfg.size - y) / xp.where(uy > 0, uy, 1.0), big)
+        west = xp.where(ux < 0, -x / xp.where(ux < 0, ux, -1.0), big)
+        return xp.stack([north, east, south, west], -1)
+
+    # Occhi per i muri: in ogni direzione si vede il muro più vicino, del suo colore.
+    walls = []
+    for s in range(3):
+        t = wall_hits(SIGHT[s])
+        first = t.argmin(-1)
+        near = xp.clip(1.0 - t.min(-1) / (2.0 * cfg.size), 0.1, 1.0)
+        walls.append([xp.where(first == w, near, 0.0) for w in range(4)])
+    chans += [walls[s][w] for w in range(4) for s in range(3)]
+    # Raggi di distanza (infrarossi).
+    for a in RAYS:
+        chans.append(xp.clip(1.0 - (wall_hits(a).min(-1) - cfg.radius) / cfg.ray_range, 0.0, 1.0))
+    # Urti: muri, altri esseri, pile, a sinistra, davanti o a destra.
+    x, y = pos[..., 0], pos[..., 1]
+    touch = cfg.radius + 2.0
+    wall_on = xp.stack([y < touch, x > cfg.size - touch, y > cfg.size - touch, x < touch], -1)
+    wall_dir = xp.asarray(np.array([-np.pi / 2, 0.0, np.pi / 2, np.pi]))
+    a_wall = wrap(wall_dir[None, None, :] - heading[..., None])
+    on_e = (xp.hypot(de[..., 0], de[..., 1]) < 2.0 * cfg.radius) & ~eye
+    on_b = (xp.hypot(db[..., 0], db[..., 1]) < cfg.radius + cfg.battery_radius) & bon[:, None, :]
+    ang = xp.concatenate([a_wall, ae, ab], -1)
+    on = xp.concatenate([wall_on, on_e, on_b], -1)
+    q = np.pi / 4
+    chans += [(on & (ang < -q)).any(-1).astype(float), (on & (xp.abs(ang) <= q)).any(-1).astype(float),
+              (on & (ang > q)).any(-1).astype(float)]
+    # Corpo e compagni.
+    look = (xp.abs(back) < np.radians(cfg.watch_angle)) & (xp.hypot(de[..., 0], de[..., 1]) < cfg.watch_range) & ~eye
+    chans += [energy / cfg.energy_max, look.any(-1).astype(float), taste, pain]
+    return xp.stack(chans, -1)
 
 
 @dataclass
@@ -49,8 +132,11 @@ class PileConfig:
     zone_margin: float = 110.0  # distanza del centro della zona dai muri
     inversion_every: float = 300.0  # s: rosso e giallo si scambiano i ruoli
     zone_every: float = 200.0  # s: la zona delle pile cambia
-    take_speed: float = 0.3  # per prendere una pila: velocità sotto questa quota della massima
-    mouth: float = 20.0  # gradi: si prende solo una pila davanti al muso (non quelle che si sfiorano di lato)
+    take_speed: float = 0.3  # per mordere una pila: velocità sotto questa quota della massima
+    mouth: float = 25.0  # gradi: si morde solo una pila davanti al muso
+    bite_reach: float = 6.0  # la pila deve essere entro raggio + raggio della pila + questo
+    bite_cost: float = 0.1  # energia/s mentre si tiene la bocca aperta per mordere
+    reverse: float = 0.5  # all'indietro si va a questa quota della velocità massima
     charge_time: float = 2.0  # s per consumare una pila buona (intanto si sta fermi)
     good_energy: float = 25.0
     bad_energy: float = 8.0
@@ -143,79 +229,32 @@ class PileWorld:
     # --- I sensi ---------------------------------------------------------------------
 
     def senses(self) -> np.ndarray:
-        """(B, n, N_SENSES), tutti tra 0 e 1."""
-        cfg = self.cfg
-        B, n = self.B, self.n
-        out = np.zeros((B, n, N_SENSES))
-        # Gli oggetti visibili: le pile presenti e la luce sul muso degli altri.
-        objs = [(self.bpos, self.bcolor, self.bon)]
-        face = np.broadcast_to(np.full(n, BLUE), (B, n))
-        objs.append((self.pos, face, np.ones((B, n), dtype=bool)))
-        for k, (opos, ocol, oon) in enumerate(objs):
-            d = opos[:, None, :, :] - self.pos[:, :, None, :]  # (B, n, M, 2)
-            dist = np.hypot(d[..., 0], d[..., 1])
-            ang = _wrap(np.arctan2(d[..., 1], d[..., 0]) - self.heading[:, :, None])
-            near = np.clip(1.0 - dist / cfg.eye_range, 0.0, 1.0) * oon[:, None, :]
-            if k == 1:  # gli altri esseri: non se stessi, e la luce si vede solo se sono rivolti verso di me
-                near = near * (1.0 - np.eye(n))[None]
-                back = _wrap(np.arctan2(-d[..., 1], -d[..., 0]) - self.heading[:, None, :])
-                near = near * (np.abs(back) < np.radians(cfg.face_visible))
-            for s in range(3):
-                inside = (ang >= SECTORS[s]) & (ang < SECTORS[s + 1])
-                for c in ((RED, YELLOW) if k == 0 else (BLUE,)):
-                    v = np.where(inside & (ocol[:, None, :] == c), near, 0.0).max(axis=2)
-                    out[..., 3 * c + s] = np.maximum(out[..., 3 * c + s], v)
-        # Distanza dai muri lungo tre raggi.
-        for r, a in enumerate(RAYS):
-            u = np.stack([np.cos(self.heading + a), np.sin(self.heading + a)], -1)
-            t = np.full((B, n), np.inf)
-            for axis in (0, 1):
-                comp = u[..., axis]
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    hit = np.where(comp > 0, (cfg.size - self.pos[..., axis]) / comp,
-                                   np.where(comp < 0, -self.pos[..., axis] / comp, np.inf))
-                t = np.minimum(t, hit)
-            out[..., 9 + r] = np.clip(1.0 - (t - cfg.radius) / cfg.ray_range, 0.0, 1.0)
-        # Contatto: un muro, un altro essere, una pila.
-        wall = (self.pos.min(-1) < cfg.radius + 2.0) | (self.pos.max(-1) > cfg.size - cfg.radius - 2.0)
-        dd = np.hypot(*np.moveaxis(self.pos[:, :, None] - self.pos[:, None], -1, 0)) + np.eye(n) * 1e9
-        other = dd.min(-1) < 2.0 * cfg.radius
-        out[..., 12] = (wall | other | (self.charging > 0)).astype(float)
-        out[..., 13] = self.energy / cfg.energy_max
-        out[..., 14] = self._watched().astype(float)
-        out[..., 15] = self.taste
-        out[..., 16] = self.pain
-        return out
+        """(B, n, N_SENSES), tutti tra 0 e 1 (vedi `sense`)."""
+        return sense(self.cfg, self.pos, self.heading, self.bpos, self.bcolor, self.bon, self.energy, self.taste,
+                     self.pain)
 
     def objects(self) -> dict:
         """Gli oggetti in vista di ogni essere (vedi `objects_of`)."""
         return objects_of(self.pos, self.heading, self.bpos, self.bcolor, self.bon, self.cfg)
 
-    def _watched(self):
-        """(B, n): un altro essere vicino ha il muso verso di me."""
-        cfg = self.cfg
-        d = self.pos[:, :, None, :] - self.pos[:, None, :, :]  # da j a i: [b, i, j]
-        dist = np.hypot(d[..., 0], d[..., 1])
-        ang = _wrap(np.arctan2(d[..., 1], d[..., 0]) - self.heading[:, None, :])
-        look = (np.abs(ang) < np.radians(cfg.watch_angle)) & (dist < cfg.watch_range) & ~np.eye(self.n, dtype=bool)
-        return look.any(-1)
-
     # --- Un passo --------------------------------------------------------------------
 
-    def step(self, thrust: np.ndarray, steer: np.ndarray) -> dict:
-        """thrust (B, n) in [0, 1], steer (B, n) in [-1, 1]. Restituisce ciò che è
-        successo in questo passo: piacere e dolore (B, n), chi è morto (B, n),
-        accoppiamenti [(recinto, a, b)]."""
+    def step(self, thrust: np.ndarray, steer: np.ndarray, bite=None) -> dict:
+        """thrust (B, n) in [-1, 1] (indietro più piano), steer (B, n) in [-1, 1],
+        bite (B, n) bool: si morde. Restituisce ciò che è successo in questo
+        passo: piacere e dolore (B, n), chi è morto (B, n), accoppiamenti
+        [(recinto, a, b)]."""
         cfg, dt = self.cfg, self.cfg.dt
         B, n = self.B, self.n
+        bite = np.zeros((B, n), dtype=bool) if bite is None else np.asarray(bite, dtype=bool)
         # Mentre consuma una pila l'essere sta fermo (come il robot attaccato alla pila).
-        thrust = np.where(self.charging > 0.0, 0.0, np.clip(thrust, 0.0, 1.0))
+        thrust = np.where(self.charging > 0.0, 0.0, np.clip(thrust, -1.0, 1.0))
         self.heading = _wrap(self.heading + np.clip(steer, -1.0, 1.0) * cfg.turn * dt)
-        self.speed = thrust * cfg.speed
+        self.speed = thrust * cfg.speed * np.where(thrust < 0, cfg.reverse, 1.0)
         u = np.stack([np.cos(self.heading), np.sin(self.heading)], -1)
         self.pos = np.clip(self.pos + u * self.speed[..., None] * dt, cfg.radius, cfg.size - cfg.radius)
         self.age += dt
-        self.energy -= (cfg.drain + cfg.move_cost * thrust) * dt
+        self.energy -= (cfg.drain + cfg.move_cost * np.abs(thrust) + cfg.bite_cost * bite) * dt
         fade = np.exp(-dt / cfg.taste_tau)
         self.taste *= fade
         self.pain *= fade
@@ -223,7 +262,7 @@ class PileWorld:
         hurt = np.zeros((B, n))
 
         # Ricarica in corso (si è fermi: vedi sopra).
-        moving = self.speed > cfg.take_speed * cfg.speed
+        moving = np.abs(self.speed) > cfg.take_speed * cfg.speed
         self.charging[moving] = 0.0
         gain = np.minimum(self.charging, cfg.good_energy * dt / cfg.charge_time)
         self.charging -= gain
@@ -240,8 +279,9 @@ class PileWorld:
         self._spawn(~self.bon & (self.bwait <= 0.0))
         d = self.bpos[:, None] - self.pos[:, :, None]  # (B, n, K, 2)
         front = np.abs(_wrap(np.arctan2(d[..., 1], d[..., 0]) - self.heading[:, :, None])) < np.radians(cfg.mouth)
-        close = (np.hypot(d[..., 0], d[..., 1]) < cfg.radius + cfg.battery_radius) & self.bon[:, None] & front
-        free = ~moving & (self.charging <= 0.0)
+        close = (np.hypot(d[..., 0], d[..., 1]) < cfg.radius + cfg.battery_radius + cfg.bite_reach) \
+            & self.bon[:, None] & front
+        free = ~moving & (self.charging <= 0.0) & bite
         for b, i in zip(*np.nonzero(free & close.any(-1))):
             k = int(np.flatnonzero(close[b, i] & self.bon[b])[0]) if (close[b, i] & self.bon[b]).any() else -1
             if k < 0:
@@ -307,7 +347,7 @@ class PileWorld:
         dist = np.hypot(d[..., 0], d[..., 1])
         ang = np.abs(_wrap(np.arctan2(d[..., 1], d[..., 0]) - self.heading[:, :, None]))
         facing = ang < np.radians(cfg.mate_angle)
-        ready = (self.energy >= cfg.mate_energy) & (self.rest <= 0.0) & (self.speed <= cfg.take_speed * cfg.speed)
+        ready = (self.energy >= cfg.mate_energy) & (self.rest <= 0.0) & (np.abs(self.speed) <= cfg.take_speed * cfg.speed)
         ok = facing & facing.transpose(0, 2, 1) & (dist < cfg.mate_distance) & ready[:, :, None] & ready[:, None, :]
         ok &= ~np.eye(n, dtype=bool)
         self.pair_time = np.where(ok, self.pair_time + dt, 0.0)
@@ -350,48 +390,82 @@ def objects_of(pos, heading, bpos, bcolor, bon, cfg, xp=np):
     return {"vis": vis, "col": xp.broadcast_to(ocol[:, None, :], vis.shape), "near": near, "ang": ang}
 
 
-# --- I programmi di movimento (la sezione F, fissa) ---------------------------------
+# --- I programmi di movimento e il circuito motore (la sezione F) -------------------
 
 PROGRAMS = ("avvicinati", "allontanati", "lascialo", "esplora")
 N_PROGRAMS = len(PROGRAMS)
 
+# F è un piccolo circuito di neuroni innati (come i circuiti motori del tronco
+# encefalico): non impara durante la vita, ma i suoi pesi sono geni (fase B).
+# Ingressi: il programma scelto da E combinato con dove sta l'oggetto attento,
+# la deriva del vagare, il riflesso dei muri. Uscite: 4 neuroni motori.
+F_INPUTS = ("avvicinati: oggetto a sinistra", "avvicinati: oggetto a destra", "avvicinati: oggetto lontano",
+            "avvicinati: oggetto vicino", "allontanati: oggetto a sinistra", "allontanati: oggetto a destra",
+            "allontanati", "vaga", "vaga: deriva a sinistra", "vaga: deriva a destra", "riflesso: muro, gira a sinistra",
+            "riflesso: muro, gira a destra", "muro davanti", "costante")
+F_NEURONS = ("gira a sinistra", "gira a destra", "avanti", "indietro")
+N_FIN, N_FOUT = len(F_INPUTS), len(F_NEURONS)
+
+
+def default_motor() -> np.ndarray:
+    """I pesi di partenza di F (4 × 14): riproducono i programmi innati.
+    Avvicinati: girarsi verso l'oggetto e andarci, rallentando da vicino;
+    allontanati: girarsi via e andare; vaga: avanti con una deriva a caso;
+    riflesso: un muro davanti fa girare dalla parte libera e frenare."""
+    W = np.zeros((N_FOUT, N_FIN))
+    L, R, F, B = range(N_FOUT)
+    W[L, 0] = W[R, 1] = 3.1
+    W[L, 5] = W[R, 4] = 2.0
+    W[L, 8] = W[R, 9] = 1.0
+    W[L, 10] = W[R, 11] = 4.0
+    W[F, 2], W[F, 3], W[F, 6], W[F, 7], W[F, 12] = 1.35, 0.15, 0.7, 0.8, -0.7
+    return W
+
+
+def motor_inputs(program, has, near, ang, wander, escape, rays, xp=np):
+    """Gli ingressi di F, (..., 14)."""
+    side = SECTORS[-1]
+    left, right = xp.clip(-ang / side, 0.0, 1.0), xp.clip(ang / side, 0.0, 1.0)
+    go = ((program == 0) & has).astype(float)
+    away = ((program == 1) & has).astype(float)
+    roam = 1.0 - go - away
+    one = xp.ones_like(near)
+    return xp.stack([go * left, go * right, go * (1.0 - near), go * near, away * left, away * right, away, roam,
+                     roam * xp.maximum(-wander, 0.0), roam * xp.maximum(wander, 0.0),
+                     (escape < 0).astype(float), (escape > 0).astype(float),
+                     xp.clip(rays[..., 1] - 0.3, 0.0, 1.0), one], -1)
+
+
+def escape_reflex(rays, escape, xp=np):
+    """Il riflesso dei muri: con un muro vicino davanti sceglie da che parte
+    girare (la più libera) e ci resta finché davanti non è libero (senza, in
+    un angolo oscillava tra le due parti per sempre)."""
+    wall = rays.max(-1) > 0.5
+    free_side = xp.where(rays[..., 0] < rays[..., 2], -1.0, 1.0)
+    return xp.where(wall, xp.where(escape == 0.0, free_side, escape), 0.0)
+
+
+def motor_net(x, W, xp=np):
+    """F: (ingressi, pesi (..., 4, 14)) -> (spinta, sterzo, attività dei 4 neuroni)."""
+    a = xp.clip(xp.einsum("...oi,...i->...o", W, x), 0.0, 1.0)
+    return a[..., 2] - a[..., 3], a[..., 1] - a[..., 0], a
+
 
 class Motor:
-    """F: dai programmi alle ruote, innato e uguale per tutti. I programmi non
-    sanno che cosa sia un oggetto: agiscono sull'oggetto su cui l'essere è
-    concentrato (l'attenzione, nel cervello), di cui conoscono solo dove sta.
-    Avvicinati: girarsi verso di lui e andarci, rallentando da vicino (per
-    poter prendere la pila o fermarsi davanti a un compagno); allontanati:
-    girarsi via e andare; lascialo: l'attenzione passa ad altro (lo decide il
-    cervello) e intanto si vaga; esplora: vagare. Senza oggetto, avvicinati e
-    allontanati vagano. Un riflesso fisso fa girare via dai muri: sceglie da
-    che parte girare e ci resta finché davanti non è libero (senza, in un
-    angolo oscillava tra le due parti per sempre, spingendo contro i muri)."""
+    """F nella versione NumPy: tiene la deriva del vagare e il verso della fuga
+    dal muro di ogni essere."""
 
     def __init__(self, shape, rng: np.random.Generator):
         self.rng = rng
         self.wander = np.zeros(shape)
-        self.escape = np.zeros(shape)  # verso della fuga dal muro in corso (0 = nessuna)
+        self.escape = np.zeros(shape)
+        self.activity = np.zeros(shape + (N_FOUT,))
 
-    def __call__(self, program, senses, has, near, ang, dt):
-        """program, has (c'è un oggetto attento), near, ang: (B, n)."""
+    def __call__(self, program, senses, has, near, ang, W):
+        """program, has, near, ang: (B, n); W: (B, n, 4, 14). -> (spinta, sterzo)."""
         self.wander = 0.9 * self.wander + 0.3 * self.rng.normal(0.0, 1.0, self.wander.shape)
-        thrust, steer, self.escape = motor_rule(program, senses, has, near, ang, self.wander, self.escape, np)
+        rays = senses[..., RAY]
+        self.escape = escape_reflex(rays, self.escape)
+        self.inputs = motor_inputs(program, has, near, ang, self.wander, self.escape, rays)
+        thrust, steer, self.activity = motor_net(self.inputs, W)
         return thrust, steer
-
-
-def motor_rule(program, senses, has, near, ang, wander, escape, xp):
-    """La regola di F, uguale per NumPy e JAX (`xp`). `escape`: il verso della
-    fuga dal muro in corso. Restituisce (spinta, sterzo, nuovo escape)."""
-    roam_th, roam_st = 0.8, xp.clip(wander, -1.0, 1.0)
-    go = (program == 0) & has
-    away = (program == 1) & has
-    thrust = xp.where(go, xp.clip(1.2 * (1.0 - near), 0.15, 1.0), xp.where(away, 0.7, roam_th))
-    steer = xp.where(go, xp.clip(3.0 * ang, -1.0, 1.0), xp.where(away, xp.where(ang > 0, -1.0, 1.0), roam_st))
-    ray = senses[..., 9:12]
-    wall = ray.max(-1) > 0.5
-    free_side = xp.where(ray[..., 0] < ray[..., 2], -1.0, 1.0)
-    escape = xp.where(wall, xp.where(escape == 0.0, free_side, escape), 0.0)
-    steer = xp.where(wall, escape, steer)
-    thrust = thrust * (1.0 - 0.7 * xp.clip(ray[..., 1] - 0.3, 0.0, 1.0))
-    return thrust, steer, escape

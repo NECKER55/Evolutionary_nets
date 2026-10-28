@@ -163,6 +163,46 @@ proporzionato al danno, selezione dei programmi "appiccicosa" (senza, un
 esploratore a caso cambiava programma ogni 0,25 s e non arrivava mai a una
 pila).
 
+## Corpo nuovo: sensi elementari, morso, F come circuito di neuroni (2026-10-28)
+
+**Sensi** (31 canali, `sim.pile.sense`, la stessa funzione per NumPy e
+GPU): occhi per colore e direzione (sinistra, centro, destra) per pile
+rosse e gialle, compagni (blu) e i **quattro muri, ognuno di un colore**
+(nord verde, est viola, sud arancio, ovest bianco: punti di riferimento);
+tre raggi di distanza; **tre sensori d'urto** (sinistra, davanti, destra);
+energia, "mi guardano", gusto, dolore.
+
+**Motori elementari**: girare, avanti/indietro (indietro a metà velocità),
+**mordere**. Si mangia solo mordendo una pila davanti al muso, vicina,
+andando piano; tenere la bocca aperta costa 0,1 di energia al secondo.
+Urtare una pila non vuol dire mangiarla. E decide se mordere (una "testa" in
+più, sì o no a ogni decisione); C ed L votano anche sul morso.
+
+**F è un circuito di neuroni innati** (`sim.pile.motor_net`): 14 ingressi
+(il programma di E combinato con dove sta l'oggetto attento, la deriva del
+vagare, il riflesso dei muri, una costante) e 4 neuroni motori (gira a
+sinistra, a destra, avanti, indietro). I pesi di partenza riproducono i
+programmi di prima; non imparano nella vita; sono geni (fase B).
+
+**Risultati** (GPU, 200 recinti × 6 esseri, 25 minuti):
+
+| agente | pile/min | buone | morti di fame/min | prima dell'inversione | 0-15 s dopo | 15-30 | 30-60 | 60-90 |
+|---|---|---|---|---|---|---|---|---|
+| guidato | 2,39 | **94%** | 0,000 | 93% | 97% | 93% | 94% | 93% |
+| attore-critico | 4,80 | 50% | 0,10 | 51% | 48% | 50% | 50% | 49% |
+| sezioni | 2,82 | 56% | 0,20 | 65% | 37% | 43% | 44% | 47% |
+| sezioni senza C | 3,66 | 53% | 0,18 | 61% | 40% | 42% | 44% | 46% |
+| sezioni senza S | 2,93 | 53% | 0,18 | 55% | 47% | 48% | 48% | 51% |
+| sezioni senza B / D / L / U / V | 2,16-3,74 | 54-57% | 0,18-0,21 | 62-68% | 34-40% | 42-45% | 43-46% | 47-49% |
+
+- Il morso come decisione toglie il limite del corpo: il guidato passa
+  dall'80% al 94% (prima il 95% delle sue cattive erano urtate per strada).
+- L'attore-critico morde tutto (4,8 pile al minuto, a caso).
+- Nel cervello a sezioni ora **C conta** (senza C: 61% invece di 65% prima
+  dell'inversione); S resta la parte più importante; dopo l'inversione si
+  disimpara ancora lentamente, e si muore di fame più dell'attore-critico
+  (mordono meno).
+
 ## C legge che cosa si guarda, D ricorda che cosa si è preso (2026-10-28)
 
 **Diagnosi.** Dopo un'inversione C non cambiava idea: ogni incontro con lo

@@ -116,7 +116,12 @@ La schermata (`evonets/viz/pile_view.py`):
   puntino blu è la luce sul muso); sotto, l'energia dell'essere seguito, i
   tempi della prossima inversione e del prossimo cambio di zona, le pile
   prese nell'ultimo minuto in tutti i recinti;
-- **a destra il suo cervello**, da sinistra a destra come scorre il segnale:
+- **a destra il suo cervello** (corpo nuovo: in A gli occhi sono una griglia
+  colore × sinistra/centro/destra, con i quattro muri colorati, poi distanza,
+  urti, corpo e fovea; in E la casella "mordi"; in F 4 neuroni motori, con le
+  linee dai programmi che pesano quanto il loro contributo adesso, e la
+  bocca; nel recinto i muri colorati e un puntino rosso quando l'essere
+  morde), da sinistra a destra come scorre il segnale:
   A (i sensi: barra = valore, tacca chiara = quanto è appena salito), B (16
   neuroni in gara; le linee verso A: a cosa risponde ciascuno), D (la copia
   che resta per qualche secondo), C (64 neuroni, accesi i 4 della situazione
