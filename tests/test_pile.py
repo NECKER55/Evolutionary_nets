@@ -6,7 +6,7 @@ import numpy as np
 from evonets.evo.pile_test import run
 from evonets.net.sections import (
     INNATE_CAP,
-    N_GENOME,
+    N_BASE,
     ActorCritic,
     Sections,
     Sizes,
@@ -236,8 +236,76 @@ def test_genomes_cross_mutate_and_stay_in_their_limits():
     child = cross(a, b, rng)
     assert ((child == a) | (child == b)).all()
     g = mutate(np.tile(default_genome(), (5, 1)), rng, sigma=5.0)
-    assert g.shape == (5, N_GENOME)
+    assert g.shape == (5, N_BASE)
     assert (np.abs(decode(g)["innate"]) <= INNATE_CAP).all()
+
+
+def test_the_genome_carries_starting_weights_and_connections_and_birth_uses_them():
+    """Nel genoma ci sono i pesi di partenza (B, E, V, salienza) e le
+    connessioni di C; alla nascita il cervello riparte da lì, non da ciò che
+    il genitore aveva imparato."""
+    b = Sections(3, 0.05, seed=0)
+    assert set(b.blocks) == {"proto", "c_in", "e0", "v0", "s0"}
+    assert (b.c_in.sum(-1) == b.s.c_fan_in).all()  # 4 connessioni per neurone di C, dal genoma
+    g = b.genome.copy()
+    sl, shape = b.blocks["e0"]
+    g[1, sl] = 0.7  # un figlio con un E di partenza diverso
+    sl_c, _ = b.blocks["c_in"]
+    g[1, sl_c] = 0.0
+    g[1, sl_c.start] = 1.0  # e una sola connessione in C
+    b.w_e[:] = 3.0  # ciò che si era imparato
+    b.reborn(np.array([False, True, False]), g[1:2])
+    assert np.allclose(b.w_e[1], 0.7) and np.allclose(b.w_e[0], 3.0)
+    assert b.c_in[1].sum() == 1.0
+
+
+def test_arbitration_gives_the_fast_memory_more_say_after_surprises():
+    b = Sections(2, 0.05, seed=0)
+    raw = np.zeros((2, N_SENSES))
+    objs = {"vis": np.zeros((2, 1), bool), "col": np.zeros((2, 1), int), "near": np.zeros((2, 1)),
+            "ang": np.zeros((2, 1))}
+    b.step(raw, np.zeros(2), objs)
+    b.unc[:] = [0.0, 3.0]  # il secondo ha appena avuto molte sorprese
+    b.step(raw, np.zeros(2), objs)
+    k = b.votes["k"]
+    assert k[0] == 0.0 and k[1] == 1.0
+    les = Sections(2, 0.05, seed=0, sizes=Sizes(lesions=frozenset("R")))
+    les.step(raw, np.zeros(2), objs)
+    les.unc[:] = 3.0
+    les.step(raw, np.zeros(2), objs)
+    assert (les.votes["k"] == 0.0).all()  # senza arbitraggio: com'era prima
+
+
+def test_a_run_saves_and_reopens_on_either_engine(tmp_path):
+    from evonets.evo import pile_saves
+    from evonets.evo.pile_test import make_run
+
+    for engine in ("gpu", "numpy"):
+        r = make_run("sezioni", "B", 3, 0, (), engine=engine)
+        r.advance(60)
+        pile_saves.save(r, tmp_path / f"{engine}.npz")
+        g = pile_saves.export_state(r)["brain"]["genome"]
+        for other in ("gpu", "numpy"):
+            back = pile_saves.load(tmp_path / f"{engine}.npz", engine=other)
+            assert abs(back.t - r.t) < 1e-3
+            assert np.allclose(pile_saves.export_state(back)["brain"]["genome"], g, atol=1e-5)
+            back.advance(10)  # e continua
+
+
+def test_each_network_can_be_tried_alone(tmp_path):
+    from evonets.evo import pile_saves
+    from evonets.evo.pile_test import make_run
+
+    r = make_run("sezioni", "A", 2, 0, (), engine="numpy")
+    r.advance(100)
+    pile_saves.save(r, tmp_path / "corsa.npz")
+    for engine in ("gpu", "numpy"):
+        alone = pile_saves.alone(tmp_path / "corsa.npz", engine=engine)
+        assert alone.B == 2 * r.n and alone.n == 1  # ogni rete nel suo recinto
+        mine = pile_saves.export_state(r)["brain"]["w_e"]
+        assert np.allclose(pile_saves.export_state(alone)["brain"]["w_e"], mine, atol=1e-5)  # con ciò che ha imparato
+        alone.advance(200)
+        assert len(pile_saves.per_network(alone)) == 2 * r.n
 
 
 def test_phase_b_mates_and_children_carry_the_parents_genes():
@@ -280,7 +348,7 @@ def test_gpu_phase_b_and_lesions_run():
 # --- Il menu e la schermata ------------------------------------------------------------
 
 
-def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkeypatch):
+def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkeypatch, tmp_path):
     import os
 
     monkeypatch.setitem(os.environ, "SDL_VIDEODRIVER", "dummy")
@@ -297,6 +365,7 @@ def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkey
     assert menu._visible() is menu.pile_fields
     for agent in ("sezioni", "attore-critico", "guidato"):
         menu.p_agent.select(agent)
+        menu.save.value = str(tmp_path / f"{agent}.npz")
         menu.start()
         screen = app.current
         assert isinstance(screen, PileScreen) and screen.run.agent == agent
@@ -309,6 +378,21 @@ def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkey
                 (("B", 0), ("D", 0), ("C", 0), ("E", 0)) if agent == "sezioni" else ()):
             screen.hover = hover
             screen.draw(app.screen)  # anche la spiegazione sotto il mouse
+        screen.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p, mod=0))  # le reti una a una
+        test = app.current
+        assert test is not screen and test.testing
+        test.update()
+        test.draw(app.screen)
+        test.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE, mod=0))
+        assert app.current is screen  # si torna alla corsa
         screen.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE, mod=0))
-        assert app.current is menu
+        assert app.current is menu and (tmp_path / f"{agent}.npz").exists()  # salvata uscendo
+    # Riprendere un salvataggio dal menu, e provarne le reti una a una.
+    menu._choose(str(tmp_path / "sezioni.npz"))
+    assert menu.task.value == "pile" and not menu.p_agent.enabled
+    menu.start()
+    assert isinstance(app.current, PileScreen) and app.current.run.t > 0
+    app.current.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE, mod=0))
+    menu.explore()
+    assert app.current.testing
     pygame.quit()

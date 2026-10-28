@@ -55,8 +55,17 @@ Due regole sull'apprendimento con δ, solo nel cervello a sezioni:
   adatta la sua scala: Tobler, Fiorillo, Schultz 2005). Il critico impara
   invece da tutto δ: è il suo errore.
 
+Arbitraggio (Daw, Niv, Dayan 2005; l'incertezza inattesa e la noradrenalina,
+Yu e Dayan 2005): quando le sorprese sono tante (U alta) il mondo è cambiato,
+le abitudini non sono affidabili e la decisione passa alla memoria veloce:
+il voto di C conta di più, quelli di E ed L di meno, e la salienza imparata
+meno di quella innata (ci si guarda attorno). Quando le sorprese calano,
+tutto torna come prima. U accelera solo C.
+
 Lesioni (`lesions`): "B" (E, V, C, D leggono A invece di B), "D", "C", "L",
-"U", "V" (niente critico: δ = ricompensa grezza), "S" (salienza solo innata).
+"U", "V" (niente critico: δ = ricompensa grezza), "S" (salienza solo innata),
+"R" (niente arbitraggio: U accelera E, aggiunge caso e non sposta i voti,
+com'era prima).
 """
 
 from dataclasses import dataclass, field, fields
@@ -129,12 +138,17 @@ INNATE_CAP = 0.2  # tetto dei valori innati legati ai sensi (per secondo di sens
 DELTA_MAX = 3.0  # δ satura qui
 WEIGHT_MAX = 5.0  # nessun peso imparato oltre questo
 N_MOTOR = N_FOUT * N_FIN
-N_GENOME = len(GENE_NAMES) + N_SENSES + N_MOTOR  # i parametri, i valori innati per ogni senso, i pesi di F
+# Il genoma: prima la parte comune (i parametri, i valori innati per ogni
+# senso, i pesi di F), poi i blocchi propri di ogni cervello (`Agent.blocks`):
+# i pesi di partenza e le connessioni, che si ereditano (ciò che si impara
+# durante la vita no).
+N_BASE = len(GENE_NAMES) + N_SENSES + N_MOTOR
 INNATE = slice(len(GENE_NAMES), len(GENE_NAMES) + N_SENSES)
-MOTOR = slice(INNATE.stop, N_GENOME)
+MOTOR = slice(INNATE.stop, N_BASE)
 
 
 def default_genome() -> np.ndarray:
+    """La parte comune del genoma, con i valori di partenza."""
     g = Genes()
     v = [np.log(getattr(g, k)) if k in Genes.LOG else getattr(g, k) for k in GENE_NAMES]
     return np.concatenate([np.asarray(v, dtype=float), np.zeros(N_SENSES), default_motor().ravel()])
@@ -179,6 +193,12 @@ class Sizes:
     forget: float = 180.0  # C: s per dimenticare
     rest_energy: float = 0.6  # L: "riposo" = carichi (energia sopra questa quota) e fermi a ricaricarsi
     context: float = 0.1  # C: peso del contesto (B) rispetto all'identità dell'oggetto guardato (1)
+    # Arbitraggio (U): con molte sorprese (k = U/3, da 0 a 1) il voto di C vale
+    # fino a 1 + arb_fast volte, quelli di E ed L fino a 1 - arb_slow volte, la
+    # salienza imparata fino a 1 - att_shift volte (si torna a guardarsi attorno).
+    arb_fast: float = 2.0
+    arb_slow: float = 0.5
+    att_shift: float = 0.7
     memory: float = 0.5  # C: peso dell'oggetto ricordato in D
     c_threshold: float = 0.9  # C: si accendono tutti i neuroni sopra questa soglia (non un numero fisso)
     c_max: float = 0.3  # C: ogni voto satura qui, così conta l'ultima esperienza e un dolore ribalta tutto
@@ -205,9 +225,10 @@ class Attention:
         self.e = np.zeros((n, 3))  # la sua traccia
         self.new = np.zeros(n)
 
-    def update(self, objs: dict, decide: bool, extra=None) -> None:
+    def update(self, objs: dict, decide: bool, extra=None, learned=None) -> None:
         """Sceglie l'oggetto (a ogni decisione, o subito se quello attento è
-        sparito). `extra` (n, m): punteggio in più (il guidato bara così)."""
+        sparito). `extra` (n, m): punteggio in più (il guidato bara così).
+        `learned` (n,): quanto conta la salienza imparata (l'arbitraggio)."""
         S, dt, n = SALIENCE, self.dt, self.n
         vis, col, near = objs["vis"], objs["col"], objs["near"]
         idx = np.arange(n)
@@ -223,7 +244,8 @@ class Attention:
             return
         colour = np.eye(3)[col]  # (n, m, 3)
         slots = np.arange(self.m)[None]
-        score = (S["near"] * near + S["novelty"] * self.novelty + (colour * self.w[:, None, :]).sum(-1)
+        trust = np.ones(n) if learned is None else learned
+        score = (S["near"] * near + S["novelty"] * self.novelty + trust[:, None] * (colour * self.w[:, None, :]).sum(-1)
                  + S["stick"] * (slots == self.target[:, None])
                  - S["inhibit"] * ((slots == self.inhib[:, None]) & (self.inhib_t > 0)[:, None]))
         if extra is not None:
@@ -277,14 +299,36 @@ class Agent:
     def __init__(self, n: int, dt: float, seed: int = 0, genomes=None, objects: int = 1):
         self.n, self.dt = n, dt
         self.rng = np.random.default_rng(seed)
-        self.genome = np.tile(default_genome(), (n, 1)) if genomes is None else np.array(genomes, dtype=float)
+        self._given = None if genomes is None else np.array(genomes, dtype=float)
+        self.genome = np.tile(default_genome(), (n, 1)) if genomes is None else self._given
         self.p = decode(self.genome)
+        self.blocks = {}
         self.att = Attention(n, objects, dt, self.rng)
         self.clock = 0.0
         self.program = np.full(n, EXPLORE)
         self.pi = np.full((n, N_PROGRAMS), 1.0 / N_PROGRAMS)
         self.bite = np.zeros(n, dtype=bool)  # si morde (deciso a ogni decisione)
         self.p_bite = np.full(n, 0.5)
+
+    def _attach(self, specs) -> None:
+        """I blocchi propri del cervello: (nome, forma, valori di partenza (n, ...))."""
+        start, parts = N_BASE, []
+        for name, shape, init in specs:
+            size = int(np.prod(shape))
+            self.blocks[name] = (slice(start, start + size), tuple(shape))
+            parts.append(np.asarray(init, dtype=float).reshape(self.n, size))
+            start += size
+        if self._given is None:
+            self.genome = np.concatenate([self.genome[:, :N_BASE]] + parts, 1)
+        elif self._given.shape[1] != start:
+            raise ValueError(f"genoma di {self._given.shape[1]} geni, questo cervello ne vuole {start}")
+        self.p = decode(self.genome)
+
+    def start(self, name: str, who=slice(None)) -> np.ndarray:
+        """I valori di partenza del blocco `name` (dal genoma)."""
+        sl, shape = self.blocks[name]
+        g = self.genome[who, sl]
+        return g.reshape((g.shape[0],) + shape)
 
     def _tick(self) -> bool:
         self.clock += self.dt
@@ -315,6 +359,7 @@ class Guided(Agent):
 
     def __init__(self, n, dt, seed=0, genomes=None, objects: int = 1, batteries: int = 0):
         super().__init__(n, dt, seed, genomes, objects)
+        self._attach(())
         self.good = np.zeros(n, dtype=int)
         self.batteries = batteries
 
@@ -414,6 +459,13 @@ class ActorCritic(_Learner):
         super().__init__(n, dt, seed, genomes, objects)
         self.a = Interface(n, dt)
         self._init_actor_critic(N_A + 1, N_A + 1)
+        self._attach((("e0", (N_HEADS, N_A + 1), np.zeros((n, N_HEADS, N_A + 1))),
+                      ("v0", (N_A + 1,), np.zeros((n, N_A + 1))), ("s0", (3,), np.zeros((n, 3)))))
+        self._born(slice(None))
+
+    def _born(self, who) -> None:
+        """I pesi di partenza, dal genoma."""
+        self.w_e[who], self.w_v[who], self.att.w[who] = self.start("e0", who), self.start("v0", who), self.start("s0", who)
 
     def step(self, raw, reward, objs):
         decide = self._tick()
@@ -429,6 +481,7 @@ class ActorCritic(_Learner):
         super().reborn(who, genomes)
         self.a.reset(who)
         self._reset_actor_critic(who)
+        self._born(who)
 
 
 def c_threshold(fov, s: Sizes, xp=np):
@@ -451,8 +504,9 @@ class Sections(_Learner):
         self.a = Interface(n, dt)
         nb = N_A if "B" in self.les else s.b
         self.nb = nb
-        # B: prototipi a caso (nessun significato alla nascita) e previsione.
-        self.proto = self.rng.random((n, s.b, N_A)) * 0.3
+        # B: prototipi di partenza (dal genoma: a caso, senza significato, nella
+        # fase A; l'evoluzione può cambiarli nella fase B) e previsione.
+        self.proto = np.zeros((n, s.b, N_A))
         self.pred = np.zeros((n, N_A, s.b))
         self.win_rate = np.full((n, s.b), 1.0 / s.b)
         self.state_b = np.zeros((n, nb))
@@ -464,10 +518,11 @@ class Sections(_Learner):
         self.e_gate = np.zeros((n, nf))
         # C: ingresso fisso, casuale e sparso (che cos'è l'oggetto guardato e quello
         # ricordato in D, più il contesto da B); uscite verso E (C veloce, L lenta).
-        self.c_in = np.zeros((n, s.c, 2 * IDENTITY + nb))
+        wiring = np.zeros((n, s.c, 2 * IDENTITY + nb))  # le connessioni di partenza: a caso, 4 per neurone
         for j in range(s.c):
             pick = np.argsort(self.rng.random((n, 2 * IDENTITY + nb)), axis=1)[:, : s.c_fan_in]
-            np.put_along_axis(self.c_in[:, j], pick, 1.0, axis=1)
+            np.put_along_axis(wiring[:, j], pick, 1.0, axis=1)
+        self.c_in = np.zeros_like(wiring)
         self.u_c = np.zeros((n, N_HEADS, s.c))
         self.e_c = np.zeros((n, N_HEADS, s.c))
         self.u_l = np.zeros((n, N_HEADS, s.c))
@@ -475,9 +530,24 @@ class Sections(_Learner):
         # U e soglia: medie di |δ|.
         self.d_fast = np.zeros(n)
         self.d_slow = np.full(n, 1e-3)
+        self.t_slow = np.full(n, 1e-4)
         self.unc = np.zeros(n)
         # E legge B, D e la costante; V legge B, D, C e la costante.
         self._init_actor_critic(nb + nf + 1, nb + nf + s.c + 1)
+        # Nel genoma: i pesi di partenza (prototipi di B, E, V, salienza) e le
+        # connessioni di C (un gene per connessione possibile: c'è se supera 0,5).
+        self._attach((("proto", (s.b, N_A), self.rng.random((n, s.b, N_A)) * 0.3),
+                      ("c_in", wiring.shape[1:], wiring),
+                      ("e0", (N_HEADS, nb + nf + 1), np.zeros((n, N_HEADS, nb + nf + 1))),
+                      ("v0", (nb + nf + s.c + 1,), np.zeros((n, nb + nf + s.c + 1))),
+                      ("s0", (3,), np.zeros((n, 3)))))
+        self._born(slice(None))
+
+    def _born(self, who) -> None:
+        """Pesi e connessioni di partenza, dal genoma."""
+        self.proto[who] = self.start("proto", who)
+        self.c_in[who] = (self.start("c_in", who) > 0.5).astype(float)
+        self.w_e[who], self.w_v[who], self.att.w[who] = self.start("e0", who), self.start("v0", who), self.start("s0", who)
 
     # --- B ---------------------------------------------------------------------------
 
@@ -537,7 +607,9 @@ class Sections(_Learner):
     def step(self, raw, reward, objs):
         s, p, dt = self.s, self.p, self.dt
         decide = self._tick()
-        self.att.update(objs, decide)
+        arbitrate = "R" not in self.les and "U" not in self.les
+        k = np.clip(self.unc / 3.0, 0.0, 1.0) if arbitrate else np.zeros(self.n)
+        self.att.update(objs, decide, learned=1.0 - s.att_shift * k)
         fov = self.att.fovea(objs)
         a = self.a(raw, fov)
         r = reward + self.innate_reward(raw)
@@ -547,13 +619,17 @@ class Sections(_Learner):
         c = self._c(b, m, fov)
         one = np.ones((self.n, 1))
         delta = self._td(np.concatenate([b, m, c, one], 1), r, use_critic="V" not in self.les)
-        # Soglia adattiva e U: le medie della sorpresa.
-        self.d_fast += (dt / 20.0) * (np.abs(delta) - self.d_fast)
+        # Soglia adattiva: insegna solo la parte di δ sopra la sorpresa media.
         self.d_slow += (dt / 200.0) * (np.abs(delta) - self.d_slow)
-        if "U" not in self.les:
-            self.unc = np.clip(self.d_fast / np.maximum(self.d_slow, 1e-6) - 1.0, 0.0, 3.0)
         teach = np.sign(delta) * np.maximum(np.abs(delta) - s.floor * self.d_slow, 0.0)
         self.teach = teach
+        # U: le sorprese vere (sopra la soglia) degli ultimi 20 s rispetto agli
+        # ultimi 200 (con la media di tutto δ i pochi dolori di un'inversione si
+        # perdevano nel rumore del critico, e U non si accorgeva di niente).
+        self.d_fast += (dt / 20.0) * (np.abs(teach) - self.d_fast)
+        self.t_slow += (dt / 200.0) * (np.abs(teach) - self.t_slow)
+        if "U" not in self.les:
+            self.unc = np.clip(self.d_fast / np.maximum(self.t_slow, 1e-4) - 1.0, 0.0, 3.0)
         boost = 1.0 + p["surprise_rate"] * self.unc
         # C impara in fretta e dimentica; L si avvicina a C solo a riposo.
         step = p["eta_c"] * boost * teach / (1.0 + self.code.sum(1))  # diviso per i neuroni accesi
@@ -563,28 +639,33 @@ class Sections(_Learner):
             # Riposo: carichi e fermi a ricaricarsi (il gusto della pila che si consuma).
             rest = (raw[:, ENERGY] > s.rest_energy) & (raw[:, TASTE] > 0.1)
             self.u_l += (p["eta_l"] * dt * rest)[:, None, None] * (self.u_c - self.u_l)
+        # Con l'arbitraggio U non accelera più E e non aggiunge caso (era rumore):
+        # sposta il peso della decisione verso C. Senza ("R"), com'era prima.
+        slow_boost = np.ones(self.n) if arbitrate else boost
         if "S" not in self.les:
-            self.att.learn(teach, p["eta_att"] * boost)
+            self.att.learn(teach, p["eta_att"] * slow_boost)
         f_e = np.concatenate([b, m, one], 1)
         f_tag = np.concatenate([np.where(b > s.tag, b, 0.0), np.where(m > s.tag, m, 0.0), one], 1)
-        logits = (self.w_e * f_e[:, None, :]).sum(-1) + np.einsum("npc,nc->np", self.u_c, c)
+        habit = (self.w_e * f_e[:, None, :]).sum(-1)
         if "L" not in self.les:
-            logits += np.einsum("npc,nc->np", self.u_l, c)
-        temp = p["temperature"] * (1.0 + p["surprise_explore"] * self.unc)
-        return self._act(logits, f_e, teach, p["eta_e"] * boost, temp, decide, f_tag)
+            habit += np.einsum("npc,nc->np", self.u_l, c)
+        self.votes = {"E+L": habit, "C": np.einsum("npc,nc->np", self.u_c, c), "k": k}
+        logits = (1.0 - s.arb_slow * k)[:, None] * habit + (1.0 + s.arb_fast * k)[:, None] * self.votes["C"]
+        temp = p["temperature"] * (1.0 + (0.0 if arbitrate else p["surprise_explore"]) * self.unc)
+        return self._act(logits, f_e, teach, p["eta_e"] * slow_boost, temp, decide, f_tag)
 
     def reborn(self, who, genomes=None):
         super().reborn(who, genomes)
-        k = int(np.asarray(who).sum()) if np.asarray(who).dtype == bool else len(who)
         self.a.reset(who)
         self._reset_actor_critic(who)
-        self.proto[who] = self.rng.random((k, self.s.b, N_A)) * 0.3
         self.pred[who] = 0.0
         self.win_rate[who] = 1.0 / self.s.b
         for x in (self.state_b, self.prev_b, self.mem, self.w_gate, self.e_gate, self.u_c, self.e_c, self.u_l,
                   self.code, self.d_fast, self.unc):
             x[who] = 0.0
         self.d_slow[who] = 1e-3
+        self.t_slow[who] = 1e-4
+        self._born(who)
 
     def winner(self) -> np.ndarray:
         """(N,) il neurone di B più acceso (per le misure di emersione)."""

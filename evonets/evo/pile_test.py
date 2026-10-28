@@ -21,18 +21,20 @@ import time
 
 import numpy as np
 
-from ..net.sections import AGENTS, EXPLORE, GENE_NAMES, N_GENOME, Sections, Sizes, cross, decode, mutate
+from ..net.sections import AGENTS, EXPLORE, GENE_NAMES, Sections, Sizes, cross, decode, mutate
 from ..sim.pile import EYES, N_PROGRAMS, PROGRAMS, Motor, PileConfig, PileWorld
 
 WINDOWS = ((-30, 0), (0, 15), (15, 30), (30, 60), (60, 90))  # s rispetto all'inversione
 SERIES = ("good_taken", "bad_taken", "starved", "aged", "matings", "inversion", "zone_change")
 
 
-def start_genomes(agent: str, phase: str, N: int, seed: int, dt: float):
-    """Fase B: genomi di partenza un po' diversi tra loro; fase A: quelli di base per tutti."""
+def start_genomes(agent: str, phase: str, N: int, seed: int, cfg: PileConfig, lesions=()):
+    """Fase B: genomi di partenza un po' diversi tra loro; fase A: quelli di
+    base (None: ognuno i suoi, a caso dove serve, come la nascita)."""
     if phase != "B":
         return None
-    return mutate(np.tile(AGENTS[agent](1, dt).genome, (N, 1)), np.random.default_rng([seed, 1]), 0.2)
+    first = AGENTS[agent](N, cfg.dt, seed, **brain_kwargs(agent, cfg, lesions)).genome
+    return mutate(first, np.random.default_rng([seed, 1]), 0.2)
 
 
 class NumpyRun:
@@ -41,11 +43,12 @@ class NumpyRun:
     def __init__(self, cfg: PileConfig, agent: str, phase: str, enclosures: int, seed: int = 0, lesions=()):
         cfg.mating = phase == "B"
         self.cfg, self.agent, self.phase = cfg, agent, phase
+        self.lesions, self.seed = tuple(lesions), seed
         self.w = PileWorld(cfg, enclosures, seed)
         self.B, self.n = self.w.B, self.w.n
         N = self.B * self.n
         kw = brain_kwargs(agent, cfg, lesions)
-        self.brain = AGENTS[agent](N, cfg.dt, seed, genomes=start_genomes(agent, phase, N, seed, cfg.dt), **kw)
+        self.brain = AGENTS[agent](N, cfg.dt, seed, genomes=start_genomes(agent, phase, N, seed, cfg, lesions), **kw)
         self.motor = Motor((self.B, self.n), np.random.default_rng([seed, 2]))
         self.rng = np.random.default_rng([seed, 3])
         self.pairs = {}  # recinto -> (genoma a, genoma b) dell'ultima coppia
@@ -53,6 +56,7 @@ class NumpyRun:
         self.usage = np.zeros(N_PROGRAMS)
         self.counts = np.zeros((N, self.brain.nb, 4)) if isinstance(self.brain, Sections) else None
         self.series = {k: [] for k in SERIES}
+        self.by = {k: np.zeros(N) for k in ("good_by", "bad_by", "deaths_by")}  # per essere
 
     @property
     def t(self) -> float:
@@ -83,6 +87,8 @@ class NumpyRun:
         before = (len(w.taken), dict(w.deaths), len(w.matings), len(w.inversions), len(w.zone_changes))
         out = w.step(thrust, steer, brain.bite.reshape(B, n))
         new = w.taken[before[0]:]
+        for (_, bb, ii, _, ok) in new:
+            self.by["good_by" if ok else "bad_by"][bb * n + ii] += 1
         self.series["good_taken"].append(sum(1 for x in new if x[4]))
         self.series["bad_taken"].append(sum(1 for x in new if not x[4]))
         self.series["starved"].append(w.deaths["fame"] - before[1]["fame"])
@@ -94,10 +100,11 @@ class NumpyRun:
         for b, i, j in out["mates"]:
             self.pairs[b] = (brain.genome[b * n + i].copy(), brain.genome[b * n + j].copy())
         dead = out["dead"].reshape(N)
+        self.by["deaths_by"] += dead
         if dead.any():
             child = None
             if self.phase == "B":
-                child = np.zeros((int(dead.sum()), N_GENOME))
+                child = np.zeros((int(dead.sum()), brain.genome.shape[1]))
                 for k, s in enumerate(np.flatnonzero(dead)):
                     b = s // n
                     if b in self.pairs:
@@ -167,7 +174,7 @@ def make_run(agent="sezioni", phase="A", enclosures=200, seed=0, lesions=(), cfg
             from ..gpu.pile import PileGpu
 
             return PileGpu(cfg, agent, phase, enclosures, seed, lesions,
-                           genomes=start_genomes(agent, phase, enclosures * cfg.beings, seed, cfg.dt))
+                           genomes=start_genomes(agent, phase, enclosures * cfg.beings, seed, cfg, lesions))
     return NumpyRun(cfg, agent, phase, enclosures, seed, lesions)
 
 
@@ -288,9 +295,22 @@ def main() -> None:
     ap.add_argument("--lesioni", default="", help="sezioni da togliere, per esempio D o B,C (solo per sezioni)")
     ap.add_argument("--confronto", action="store_true", help="i tre agenti e le lesioni del cervello a sezioni")
     ap.add_argument("--motore", choices=("gpu", "numpy"), default="gpu")
+    ap.add_argument("--prova", default=None, help="un salvataggio: prova le sue reti una a una, ognuna da sola")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     show = lambda r: print(json.dumps({k: v for k, v in r.items() if k != "storia"}, ensure_ascii=False), flush=True)
+    if args.prova:
+        from .pile_saves import alone, per_network
+
+        r = alone(args.prova, engine=args.motore, seed=args.seed)
+        r.advance(int(round(args.minuti * 60.0 / r.cfg.dt)))
+        nets = [x for x in per_network(r) if x["scelta"] is not None]
+        nets.sort(key=lambda x: (-x["scelta"], -x["buone"]))
+        print(f"{len(per_network(r))} reti, ognuna da sola per {args.minuti} minuti; con almeno una pila: {len(nets)}")
+        for x in nets[:10] + ([{"rete": "..."}] if len(nets) > 20 else []) + nets[-10:]:
+            print(json.dumps(x, ensure_ascii=False))
+        show({"insieme": measures(r)})
+        return
     if args.confronto:
         for agent, les in (("guidato", ()), ("attore-critico", ()), ("sezioni", ()), ("sezioni", ("B",)),
                            ("sezioni", ("D",)), ("sezioni", ("C",)), ("sezioni", ("L",)), ("sezioni", ("U",)),

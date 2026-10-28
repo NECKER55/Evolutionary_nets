@@ -163,6 +163,46 @@ proporzionato al danno, selezione dei programmi "appiccicosa" (senza, un
 esploratore a caso cambiava programma ogni 0,25 s e non arrivava mai a una
 pila).
 
+## Arbitraggio, genoma con pesi e connessioni, salvataggi (2026-10-28)
+
+**Arbitraggio (U).** Con molte sorprese (k = U/3) il voto di C conta fino
+a 3 volte, quelli di E ed L fino a metà, la salienza imparata fino a 0,3
+volte (ci si guarda attorno); U non accelera più E e non aggiunge caso
+(accelera solo C). La lesione "R" rimette com'era. U ora conta solo le
+sorprese vere (sopra la soglia): con la media di tutto δ non si accorgeva
+delle inversioni.
+
+| | prima dell'inversione | 0-15 s | 15-30 | 30-60 | 60-90 |
+|---|---|---|---|---|---|
+| sezioni (arbitraggio) | 62,5% | 39,3% | 42,8% | **45,8%** | **50,0%** |
+| sezioni senza arbitraggio (R) | 63,5% | 39,5% | 41,7% | 43,1% | 47,1% |
+
+Aiuta poco (circa +3 punti nel recupero), perché le sorprese sono frequenti
+anche prima dell'inversione (si sbaglia ancora una pila su tre): l'inversione
+non produce un'ondata riconoscibile, e U resta intorno a 0,7. Servirà quando
+le abitudini saranno buone.
+
+**Genoma con pesi e connessioni.** Oltre ai parametri, ai valori innati e
+ai pesi di F, il genoma di ogni cervello contiene i suoi **pesi di
+partenza** (prototipi di B, E, V, salienza) e le **connessioni** di C (un
+gene per connessione possibile: c'è se supera 0,5). Alla nascita il
+cervello riparte da lì; il figlio eredita i valori di partenza dei
+genitori (incrocio e mutazione), non ciò che hanno imparato. C, L, D e le
+altre memorie non si ereditano. Fase A: ognuno ha i suoi valori di partenza
+(a caso dove serve) e rinasce sempre da quelli.
+
+**Salvataggi** (`evonets/evo/pile_saves.py`): mondo, cervelli (genoma e
+tutto ciò che si è imparato), serie e contatori per essere; la stessa forma
+per GPU e processore. Ctrl+S nella schermata, e all'uscita se ci sono
+novità; nel menu "Riprendi da" li riconosce (righe dell'arena delle pile
+compilate dal file). Alla ripresa valgono le regole attuali.
+
+**Le reti una a una.** `alone`: ogni rete da sola nel suo recinto, tutte
+insieme, con ciò che ha imparato; contatori per rete (buone, cattive,
+morti). Nella schermata il tasto P (Esc torna alla corsa), nel menu
+"Esplora" su un salvataggio delle pile, da riga di comando
+`--prova salvataggio.npz --minuti 10` (le migliori e le peggiori).
+
 ## Corpo nuovo: sensi elementari, morso, F come circuito di neuroni (2026-10-28)
 
 **Sensi** (31 canali, `sim.pile.sense`, la stessa funzione per NumPy e

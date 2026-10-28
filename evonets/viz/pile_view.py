@@ -98,10 +98,16 @@ class PileScreen(Screen):
     """La simulazione nell'arena delle pile: `run` è una corsa di
     `evo.pile_test` (NumPy o GPU)."""
 
-    def __init__(self, app, run, minutes: int = 0):
+    def __init__(self, app, run, minutes: int = 0, save: str | None = None, back=None):
+        """`save`: dove salvare (Ctrl+S, e all'uscita se ci sono novità).
+        `back`: la schermata a cui tornare con Esc (la prova delle reti una a
+        una torna alla corsa); senza, si torna al menu."""
         self.app, self.run = app, run
         self.cfg = run.cfg
-        self.goal = 60.0 * minutes if minutes else None
+        self.save_path, self.back = save, back
+        self.testing = hasattr(run, "origin")  # le reti di una corsa, ognuna da sola nel suo recinto
+        self.saved_t = run.t
+        self.goal = run.t + 60.0 * minutes if minutes else None
         self.encl, self.follow = 0, 0
         self.paused = False
         self.turbo = False
@@ -186,8 +192,15 @@ class PileScreen(Screen):
         elif ev.type == pygame.KEYDOWN:
             k = ev.key
             if k == pygame.K_ESCAPE:
+                if self.back is not None:
+                    self.app.show(self.back)
+                    return
                 self.app.active_run = None
-                self.app.launcher.returned("arena delle pile chiusa (le corse delle pile non si salvano ancora)")
+                self.app.launcher.returned(self._leave())
+            elif k == pygame.K_s and ev.mod & pygame.KMOD_CTRL:
+                self._save()
+            elif k == pygame.K_p and not self.testing:
+                self._test_networks()
             elif k == pygame.K_SPACE:
                 self.paused = not self.paused
             elif k == pygame.K_t:
@@ -204,6 +217,33 @@ class PileScreen(Screen):
                 self._choose(encl=self.encl - 1)
             elif k == pygame.K_h:
                 self.show_help = not self.show_help
+
+    def _save(self) -> None:
+        from ..evo.pile_saves import save
+
+        if self.testing or not self.save_path:
+            self.message = "la prova delle reti non si salva" if self.testing else "nessun file dove salvare"
+            return
+        save(self.run, self.save_path)
+        self.saved_t = self.run.t
+        self.message = f"salvato al minuto {self.run.t / 60:.1f} in {self.save_path}"
+
+    def _leave(self) -> str:
+        """Uscendo: si salva se ci sono novità."""
+        if not self.testing and self.save_path and self.run.t != self.saved_t:
+            self._save()
+            return self.message
+        return "arena delle pile chiusa"
+
+    def _test_networks(self) -> None:
+        """P: le reti di questa corsa, ognuna da sola nel suo recinto (con ciò che
+        ha imparato fin qui); Esc torna qui."""
+        from ..evo.pile_saves import alone
+
+        engine = "numpy" if type(self.run).__name__ == "NumpyRun" else "gpu"
+        test = PileScreen(self.app, alone(self.run, engine=engine), back=self)
+        test.encl = self.encl * self.run.n + self.follow  # si parte dalla rete seguita
+        self.app.show(test)
 
     # --- disegno --------------------------------------------------------------
 
@@ -228,6 +268,8 @@ class PileScreen(Screen):
         les = f", senza {','.join(sorted(les))}" if les else ""
         head = (f"Arena delle pile — {r.agent}{les}, fase {r.phase} — recinto {self.encl + 1}/{r.B} "
                 f"— essere {self.follow + 1}/{r.n}")
+        if self.testing:
+            head = f"Prova delle reti una a una — {r.agent}{les} — rete {self.encl + 1}/{r.B}, da sola nel suo recinto"
         s.blit(app.font.render(head, True, PLAYER), (16, 12))
         speed = "turbo" if self.turbo else f"x{SPEEDS[self.speed_i]}"
         info = (f"t {w['t'] / 60:5.1f} min   {speed} ({self.rate:,.0f} s di mondo/s)"
@@ -324,7 +366,18 @@ class PileScreen(Screen):
         line(f"ultimo minuto, tutti i recinti: {g + b:.0f} pile prese, {g / max(g + b, 1):.0%} buone", TEXT)
         line(f"dall'inizio: {good_s.sum() / max(tot, 1):.0%} buone; morti di fame {r.flat('starved').sum():.0f}"
              + (f"; accoppiamenti {r.flat('matings').sum():.0f}" if r.phase == "B" else ""), DIM)
-        line("clic o Tab: segui un essere   PagSu/Giù: recinto   +/-: velocità", DIM)
+        if self.testing:
+            from ..evo.pile_saves import per_network
+
+            nets = per_network(r)
+            me = nets[self.encl]
+            done = sorted([x["scelta"] for x in nets if x["scelta"] is not None], reverse=True)
+            rank = (done.index(me["scelta"]) + 1) if me["scelta"] is not None else None
+            line(f"questa rete: {me['buone']} buone, {me['cattive']} cattive, morta {me['morti']} volte"
+                 + (f", scelta {me['scelta']:.0%} ({rank}ª su {len(done)})" if rank else ""), PLAYER)
+            line("PagSu/Giù: rete precedente / successiva   +/-: velocità   Esc: torna alla corsa", DIM)
+        else:
+            line("clic o Tab: segui   PagSu/Giù: recinto   P: prova le reti una a una   Ctrl+S: salva", DIM)
         if self.message:
             line(self.message, TARGET)
 
@@ -792,7 +845,8 @@ class PileScreen(Screen):
                  "C/L cosa ho imparato (in fretta / piano), E cosa faccio, F come lo faccio; V il critico, U",
                  "l'incertezza. Passa il mouse su qualsiasi cosa per la spiegazione.", "",
                  "Comandi: clic o Tab segue un essere, PagSu/PagGiù cambia recinto, +/- velocità, T turbo,",
-                 "Spazio pausa, H questo aiuto, Esc torna al menu."]
+                 "Spazio pausa, Ctrl+S salva, P prova le reti una a una (ognuna da sola nel suo recinto),",
+                 "H questo aiuto, Esc torna al menu (salvando, se ci sono novità)."]
         for k, t in enumerate(lines):
             s.blit((app.font if k == 0 else app.small).render(t, True, PLAYER if k == 0 else TEXT),
                    (r.x + 20, r.y + 20 + 18 * k))

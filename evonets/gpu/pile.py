@@ -172,7 +172,7 @@ def world_step(cfg: P.PileConfig, w: dict, thrust, steer, bite, key):
     pair_time = jnp.where(dead[:, :, None] | dead[:, None, :], 0.0, pair_time)
     w.update(pos=pos, heading=heading, speed=speed, energy=energy, bpos=bpos, bcolor=bcolor, bon=bon, bwait=bwait,
              bage=bage, t=t, good=good, next_inv=next_inv, zone=zone, next_zone=next_zone, pair_time=pair_time)
-    outs = dict(pleasure=pleasure, pain=hurt, dead=dead, mated=mated, partner=partner,
+    outs = dict(pleasure=pleasure, pain=hurt, dead=dead, mated=mated, partner=partner, good_each=took & ok, bad_each=bad,
                 good_taken=(took & ok).sum(), bad_taken=bad.sum(), starved=starved.sum(), aged=(aged & ~starved).sum(),
                 matings=mated.sum() // 2, inversion=inv, zone_change=zc)
     return w, outs
@@ -184,8 +184,9 @@ ATT_KEYS = ("att_target", "att_inhib", "att_inhib_t", "att_prev_vis", "att_novel
 
 
 def init_brain(agent: str, N: int, dt: float, seed: int, cfg: P.PileConfig, genomes=None,
-               sizes: S.Sizes | None = None) -> dict:
-    """Lo stato di partenza, dalla versione NumPy (stessa partenza)."""
+               sizes: S.Sizes | None = None) -> tuple[dict, dict]:
+    """Lo stato di partenza, dalla versione NumPy (stessa partenza), e dove
+    stanno nel genoma i pesi e le connessioni di partenza (`Agent.blocks`)."""
     from ..evo.pile_test import brain_kwargs
 
     kw = brain_kwargs(agent, cfg, sizes.lesions if sizes else ())
@@ -199,14 +200,14 @@ def init_brain(agent: str, N: int, dt: float, seed: int, cfg: P.PileConfig, geno
            "att_inhib_t": at.inhib_t, "att_prev_vis": at.prev_vis, "att_novelty": at.novelty, "att_w": at.w,
            "att_e": at.e, "att_new": at.new}
     if agent == "guidato":
-        return out
+        return out, b.blocks
     out.update(a_slow=b.a.slow, w_e=b.w_e, e_e=b.e_e, w_v=b.w_v, e_v=b.e_v, v_prev=b.v_prev, fresh=b.fresh,
                delta=b.delta, teach=b.teach)
     if agent == "sezioni":
         out.update(proto=b.proto, pred=b.pred, win_rate=b.win_rate, state_b=b.state_b, prev_b=b.prev_b, mem=b.mem,
                    w_gate=b.w_gate, e_gate=b.e_gate, c_in=b.c_in, u_c=b.u_c, e_c=b.e_c, u_l=b.u_l, code=b.code,
-                   d_fast=b.d_fast, d_slow=b.d_slow, unc=b.unc, counts=np.zeros((N, b.nb, 4)))
-    return out
+                   d_fast=b.d_fast, d_slow=b.d_slow, t_slow=b.t_slow, unc=b.unc, counts=np.zeros((N, b.nb, 4)))
+    return out, b.blocks
 
 
 def decode(genome):
@@ -220,7 +221,7 @@ def decode(genome):
     return out
 
 
-def _attend(br, objs, decide, dt, key, extra=None):
+def _attend(br, objs, decide, dt, key, extra=None, learned=None):
     """L'attenzione: come `sections.Attention.update`."""
     A = S.SALIENCE
     vis, col, near = objs["vis"], objs["col"], objs["near"]
@@ -237,7 +238,9 @@ def _attend(br, objs, decide, dt, key, extra=None):
     choose = (decide | (target < 0)) & vis.any(1)
     colour = jax.nn.one_hot(col, 3)
     slots = jnp.arange(m)[None]
-    score = (A["near"] * near + A["novelty"] * br["att_novelty"] + (colour * br["att_w"][:, None, :]).sum(-1)
+    trust = jnp.ones(n) if learned is None else learned
+    score = (A["near"] * near + A["novelty"] * br["att_novelty"]
+             + trust[:, None] * (colour * br["att_w"][:, None, :]).sum(-1)
              + A["stick"] * (slots == target[:, None])
              - A["inhibit"] * ((slots == br["att_inhib"][:, None]) & (br["att_inhib_t"] > 0)[:, None]))
     if extra is not None:
@@ -316,7 +319,9 @@ def _act(br, logits, f_e, teach, eta, temp, dt, decide, key, f_tag=None, code=No
 
 def _sections(br, p, raw, objs, reward, dt, sz: S.Sizes, les: frozenset, decide, key):
     k_att, k_act = jax.random.split(key)
-    _attend(br, objs, decide, dt, k_att)
+    arbitrate = "R" not in les and "U" not in les
+    k = jnp.clip(br["unc"] / 3.0, 0.0, 1.0) if arbitrate else jnp.zeros_like(br["unc"])
+    _attend(br, objs, decide, dt, k_att, learned=1.0 - sz.att_shift * k)
     a = _interface(br, raw, objs, dt)
     fov = a[:, -len(S.FOVEA):]
     r = reward + (p["innate"] * raw).sum(1) * dt
@@ -360,12 +365,13 @@ def _sections(br, p, raw, objs, reward, dt, sz: S.Sizes, les: frozenset, decide,
     br["code"] = c
     one = jnp.ones((n, 1), F)
     delta = _td(br, p, jnp.concatenate([b, m, c, one], 1), r, dt, use_critic="V" not in les)
-    br["d_fast"] = br["d_fast"] + (dt / 20.0) * (jnp.abs(delta) - br["d_fast"])
     br["d_slow"] = br["d_slow"] + (dt / 200.0) * (jnp.abs(delta) - br["d_slow"])
-    if "U" not in les:
-        br["unc"] = jnp.clip(br["d_fast"] / jnp.maximum(br["d_slow"], 1e-6) - 1.0, 0.0, 3.0)
     teach = jnp.sign(delta) * jnp.maximum(jnp.abs(delta) - sz.floor * br["d_slow"], 0.0)
     br["teach"] = teach
+    br["d_fast"] = br["d_fast"] + (dt / 20.0) * (jnp.abs(teach) - br["d_fast"])
+    br["t_slow"] = br["t_slow"] + (dt / 200.0) * (jnp.abs(teach) - br["t_slow"])
+    if "U" not in les:
+        br["unc"] = jnp.clip(br["d_fast"] / jnp.maximum(br["t_slow"], 1e-4) - 1.0, 0.0, 3.0)
     boost = 1.0 + p["surprise_rate"] * br["unc"]
     step = p["eta_c"] * boost * teach / (1.0 + c.sum(1))
     br["u_c"] = jnp.clip(br["u_c"] + step[:, None, None] * br["e_c"] - br["u_c"] * (dt / sz.forget), -sz.c_max, sz.c_max)
@@ -373,15 +379,18 @@ def _sections(br, p, raw, objs, reward, dt, sz: S.Sizes, les: frozenset, decide,
     if "L" not in les:
         rest = (raw[:, P.ENERGY] > sz.rest_energy) & (raw[:, P.TASTE] > 0.1)
         br["u_l"] = br["u_l"] + (p["eta_l"] * dt * rest)[:, None, None] * (br["u_c"] - br["u_l"])
+    slow_boost = jnp.ones_like(boost) if arbitrate else boost
     if "S" not in les:
-        br["att_w"] = jnp.clip(br["att_w"] + (p["eta_att"] * boost * teach)[:, None] * br["att_e"], -5.0, 5.0)
+        br["att_w"] = jnp.clip(br["att_w"] + (p["eta_att"] * slow_boost * teach)[:, None] * br["att_e"], -5.0, 5.0)
     f_e = jnp.concatenate([b, m, one], 1)
     f_tag = jnp.concatenate([jnp.where(b > sz.tag, b, 0.0), jnp.where(m > sz.tag, m, 0.0), one], 1)
-    logits = (br["w_e"] * f_e[:, None, :]).sum(-1) + jnp.einsum("npc,nc->np", br["u_c"], c)
+    habit = (br["w_e"] * f_e[:, None, :]).sum(-1)
     if "L" not in les:
-        logits = logits + jnp.einsum("npc,nc->np", br["u_l"], c)
-    temp = p["temperature"] * (1.0 + p["surprise_explore"] * br["unc"])
-    prog = _act(br, logits, f_e, teach, p["eta_e"] * boost, temp, dt, decide, k_act, f_tag=f_tag, code=c)
+        habit = habit + jnp.einsum("npc,nc->np", br["u_l"], c)
+    fast = jnp.einsum("npc,nc->np", br["u_c"], c)
+    logits = (1.0 - sz.arb_slow * k)[:, None] * habit + (1.0 + sz.arb_fast * k)[:, None] * fast
+    temp = p["temperature"] * (1.0 + (0.0 if arbitrate else p["surprise_explore"]) * br["unc"])
+    prog = _act(br, logits, f_e, teach, p["eta_e"] * slow_boost, temp, dt, decide, k_act, f_tag=f_tag, code=c)
     eye = raw[:, P.EYES].reshape(n, 3, 3).max(-1)
     seen = jnp.where(eye.max(1) > 0.2, eye.argmax(1), 3)
     br["counts"] = br["counts"].at[jnp.arange(n), br["state_b"].argmax(1), seen].add(1.0)
@@ -413,8 +422,9 @@ def _guided(br, objs, good, batteries, decide, dt, key):
     return prog
 
 
-def _reborn(br, dead, child, agent, sz, key):
-    """I cervelli dei corpi rinati: ciò che si era imparato sparisce."""
+def _reborn(br, dead, child, agent, sz, key, blocks):
+    """I cervelli dei corpi rinati: ciò che si era imparato sparisce, e si
+    riparte dai pesi e dalle connessioni di partenza del (nuovo) genoma."""
     br = dict(br)
     if child is not None:
         br["genome"] = jnp.where(dead[:, None], child, br["genome"])
@@ -436,14 +446,21 @@ def _reborn(br, dead, child, agent, sz, key):
         for k in ("pred", "state_b", "prev_b", "mem", "w_gate", "e_gate", "u_c", "e_c", "u_l", "code", "d_fast",
                   "unc", "counts"):
             br[k] = zero(br[k])
-        fresh = jax.random.uniform(key, br["proto"].shape, F) * 0.3
-        br["proto"] = jnp.where(dead[:, None, None], fresh, br["proto"])
         br["win_rate"] = jnp.where(dead[:, None], 1.0 / sz.b, br["win_rate"])
         br["d_slow"] = jnp.where(dead, 1e-3, br["d_slow"])
+        br["t_slow"] = jnp.where(dead, 1e-4, br["t_slow"])
+    n = dead.shape[0]
+    start = lambda name: br["genome"][:, blocks[name][0]].reshape((n,) + blocks[name][1])
+    born = {"e0": "w_e", "v0": "w_v", "s0": "att_w", "proto": "proto"}
+    for name, key_ in born.items():
+        if name in blocks:
+            br[key_] = jnp.where(dead.reshape((-1,) + (1,) * (br[key_].ndim - 1)), start(name), br[key_])
+    if "c_in" in blocks:
+        br["c_in"] = jnp.where(dead[:, None, None], (start("c_in") > 0.5).astype(F), br["c_in"])
     return br
 
 
-def make_run(cfg: P.PileConfig, agent: str, phase: str, sizes: S.Sizes):
+def make_run(cfg: P.PileConfig, agent: str, phase: str, sizes: S.Sizes, blocks: dict):
     """La funzione compilata: (stato, chiave, k) -> (stato, serie per passo)."""
     les = frozenset(sizes.lesions)
     dt = cfg.dt
@@ -483,6 +500,9 @@ def make_run(cfg: P.PileConfig, agent: str, phase: str, sizes: S.Sizes):
         w, out = world_step(cfg, w, thrust, steer, br["bite"].reshape(shape), k_world)
         misc["reward"] = (out["pleasure"] - out["pain"]).reshape(N)
         misc["usage"] = misc["usage"] + jnp.bincount(prog, length=S.N_PROGRAMS)
+        misc["good_by"] = misc["good_by"] + out["good_each"].reshape(N)  # per essere: per provare le reti una a una
+        misc["bad_by"] = misc["bad_by"] + out["bad_each"].reshape(N)
+        misc["deaths_by"] = misc["deaths_by"] + out["dead"].reshape(N)
         dead = out["dead"].reshape(N)
         child = None
         if phase == "B":
@@ -505,7 +525,7 @@ def make_run(cfg: P.PileConfig, agent: str, phase: str, sizes: S.Sizes):
             mix = mix + 0.1 * jax.random.normal(kc3, mix.shape, F)
             mix = mix.at[..., S.INNATE].set(jnp.clip(mix[..., S.INNATE], -S.INNATE_CAP, S.INNATE_CAP))
             child = mix.reshape(N, -1)
-        br = _reborn(br, dead, child, agent, sizes, k_reborn)
+        br = _reborn(br, dead, child, agent, sizes, k_reborn, blocks)
         misc["reward"] = jnp.where(dead, 0.0, misc["reward"])
         series = {k: out[k] for k in ("good_taken", "bad_taken", "starved", "aged", "matings", "inversion",
                                        "zone_change")}
@@ -525,17 +545,19 @@ class PileGpu:
                  lesions=(), genomes=None):
         cfg.mating = phase == "B"
         self.cfg, self.agent, self.phase = cfg, agent, phase
+        self.lesions, self.seed = tuple(lesions), seed
         self.sizes = S.Sizes(lesions=frozenset(lesions))
         B, n = enclosures, cfg.beings
         self.B, self.n = B, n
         world = init_world(cfg, B, seed)
-        brain = init_brain(agent, B * n, cfg.dt, seed, cfg, genomes, self.sizes)
-        misc = dict(reward=np.zeros(B * n), usage=np.zeros(S.N_PROGRAMS), pair=np.zeros((B, 2, S.N_GENOME)),
-                    has_pair=np.zeros(B, bool))
+        brain, self.blocks = init_brain(agent, B * n, cfg.dt, seed, cfg, genomes, self.sizes)
+        misc = dict(reward=np.zeros(B * n), usage=np.zeros(S.N_PROGRAMS), pair=np.zeros((B, 2, brain["genome"].shape[1])),
+                    has_pair=np.zeros(B, bool), good_by=np.zeros(B * n), bad_by=np.zeros(B * n),
+                    deaths_by=np.zeros(B * n))
         to = lambda x: jnp.asarray(x, F) if np.asarray(x).dtype.kind == "f" else jnp.asarray(x)
         self.state = jax.tree_util.tree_map(to, {"world": world, "brain": brain, "misc": misc})
         self.key = jax.random.PRNGKey(seed)
-        self._run = make_run(cfg, agent, phase, self.sizes)
+        self._run = make_run(cfg, agent, phase, self.sizes, self.blocks)
         self.series = {k: [] for k in ("good_taken", "bad_taken", "starved", "aged", "matings", "inversion",
                                        "zone_change")}
         self.t = 0.0

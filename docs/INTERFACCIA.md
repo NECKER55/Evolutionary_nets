@@ -140,8 +140,13 @@ La schermata (`evonets/viz/pile_view.py`):
   vince), cosa vota (C), la probabilità (E).
 
 Comandi: clic su un essere o Tab per seguirlo, PagSu/PagGiù (o [ ]) per
-cambiare recinto, +/- velocità (x1 = tempo reale), T turbo, Spazio pausa, H
-aiuto, Esc torna al menu (le corse delle pile non si salvano ancora).
+cambiare recinto, +/- velocità (x1 = tempo reale), T turbo, Spazio pausa,
+Ctrl+S salva (in "Salva in"), P prova le reti una a una (ognuna da sola nel
+suo recinto, con ciò che ha imparato: PagSu/PagGiù passa da una rete
+all'altra, sotto i suoi conti e la posizione in classifica; Esc torna alla
+corsa), H aiuto, Esc torna al menu (salvando, se ci sono novità). Nel menu
+"Riprendi da" riapre un salvataggio delle pile, e "Esplora" ne prova le reti
+una a una.
 
 ## La corsa: la pagina principale
 
