@@ -1,0 +1,633 @@
+"""La schermata dell'arena delle pile (docs/SPEC_ARENA_PILE.md): a sinistra un
+recinto, con l'essere seguito, la sua vista e i suoi raggi; a destra il suo
+cervello, sezione per sezione (docs/SPEC_CERVELLO_SEZIONI.md), con i neuroni
+accesi, i collegamenti che contano e una spiegazione di ciò che il mouse
+indica.
+
+Il cervello si legge da sinistra a destra, come scorre il segnale: A (i
+sensi) -> B (cosa c'è) -> D (cosa è appena successo) -> C (cosa ho imparato
+di recente; L la versione lenta) -> E (cosa faccio) -> F (come lo faccio).
+V (il critico) guarda B, D, C e manda δ, la sorpresa, alle sezioni che
+imparano; U (l'incertezza) alza velocità ed esplorazione dopo molte sorprese.
+"""
+
+import time
+
+import numpy as np
+import pygame
+
+from ..net.sections import FAST, N_A
+from ..sim.pile import N_PROGRAMS, N_SENSES, PROGRAMS, SECTORS, RAYS
+from .launcher import Screen
+from .render import BG, BORDER, DIM, PLAYER, TARGET, TEXT
+
+RED_C, YELLOW_C, BLUE_C = (235, 80, 70), (240, 210, 60), (90, 130, 255)
+BEING_C = (150, 200, 160)
+ME_C = (110, 230, 255)  # l'essere seguito (non giallo: si confonderebbe con le pile gialle)
+POS, NEG = (90, 220, 120), (240, 90, 80)  # rafforza, indebolisce
+FIXED = (95, 100, 120)  # collegamenti fissi
+DELTA_C = (200, 120, 255)  # la sorpresa
+ZONE_C = (40, 46, 34)
+SPEEDS = (1, 3, 6, 12, 24, 48)  # volte il tempo reale
+SHORT = ("rosso sx", "rosso c", "rosso dx", "giallo sx", "giallo c", "giallo dx", "blu sx", "blu c", "blu dx",
+         "muro sx", "muro c", "muro dx", "contatto", "energia", "mi guardano", "gusto", "dolore")
+PROG_SHORT = ("→ rosso", "→ giallo", "→ blu", "esplora", "evita")
+
+SECTION_HELP = {
+    "A": ("A  interfaccia dei sensi (fissa)",
+          "Cosa sentono i sensi adesso: barra piena = valore, tacca chiara = quanto è appena salito ('cosa è "
+          "cambiato'). Non impara: è come la retina."),
+    "B": ("B  nucleo stabile: cosa c'è",
+          "16 neuroni in gara: vincono i 3 più simili a ciò che arriva. Ognuno si specializza da solo, piano, su "
+          "una situazione che si ripete (nessuno nasce 'rosso'). Le linee verso A: a cosa risponde."),
+    "D": ("D  memoria di lavoro: cosa è appena successo",
+          "Una copia di B che resta accesa per qualche secondo dopo un evento (una pila presa, un colore che "
+          "compare). Il cancello decide quando scrivere: è l'unica cosa che impara."),
+    "C": ("C  memoria veloce (e L, lenta)",
+          "64 neuroni con ingressi fissi e casuali da B e D (come il corpo a fungo degli insetti): ogni "
+          "situazione ne accende 4. Le loro uscite verso E imparano in un colpo e dimenticano in minuti. L è la "
+          "stessa uscita, cento volte più lenta: tiene solo ciò che vale sempre."),
+    "E": ("E  selezione: cosa faccio",
+          "5 programmi in gara; la barra è la probabilità di sceglierlo. Vince uno alla volta, con un po' di "
+          "caso (esplorazione). Impara con δ: si rafforza ciò che ha portato meglio del previsto."),
+    "F": ("F  motore: come lo faccio (fisso)",
+          "Ogni programma è un movimento innato: girarsi verso un colore e avvicinarsi, vagare, girarsi via. Più "
+          "il riflesso che fa girare via dai muri."),
+    "V": ("V  critico: va meglio o peggio del previsto?",
+          "Prevede quanto bene arriverà da B, D, C. δ = ciò che arriva meno ciò che prevedeva: positivo = meglio "
+          "del previsto. È il maestro interno: le linee viola lo portano a chi impara."),
+    "U": ("U  incertezza",
+          "Quante sorprese di recente rispetto al solito. Se il mondo è cambiato (un'inversione) alza la "
+          "velocità di apprendimento di C ed E e l'esplorazione."),
+}
+
+
+def lerp(c0, c1, t):
+    t = float(np.clip(t, 0.0, 1.0))
+    return tuple(int(a + (b - a) * t) for a, b in zip(c0, c1))
+
+
+def wrap_text(font, text, width):
+    words, lines, line = text.split(), [], ""
+    for w in words:
+        test = (line + " " + w).strip()
+        if font.size(test)[0] > width and line:
+            lines.append(line)
+            line = w
+        else:
+            line = test
+    return lines + ([line] if line else [])
+
+
+class PileScreen(Screen):
+    """La simulazione nell'arena delle pile: `run` è una corsa di
+    `evo.pile_test` (NumPy o GPU)."""
+
+    def __init__(self, app, run, minutes: int = 0):
+        self.app, self.run = app, run
+        self.cfg = run.cfg
+        self.goal = 60.0 * minutes if minutes else None
+        self.encl, self.follow = 0, 0
+        self.paused = False
+        self.turbo = False
+        self.speed_i = 1
+        self.frames = 0
+        self.show_help = False
+        self.hover: tuple | None = None
+        self.targets: list = []  # (rettangolo, chiave) per le spiegazioni sotto il mouse
+        self.message = ""
+        self.trail: list = []
+        self.view = run.view(0, 0)
+        self.rate = 0.0
+        self.last = time.perf_counter()
+
+    # --- il tempo -------------------------------------------------------------
+
+    def _steps_per_frame(self) -> int:
+        """Passi da fare in questo fotogramma (a 60 fotogrammi al secondo)."""
+        per_second = SPEEDS[self.speed_i] / self.cfg.dt
+        self.frames += 1
+        due = int(self.frames * per_second / 60.0) - int((self.frames - 1) * per_second / 60.0)
+        return due
+
+    def _advance(self, k):
+        if k <= 0 or self._finished():
+            return
+        # Blocchi di grandezze fisse: sulla GPU ogni grandezza si compila una volta.
+        for size in (64, 16, 4, 1):
+            while k >= size:
+                self.run.advance(size)
+                k -= size
+
+    def _finished(self) -> bool:
+        if self.goal is not None and self.run.t >= self.goal - 1e-9:
+            if not self.paused:
+                self.paused = True
+                self.message = "minuti finiti: la corsa è ferma (Esc per tornare al menu)"
+            return True
+        return False
+
+    def background(self, budget: float) -> None:
+        pass  # fuori da questa schermata la corsa si ferma
+
+    def update(self) -> None:
+        now = time.perf_counter()
+        real, self.last = now - self.last, now
+        t0 = self.run.t
+        if not self.paused:
+            if self.turbo:
+                start = time.perf_counter()
+                while time.perf_counter() - start < 0.08 and not self._finished():
+                    self._advance(64)
+            else:
+                self._advance(self._steps_per_frame())
+        self.rate = 0.8 * self.rate + 0.2 * (self.run.t - t0) / max(real, 1e-6)
+        self.view = self.run.view(self.encl, self.encl * self.run.n + self.follow)
+        p = self.view[0]["pos"][self.follow]
+        self.trail.append((float(p[0]), float(p[1])))
+        del self.trail[:-300]
+
+    # --- comandi --------------------------------------------------------------
+
+    def _choose(self, encl=None, follow=None):
+        if encl is not None:
+            self.encl = encl % self.run.B
+        if follow is not None:
+            self.follow = follow % self.run.n
+        self.trail = []
+
+    def handle(self, ev) -> None:
+        if ev.type == pygame.MOUSEMOTION:
+            self.hover = next((key for r, key in self.targets if r.collidepoint(ev.pos)), None)
+        elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+            box = self._arena_rect()
+            if box.collidepoint(ev.pos):  # clic su un essere: lo si segue
+                w = self.view[0]
+                s = box.w / self.cfg.size
+                pts = np.array([box.x, box.y]) + w["pos"] * s
+                d = np.hypot(*(pts - np.array(ev.pos)).T)
+                if d.min() < 20:
+                    self._choose(follow=int(d.argmin()))
+        elif ev.type == pygame.KEYDOWN:
+            k = ev.key
+            if k == pygame.K_ESCAPE:
+                self.app.active_run = None
+                self.app.launcher.returned("arena delle pile chiusa (le corse delle pile non si salvano ancora)")
+            elif k == pygame.K_SPACE:
+                self.paused = not self.paused
+            elif k == pygame.K_t:
+                self.turbo = not self.turbo
+            elif k in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
+                self.turbo, self.speed_i = False, min(self.speed_i + 1, len(SPEEDS) - 1)
+            elif k in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                self.turbo, self.speed_i = False, max(self.speed_i - 1, 0)
+            elif k == pygame.K_TAB:
+                self._choose(follow=self.follow + (-1 if ev.mod & pygame.KMOD_SHIFT else 1))
+            elif k in (pygame.K_PAGEDOWN, pygame.K_RIGHTBRACKET):
+                self._choose(encl=self.encl + 1)
+            elif k in (pygame.K_PAGEUP, pygame.K_LEFTBRACKET):
+                self._choose(encl=self.encl - 1)
+            elif k == pygame.K_h:
+                self.show_help = not self.show_help
+
+    # --- disegno --------------------------------------------------------------
+
+    def _arena_rect(self) -> pygame.Rect:
+        return pygame.Rect(16, 44, 500, 500)
+
+    def draw(self, s) -> None:
+        s.fill(BG)
+        self.targets = []
+        self._top(s)
+        self._arena(s)
+        self._stats(s)
+        self._brain(s)
+        if self.hover is not None:
+            self._tooltip(s)
+        if self.show_help:
+            self._help(s)
+
+    def _top(self, s):
+        app, r, w = self.app, self.run, self.view[0]
+        les = getattr(getattr(r, "sizes", None), "lesions", None) or getattr(getattr(r, "brain", None), "les", None)
+        les = f", senza {','.join(sorted(les))}" if les else ""
+        head = (f"Arena delle pile — {r.agent}{les}, fase {r.phase} — recinto {self.encl + 1}/{r.B} "
+                f"— essere {self.follow + 1}/{r.n}")
+        s.blit(app.font.render(head, True, PLAYER), (16, 12))
+        speed = "turbo" if self.turbo else f"x{SPEEDS[self.speed_i]}"
+        info = (f"t {w['t'] / 60:5.1f} min   {speed} ({self.rate:,.0f} s di mondo/s)"
+                + ("   PAUSA" if self.paused else "") + "   H aiuto")
+        s.blit(app.small.render(info, True, DIM), (s.get_width() - 470, 16))
+
+    def _arena(self, s):
+        cfg, w, raw = self.cfg, self.view[0], self.view[2]
+        box = self._arena_rect()
+        sc = box.w / cfg.size
+        P = lambda p: (int(box.x + p[0] * sc), int(box.y + p[1] * sc))
+        pygame.draw.rect(s, (22, 25, 33), box)
+        m, h = cfg.zone_margin, cfg.zone_half
+        for z, c in enumerate(((m, m), (cfg.size - m, m), (m, cfg.size - m), (cfg.size - m, cfg.size - m))):
+            r = pygame.Rect(0, 0, int(2 * h * sc), int(2 * h * sc))
+            r.center = P(c)
+            pygame.draw.rect(s, (52, 62, 40) if z == int(w["zone"]) else ZONE_C, r, 0 if z == int(w["zone"]) else 1)
+        s.set_clip(box)  # la vista e le scie restano nel recinto
+        good = int(w["good"])
+        for k in range(cfg.batteries):
+            if not w["bon"][k]:
+                continue
+            col = RED_C if int(w["bcolor"][k]) == 0 else YELLOW_C
+            c = P(w["bpos"][k])
+            pygame.draw.circle(s, col, c, max(3, int(cfg.battery_radius * sc)))
+            if int(w["bcolor"][k]) == good:
+                pygame.draw.circle(s, (230, 240, 230), c, max(4, int(cfg.battery_radius * sc)) + 2, 1)
+        # La vista e i raggi dell'essere seguito.
+        i = self.follow
+        me, hd = w["pos"][i], float(w["heading"][i])
+        # Il cono di vista è semitrasparente: si vede ciò che c'è dentro.
+        veil = pygame.Surface(s.get_size(), pygame.SRCALPHA)
+        for k_, (a0, a1) in enumerate(zip(SECTORS[:-1], SECTORS[1:])):
+            pts = [P(me)] + [P(me + cfg.eye_range * np.array([np.cos(hd + a), np.sin(hd + a)]))
+                             for a in np.linspace(a0, a1, 6)]
+            pygame.draw.polygon(veil, (120, 150, 220, 22 if k_ != 1 else 34), pts)
+            pygame.draw.polygon(veil, (140, 170, 240, 90), pts, 1)
+        s.blit(veil, (0, 0))
+        for k in range(cfg.batteries):  # le pile di nuovo sopra il velo, nitide
+            if w["bon"][k]:
+                pygame.draw.circle(s, RED_C if int(w["bcolor"][k]) == 0 else YELLOW_C, P(w["bpos"][k]),
+                                   max(3, int(cfg.battery_radius * sc)))
+        for r_, a in enumerate(RAYS):
+            end = me + (cfg.ray_range + cfg.radius) * np.array([np.cos(hd + a), np.sin(hd + a)])
+            pygame.draw.line(s, lerp((60, 66, 84), (255, 150, 60), raw[i, 9 + r_]), P(me), P(end), 1)
+        if len(self.trail) > 1:
+            pygame.draw.lines(s, (70, 80, 60), False, [P(p) for p in self.trail], 1)
+        for j in range(self.run.n):
+            c = P(w["pos"][j])
+            rad = max(4, int(cfg.radius * sc))
+            col = ME_C if j == i else BEING_C
+            if w["charging"][j] > 0:
+                col = lerp(col, (255, 255, 255), 0.5)
+            pygame.draw.circle(s, col, c, rad, 0 if j == i else 2)
+            tip = w["pos"][j] + cfg.radius * 1.4 * np.array([np.cos(w["heading"][j]), np.sin(w["heading"][j])])
+            pygame.draw.circle(s, BLUE_C, P(tip), 3)
+        s.set_clip(None)
+        pygame.draw.rect(s, BORDER, box, 2)
+        self.targets.append((box, ("arena",)))
+
+    def _stats(self, s):
+        app, r, w = self.app, self.run, self.view[0]
+        i = self.follow
+        x, y = 16, 552
+        good = "rossa" if int(w["good"]) == 0 else "gialla"
+        line = lambda txt, col=TEXT: (s.blit(app.small.render(txt, True, col), (x, line.y)), setattr(line, "y", line.y + 16))
+        line.y = y
+        line(f"ora la pila buona è la {good} (cerchio bianco); zona attiva evidenziata", TEXT)
+        line(f"inversione tra {w['next_inv'] - w['t']:4.0f} s   cambio di zona tra {w['next_zone'] - w['t']:4.0f} s",
+             DIM)
+        e = float(w["energy"][i]) / self.cfg.energy_max
+        pygame.draw.rect(s, BORDER, (x, line.y + 2, 200, 10), 1)
+        pygame.draw.rect(s, lerp(NEG, POS, e), (x + 1, line.y + 3, int(198 * e), 8))
+        s.blit(app.small.render(f"energia {e:4.0%}   età {w['age'][i]:4.0f} s", True, TEXT), (x + 210, line.y))
+        line.y += 18
+        good_s, bad_s = r.flat("good_taken"), r.flat("bad_taken")
+        last = int(60.0 / self.cfg.dt)
+        g, b = good_s[-last:].sum(), bad_s[-last:].sum()
+        tot = good_s.sum() + bad_s.sum()
+        line(f"ultimo minuto, tutti i recinti: {g + b:.0f} pile prese, {g / max(g + b, 1):.0%} buone", TEXT)
+        line(f"dall'inizio: {good_s.sum() / max(tot, 1):.0%} buone; morti di fame {r.flat('starved').sum():.0f}"
+             + (f"; accoppiamenti {r.flat('matings').sum():.0f}" if r.phase == "B" else ""), DIM)
+        line("clic o Tab: segui un essere   PagSu/Giù: recinto   +/-: velocità", DIM)
+        if self.message:
+            line(self.message, TARGET)
+
+    # --- il cervello ----------------------------------------------------------
+
+    def _brain(self, s):
+        app = self.app
+        area = pygame.Rect(540, 44, s.get_width() - 556, s.get_height() - 60)
+        pygame.draw.rect(s, (18, 20, 28), area)
+        pygame.draw.rect(s, BORDER, area, 1)
+        world, br, raw = self.view
+        i = self.follow
+        senses = raw[i]
+        fast = np.clip(senses[list(FAST)] - br["a_slow"], 0.0, 1.0) if "a_slow" in br else np.zeros(len(FAST))
+        a = np.concatenate([senses, fast])
+        agent = self.run.agent
+        title = {"sezioni": "Il cervello a sezioni dell'essere seguito",
+                 "attore-critico": "Attore-critico: A -> E e V (niente sezioni in mezzo)",
+                 "guidato": "Guidato a mano: una regola scritta, non un cervello"}[agent]
+        s.blit(app.font.render(title, True, TEXT), (area.x + 10, area.y + 6))
+        s.blit(app.small.render("passa il mouse su una sezione o un neurone per sapere cos'è", True, DIM),
+               (area.x + 10, area.y + 26))
+        top = area.y + 58
+        # Le colonne, da sinistra a destra come scorre il segnale.
+        xs = {"A": area.x + 18, "B": area.x + 250, "D": area.x + 345, "C": area.x + 450, "E": area.x + 650,
+              "F": area.x + 790}
+        if agent != "sezioni":
+            xs["E"], xs["F"] = area.x + 420, area.x + 600
+        A_pos = self._section_A(s, xs["A"], top, a)
+        E_pos = self._section_E(s, xs["E"], top + 40, br, agent)
+        self._section_F(s, xs["F"], E_pos, br, agent)
+        if agent == "guidato":
+            self._links(s, [(A_pos[k], E_pos[p], 0.8, FIXED) for k, p in ((0, 0), (1, 0), (2, 0), (3, 1), (4, 1),
+                                                                         (5, 1))])
+            s.blit(self.app.small.render("regola scritta a mano: insegue il colore buono (lo sa), evita il "
+                                         "cattivo davanti, altrimenti va verso la zona (la sa)", True, DIM),
+                   (self._arena_rect().right + 40, s.get_height() - 40))
+            return
+        if agent == "attore-critico":
+            f = np.concatenate([a, [1.0]])
+            self._weights_to_E(s, br["w_e"], [A_pos[k] for k in range(N_A)], f, E_pos)
+            self._section_V(s, area.x + 420, area.bottom - 120, br, [E_pos[p] for p in range(N_PROGRAMS)])
+            return
+        B_pos = self._section_B(s, xs["B"], top, br, A_pos, a)
+        D_pos = self._section_D(s, xs["D"], top, br, B_pos)
+        C_pos = self._section_C(s, xs["C"], top, br, B_pos, D_pos, E_pos)
+        nb = len(B_pos)
+        f = np.concatenate([br["state_b"], br["mem"], [1.0]])
+        self._weights_to_E(s, br["w_e"], B_pos + D_pos, f, E_pos, limit=10)
+        self._section_V(s, xs["C"] + 20, area.bottom - 120, br,
+                        [C_pos[0], E_pos[0], D_pos[nb // 2]])
+        self._legend(s, area)
+
+    LABELS = {"A": "A sensi", "B": "B cosa c'è", "D": "D appena", "C": "C/L ricordi", "E": "E scelta",
+              "F": "F motore", "V": "V critico (δ)", "U": "U"}
+
+    def _links(self, s, links):
+        """Collegamenti semplici: (da, a, forza 0-1, colore)."""
+        for p0, p1, v, col in links:
+            pygame.draw.line(s, lerp((50, 54, 70), col, v), p0, p1, 2)
+
+    def _label(self, s, key, x, y, w=0):
+        name = self.LABELS[key]
+        r = pygame.Rect(x - 4, y - 2, self.app.small.size(name)[0] + 8, 18)
+        pygame.draw.rect(s, (30, 34, 46), r)
+        s.blit(self.app.small.render(name, True, PLAYER), (x, y))
+        self.targets.append((r, ("section", key)))
+
+    def _section_A(self, s, x, top, a):
+        app = self.app
+        self._label(s, "A", x, top - 20, 200)
+        pos = []
+        fast_of = {c: k for k, c in enumerate(FAST)}
+        row = 30
+        for k in range(N_SENSES):
+            y = top + k * row
+            v = float(a[k])
+            col = (RED_C, RED_C, RED_C, YELLOW_C, YELLOW_C, YELLOW_C, BLUE_C, BLUE_C, BLUE_C)[k] if k < 9 else TEXT
+            s.blit(app.small.render(SHORT[k], True, lerp(DIM, col, 0.4 + 0.6 * v)), (x, y))
+            bar = pygame.Rect(x + 92, y + 2, 90, 9)
+            pygame.draw.rect(s, (40, 44, 58), bar)
+            pygame.draw.rect(s, lerp((60, 64, 80), col, 0.3 + 0.7 * v), (bar.x, bar.y, int(bar.w * v), bar.h))
+            if k in fast_of:
+                fv = float(a[N_SENSES + fast_of[k]])
+                pygame.draw.rect(s, (230, 230, 240), (bar.x, bar.bottom + 2, int(bar.w * fv), 3))
+            pygame.draw.circle(s, lerp((50, 54, 70), col, v), (x + 196, y + 6), 5)
+            pos.append((x + 196, y + 6))
+            self.targets.append((pygame.Rect(x, y - 2, 200, row - 4), ("A", k)))
+        # I canali "cosa è cambiato" hanno la stessa riga del loro senso (tacca chiara).
+        return pos + [pos[c] for c in FAST]
+
+    def _section_B(self, s, x, top, br, A_pos, a):
+        self._label(s, "B", x - 10, top - 20, 80)
+        st = br["state_b"]
+        nb = len(st)
+        pos = []
+        if "proto" in br and nb == br["proto"].shape[0]:
+            proto = br["proto"]
+            for j in range(nb):
+                y = top + 10 + j * (480 / nb)
+                pos.append((x + 20, int(y)))
+            # A -> B: a cosa risponde ogni neurone (i due canali più alti del suo prototipo).
+            for j in range(nb):
+                strong = np.argsort(-proto[j][:N_SENSES])[:2]
+                hot = st[j] > 0.3 or self.hover == ("B", j)
+                for k in strong:
+                    if proto[j][k] < 0.25:
+                        continue
+                    col = lerp((40, 44, 58), PLAYER if hot else (90, 96, 120), float(proto[j][k]))
+                    pygame.draw.line(s, col, A_pos[k], pos[j], 2 if hot else 1)
+        else:  # senza B (lesione): E e gli altri leggono direttamente A
+            s.blit(self.app.small.render("tolto: si legge A", True, DIM), (x - 10, top + 10))
+            return [A_pos[k] for k in range(N_A)]
+        win = int(st.argmax())
+        for j, p in enumerate(pos):
+            v = float(st[j])
+            pygame.draw.circle(s, lerp((40, 44, 58), (250, 230, 140), v), p, 9)
+            pygame.draw.circle(s, PLAYER if j == win and v > 0.2 else BORDER, p, 9, 2 if j == win else 1)
+            self.targets.append((pygame.Rect(p[0] - 10, p[1] - 10, 20, 20), ("B", j)))
+        return pos
+
+    def _section_D(self, s, x, top, br, B_pos):
+        self._label(s, "D", x - 10, top - 20, 80)
+        mem = br["mem"]
+        pos = []
+        for j, bp in enumerate(B_pos):
+            p = (x + 20, bp[1])
+            pygame.draw.line(s, FIXED, bp, p, 1)  # B -> D: copia (fissa)
+            v = float(mem[j]) if j < len(mem) else 0.0
+            pygame.draw.circle(s, lerp((40, 44, 58), (140, 210, 250), v), p, 7)
+            pygame.draw.circle(s, BORDER, p, 7, 1)
+            pos.append(p)
+            self.targets.append((pygame.Rect(p[0] - 8, p[1] - 8, 16, 16), ("D", j)))
+        return pos
+
+    def _section_C(self, s, x, top, br, B_pos, D_pos, E_pos):
+        self._label(s, "C", x - 10, top - 20, 130)
+        code, u_c, u_l, c_in = br["code"], br["u_c"], br["u_l"], br["c_in"]
+        n = len(code)
+        cols = 8
+        pos = []
+        for j in range(n):
+            p = (x + 14 + (j % cols) * 18, top + 60 + (j // cols) * 18)
+            pos.append(p)
+        src = B_pos + D_pos
+        lit = np.flatnonzero(code > 0)
+        for j in lit:  # ingressi fissi e casuali dei neuroni accesi
+            for k in np.flatnonzero(c_in[j] > 0):
+                if k < len(src):
+                    pygame.draw.line(s, FIXED, src[k], pos[j], 1)
+        for j in lit:  # uscite verso E: C (pieno) e L (sottile)
+            for p_ in range(N_PROGRAMS):
+                for w, width in ((u_c[p_, j], 2), (u_l[p_, j], 1)):
+                    if abs(w) > 0.02:
+                        col = lerp((50, 54, 70), POS if w > 0 else NEG, min(abs(w) * 3, 1.0))
+                        pygame.draw.line(s, col, pos[j], E_pos[p_], width)
+        for j, p in enumerate(pos):
+            on = code[j] > 0
+            pygame.draw.circle(s, (250, 230, 140) if on else (44, 48, 62), p, 6 if on else 4)
+            self.targets.append((pygame.Rect(p[0] - 8, p[1] - 8, 16, 16), ("C", j)))
+        return pos
+
+    def _weights_to_E(self, s, w_e, src, f, E_pos, limit=14):
+        """I pesi imparati verso E più forti (contano di più quelli con l'ingresso
+        acceso adesso: linea spessa)."""
+        w = w_e[:, : len(src)]
+        score = np.abs(w) * (0.2 + f[None, : len(src)])
+        top = float(np.abs(w).max()) if w.size else 0.0
+        if top < 1e-6:
+            x, y = E_pos[0][0] - 190, E_pos[-1][1] + 30
+            s.blit(self.app.small.render("verso E: ancora niente di imparato", True, DIM), (x, y))
+            s.blit(self.app.small.render("(nessuna sorpresa finora)", True, DIM), (x, y + 16))
+            return
+        for idx in np.argsort(-score.ravel())[:limit]:
+            p_, k = divmod(int(idx), len(src))
+            v = w[p_, k]
+            if abs(v) < 0.1 * top:
+                continue
+            col = lerp((50, 54, 70), POS if v > 0 else NEG, abs(v) / top)
+            pygame.draw.line(s, col, src[k], E_pos[p_], 2 if f[k] > 0.2 else 1)
+
+    def _section_E(self, s, x, top, br, agent):
+        app = self.app
+        self._label(s, "E", x - 4, top - 30, 110)
+        pi = br.get("pi", np.full(N_PROGRAMS, 1.0 / N_PROGRAMS))
+        prog = int(br.get("program", -1)) if "program" in br else -1
+        pos = []
+        for p_ in range(N_PROGRAMS):
+            y = top + 20 + p_ * 80
+            r = pygame.Rect(x, y - 16, 110, 34)
+            on = p_ == prog
+            pygame.draw.rect(s, (60, 54, 30) if on else (30, 34, 46), r)
+            pygame.draw.rect(s, PLAYER if on else BORDER, r, 2 if on else 1)
+            s.blit(app.small.render(PROG_SHORT[p_], True, TEXT if on else DIM), (r.x + 6, r.y + 3))
+            v = float(pi[p_])
+            pygame.draw.rect(s, (44, 48, 62), (r.x + 6, r.y + 20, 98, 7))
+            pygame.draw.rect(s, PLAYER if on else (150, 150, 170), (r.x + 6, r.y + 20, int(98 * v), 7))
+            pos.append((r.x, y))
+            self.targets.append((r, ("E", p_)))
+        return pos
+
+    def _section_F(self, s, x, E_pos, br, agent):
+        app = self.app
+        self._label(s, "F", x - 4, E_pos[0][1] - 46, 90)
+        prog = int(br.get("program", -1)) if "program" in br else -1
+        for p_, (ex, ey) in enumerate(E_pos):
+            on = p_ == prog
+            pygame.draw.line(s, PLAYER if on else FIXED, (ex + 110, ey), (x, ey), 2 if on else 1)
+            r = pygame.Rect(x, ey - 10, 70, 20)
+            pygame.draw.rect(s, (30, 34, 46), r)
+            pygame.draw.rect(s, PLAYER if on else BORDER, r, 1)
+            s.blit(app.small.render(("tassia", "tassia", "tassia", "vagare", "girarsi")[p_], True,
+                                    TEXT if on else DIM), (r.x + 6, r.y + 3))
+            self.targets.append((r, ("section", "F")))
+
+    def _section_V(self, s, x, y, br, targets):
+        app = self.app
+        self._label(s, "V", x - 4, y - 22, 130)
+        d = float(br.get("delta", 0.0))
+        r = pygame.Rect(x, y, 130, 40)
+        pygame.draw.rect(s, (30, 34, 46), r)
+        pygame.draw.rect(s, BORDER, r, 1)
+        mid = r.x + 65
+        span = int(np.clip(d * 200.0, -60, 60))
+        col = POS if d > 0 else NEG
+        pygame.draw.rect(s, col, (min(mid, mid + span), r.y + 8, abs(span), 10))
+        pygame.draw.line(s, TEXT, (mid, r.y + 4), (mid, r.y + 22), 1)
+        s.blit(app.small.render(f"δ {d:+.3f}", True, TEXT), (r.x + 6, r.y + 24))
+        self.targets.append((r, ("section", "V")))
+        if abs(d) > 0.01:  # la sorpresa arriva a chi impara
+            for t in targets:
+                pygame.draw.line(s, lerp((60, 50, 80), DELTA_C, min(abs(d) * 20, 1.0)), (mid, r.y), t, 1)
+        if "unc" in br:
+            u = float(br["unc"]) / 3.0
+            ru = pygame.Rect(r.right + 14, y, 80, 40)
+            pygame.draw.rect(s, (30, 34, 46), ru)
+            pygame.draw.rect(s, BORDER, ru, 1)
+            pygame.draw.rect(s, lerp((80, 80, 120), DELTA_C, u), (ru.x + 6, ru.y + 8, int(68 * u), 10))
+            s.blit(app.small.render(f"U {float(br['unc']):.2f}", True, TEXT), (ru.x + 6, ru.y + 24))
+            self.targets.append((ru, ("section", "U")))
+
+    def _legend(self, s, area):
+        app = self.app
+        y = area.bottom - 22
+        x = area.x + 10
+        for col, txt in ((POS, "rafforza"), (NEG, "indebolisce"), (FIXED, "fisso, non impara"),
+                         (DELTA_C, "sorpresa δ"), ((250, 230, 140), "acceso")):
+            pygame.draw.line(s, col, (x, y + 7), (x + 22, y + 7), 3)
+            s.blit(app.small.render(txt, True, DIM), (x + 28, y))
+            x += 40 + app.small.size(txt)[0]
+        s.blit(app.small.render("da C verso E: linee spesse = C (veloce), sottili = L (lenta)", True, DIM),
+               (area.x + 10, y - 18))
+
+    # --- le spiegazioni sotto il mouse ----------------------------------------
+
+    def _explain(self) -> list[str]:
+        key = self.hover
+        world, br, raw = self.view
+        i = self.follow
+        kind = key[0]
+        if kind == "section":
+            return list(SECTION_HELP[key[1]])
+        if kind == "arena":
+            return ["Il recinto", "Pile rosse e gialle: quella col cerchio bianco è la buona, adesso. Le pile "
+                    "compaiono nella zona evidenziata. Giallo pieno: l'essere seguito, con la sua vista (tre "
+                    "settori) e i tre raggi per i muri; il puntino blu è la luce sul muso. Clic: segui un altro."]
+        if kind == "A":
+            k = key[1]
+            return [f"A · {SHORT[k]}", SECTION_HELP["A"][1], f"valore adesso: {raw[i, k]:.2f}"]
+        if kind == "B":
+            j = key[1]
+            proto = br.get("proto")
+            out = [f"B · neurone {j + 1}", "Si è specializzato da solo: risponde quando l'ingresso somiglia al suo "
+                   "prototipo. I canali più alti del prototipo:"]
+            if proto is not None:
+                top = np.argsort(-proto[j][:N_SENSES])[:4]
+                out.append(", ".join(f"{SHORT[k]} {proto[j][k]:.2f}" for k in top))
+            out.append(f"attività adesso: {br['state_b'][j]:.2f}")
+            counts = br.get("counts")
+            if counts is not None and counts[j].sum() > 0:
+                c = counts[j] / counts[j].sum()
+                out.append("quando vince, la vista è dominata da: "
+                           + ", ".join(f"{n} {v:.0%}" for n, v in zip(("rosso", "giallo", "blu", "niente"), c)))
+            return out
+        if kind == "D":
+            j = key[1]
+            return [f"D · copia del neurone {j + 1} di B", SECTION_HELP["D"][1], f"tenuto adesso: {br['mem'][j]:.2f}"]
+        if kind == "C":
+            j = key[1]
+            votes = ", ".join(f"{PROG_SHORT[p]} {br['u_c'][p, j]:+.2f}/{br['u_l'][p, j]:+.2f}"
+                              for p in range(N_PROGRAMS))
+            return [f"C · neurone {j + 1}", "Ingressi fissi da 4 neuroni a caso di B e D. Voti verso E (C veloce / "
+                    "L lenta):", votes, "acceso adesso" if br["code"][j] > 0 else "spento adesso"]
+        if kind == "E":
+            p_ = key[1]
+            pi = br.get("pi", np.full(N_PROGRAMS, 0.2))
+            return [f"E · {PROGRAMS[p_]}", SECTION_HELP["E"][1], f"probabilità adesso: {float(pi[p_]):.0%}"]
+        return []
+
+    def _tooltip(self, s):
+        lines = self._explain()
+        if not lines:
+            return
+        app = self.app
+        mx, my = pygame.mouse.get_pos()
+        width = 380
+        body = [lines[0]]
+        for t in lines[1:]:
+            body += wrap_text(app.small, t, width - 16)
+        h = 10 + 16 * len(body)
+        x = min(mx + 16, s.get_width() - width - 4)
+        y = min(my + 16, s.get_height() - h - 4)
+        r = pygame.Rect(x, y, width, h)
+        pygame.draw.rect(s, (12, 14, 20), r)
+        pygame.draw.rect(s, PLAYER, r, 1)
+        for k, t in enumerate(body):
+            s.blit(app.small.render(t, True, PLAYER if k == 0 else TEXT), (x + 8, y + 5 + 16 * k))
+
+    def _help(self, s):
+        app = self.app
+        r = pygame.Rect(200, 120, s.get_width() - 400, s.get_height() - 240)
+        pygame.draw.rect(s, (12, 14, 20), r)
+        pygame.draw.rect(s, PLAYER, r, 1)
+        lines = ["Arena delle pile e cervello a sezioni", "",
+                 "Ogni recinto ha pile rosse e gialle: una ricarica, l'altra fa male; ogni 5 minuti si scambiano.",
+                 "Le pile compaiono in un angolo, che cambia ogni 200 s. Gli esseri devono imparare quale colore",
+                 "inseguire, dentro la loro vita: nessuno lo sa alla nascita.", "",
+                 "Il cervello si legge da sinistra a destra: A sensi, B cosa c'è, D cosa è appena successo,",
+                 "C/L cosa ho imparato (in fretta / piano), E cosa faccio, F come lo faccio; V il critico, U",
+                 "l'incertezza. Passa il mouse su qualsiasi cosa per la spiegazione.", "",
+                 "Comandi: clic o Tab segue un essere, PagSu/PagGiù cambia recinto, +/- velocità, T turbo,",
+                 "Spazio pausa, H questo aiuto, Esc torna al menu."]
+        for k, t in enumerate(lines):
+            s.blit((app.font if k == 0 else app.small).render(t, True, PLAYER if k == 0 else TEXT),
+                   (r.x + 20, r.y + 20 + 18 * k))

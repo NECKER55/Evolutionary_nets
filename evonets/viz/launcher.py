@@ -312,10 +312,11 @@ class Launcher(Screen):
         self.genome.select(defaults.get("genome") or "diretto")
         self.task = Choice("Mondo", [("bersaglio", "bersaglio e veleno (il mondo di prima)"),
                                      ("cibo", "nutrirsi: cibo, prede e predatori"),
-                                     ("arena", "arena continua: tutti insieme, nascite e morti")],
+                                     ("arena", "arena continua: tutti insieme, nascite e morti"),
+                                     ("pile", "arena delle pile: cervello a sezioni, sensi fissi")],
                            help="Il compito. Nel mondo del cibo si riproduce chi mangia almeno N cibi; il veleno "
                                 "è spento. Nell'arena continua si vive insieme, senza generazioni "
-                                "(docs/SPEC_ARENA.md). Ignorato se si riprende un salvataggio.")
+                                "(docs/SPEC_ARENA.md). Pile: docs/SPEC_ARENA_PILE.md.")
         self.task.select(defaults.get("task") or "bersaglio")
         self.ladder = Choice("Scala", [("scala", "adattiva: sale se va bene, scende se va male"),
                                        ("basico", "ferma al mondo basico (controllo)"),
@@ -334,6 +335,19 @@ class Launcher(Screen):
         self.select = Number("Selezione finale", 0, step=1,
                              help="Finite le generazioni, i sopravvissuti rifanno la prova questo numero di "
                                   "volte, senza figli: chi fallisce è eliminato. 0 = niente.")
+        # L'arena delle pile (docs/SPEC_ARENA_PILE.md): righe proprie.
+        self.p_agent = Choice("Cervello", [("sezioni", "a sezioni (A B C D E L U V F)"),
+                                           ("attore-critico", "attore-critico classico (riferimento)"),
+                                           ("guidato", "guidato a mano: sa colore e zona (controllo)")],
+                              help="Chi guida gli esseri: il progetto, il riferimento o il controllo del mondo.")
+        self.p_phase = Choice("Fase", [("A", "A: popolazione fissa, si misura l'apprendimento"),
+                                       ("B", "B: accoppiamento e rinascita da incrocio (evoluzione)")],
+                              help="A: si rinasce col cervello di partenza. B: coi geni di una coppia.")
+        self.p_lesion = Choice("Lesione", [("", "nessuna")] + [(k, f"senza {k}") for k in "BDCLUV"],
+                               help="Solo per il cervello a sezioni: toglierne una per vedere a cosa serve.")
+        self.p_encl = Number("Recinti", 200, step=50, low=1,
+                             help="Recinti che girano insieme (GPU); se ne guarda uno alla volta.")
+        self.p_beings = Number("Esseri per recinto", 6, step=1, low=1, help="Quanti esseri in ogni recinto.")
         load = defaults.get("load")
         self.extra = [load] if load and Path(load).exists() and Path(load).parent.resolve() != RUNS.resolve() else []
         self.picker: SavePicker | None = None
@@ -348,12 +362,18 @@ class Launcher(Screen):
         self.fields = [self.mode, self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.cap,
                        self.chance, self.seed,
                        self.gens, self.exam_every, self.select, self.load, self.save]
+        self.pile_fields = [self.task, self.p_agent, self.p_phase, self.p_lesion, self.p_encl, self.p_beings,
+                            self.chance, self.seed, self.gens]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
         self.inspect_btn = Button("Esplora reti e genomi del salvataggio", self.explore)
         self.quit_btn = Button("Esci", self.quit)
         if load:
             self._choose(load)
+
+    def _visible(self) -> list:
+        """Le righe da mostrare: l'arena delle pile ha le sue."""
+        return self.pile_fields if self.task.value == "pile" and not self.load.value else self.fields
 
     def _files(self) -> list[Path]:
         return sorted(RUNS.glob("*.npz"), key=lambda p: p.stat().st_mtime, reverse=True) + \
@@ -482,7 +502,29 @@ class Launcher(Screen):
             self.message, self.error = f"non riesco ad aprire il salvataggio: {err}", True
             return None
 
+    def _pile(self) -> None:
+        from ..evo.pile_test import make_run
+        from ..sim.pile import PileConfig
+        from .pile_view import PileScreen
+
+        if self.chance.value == "random":
+            self.seed.value = secrets.randbelow(2**31)
+        cfg = PileConfig(beings=self.p_beings.fixed())
+        lesions = (self.p_lesion.value,) if self.p_lesion.value and self.p_agent.value == "sezioni" else ()
+        try:
+            run = make_run(self.p_agent.value, self.p_phase.value, self.p_encl.fixed(), self.seed.fixed(), lesions,
+                           cfg)
+        except Exception as err:
+            self.message, self.error = f"non riesco ad avviare l'arena delle pile: {err}", True
+            return
+        screen = PileScreen(self.app, run, self.gens.fixed())
+        self.app.active_run = screen
+        self.app.show(screen)
+
     def start(self) -> None:
+        if self.task.value == "pile" and not self.load.value:
+            self._pile()
+            return
         if self._is_arena():
             from .arena_view import ArenaScreen
 
@@ -507,6 +549,9 @@ class Launcher(Screen):
     def explore(self) -> None:
         from .inspector import Inspector
 
+        if self.task.value == "pile" and not self.load.value:
+            self.message, self.error = "nell'arena delle pile il cervello si guarda dentro la simulazione", False
+            return
         if self._is_arena():
             self.message, self.error = ("l'esploratore delle reti non c'è ancora per l'arena continua: "
                                         "avviala e segui un essere"), False
@@ -534,9 +579,11 @@ class Launcher(Screen):
                     self._choose(result[1])
                 self.picker = None
             return
-        field = self.fields[self.focus]
+        fields = self._visible()
+        self.focus = min(self.focus, len(fields) - 1)
+        field = fields[self.focus]
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-            for k, f in enumerate(self.fields):
+            for k, f in enumerate(fields):
                 if f.rect.collidepoint(ev.pos):
                     self.focus = k
                     f.click(ev.pos)
@@ -551,9 +598,9 @@ class Launcher(Screen):
             elif ev.key == pygame.K_ESCAPE:
                 self.quit()
             elif ev.key in (pygame.K_DOWN, pygame.K_TAB):
-                self.focus = (self.focus + 1) % len(self.fields)
+                self.focus = (self.focus + 1) % len(fields)
             elif ev.key == pygame.K_UP:
-                self.focus = (self.focus - 1) % len(self.fields)
+                self.focus = (self.focus - 1) % len(fields)
             elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT) and not isinstance(field, Text):
                 field.change(1 if ev.key == pygame.K_RIGHT else -1)
             else:
@@ -580,10 +627,15 @@ class Launcher(Screen):
         s.blit(app.font.render("nuova corsa, ripresa di un salvataggio o esplorazione delle sue reti", True, DIM),
                (60, 76))
         y = 100
-        for k, f in enumerate(self.fields):
+        fields = self._visible()
+        self.focus = min(self.focus, len(fields) - 1)
+        pile = fields is self.pile_fields
+        self.gens.label = "Minuti di mondo" if pile else self.gens.label
+        self.p_lesion.enabled = self.p_agent.value == "sezioni"
+        for k, f in enumerate(fields):
             f.draw(s, app.font, 60, y, 175, 540, k == self.focus)
             y += ROW_H  # righe fitte: con il tetto dell'arena sono 15
-        field = self.fields[self.focus]
+        field = fields[self.focus]
         help = field.help if field.enabled or field is not self.select else \
             "La selezione finale parte quando le generazioni finiscono: imposta prima Generazioni."
         s.blit(app.small.render(help, True, DIM), (235, y + 2))

@@ -1,0 +1,238 @@
+# Arena delle pile (progetto)
+
+Stato: progetto, niente codice. Un **nuovo modo di provare gli agenti**,
+ispirato al Cyber Rodent project (Doya, Uchibe, ATR; docs/SPEC_CERVELLO_SEZIONI.md,
+"Confronti"): esseri con i sensi già fatti che cercano pile per ricaricarsi
+e si riproducono incontrandosi. Arena **nuova**, selezionabile dalle
+impostazioni iniziali; le arene e i cervelli di oggi non cambiano.
+
+Scopo: confrontare, nello stesso mondo e con gli stessi sensi, il cervello
+di oggi, un attore-critico classico (riferimento) e il cervello a sezioni
+(docs/SPEC_CERVELLO_SEZIONI.md), misurando soprattutto **l'apprendimento
+dentro la vita**.
+
+## Scelte concordate (2026-10-28)
+
+| tema | scelta |
+|---|---|
+| cosa c'è da imparare | due tipi di pile (una buona, una cattiva) che ogni tanto si scambiano, **e** zone dove compaiono che cambiano nel tempo |
+| riproduzione | numero di corpi **fisso**: chi muore rinasce con i geni di una coppia che si è accoppiata (come i robot veri) |
+| geni del figlio | incrocio dei due genitori |
+| scala | recinto piccolo con 4-10 esseri; centinaia di recinti in parallelo sulla GPU |
+| conflitto | si mantiene: accoppiarsi costa tempo ed energia, bisogna scegliere tra pile e compagno |
+| ricompense innate legate ai sensi | a zero nella fase A; evolvono nella fase B |
+| fasi | prima A (popolazione fissa, nessuna nascita), poi B (con riproduzione) |
+| costo del cervello | uguale per tutti i tipi di cervello: si confronta l'intelligenza, non il suo prezzo |
+| sensi | un set fisso scritto per questa arena |
+| riferimento | attore-critico classico (TD continuo, Doya 2000) |
+| azioni scelte dal cervello | solo programmi di movimento; prendere la pila è automatico a contatto |
+| gradiente | solo come diagnosi, mai per addestrare gli esseri |
+
+## Il mondo
+
+- **Recinto** quadrato con muri (proposta: 500 × 500), 4-10 esseri.
+- **Pile** di due colori (proposta: rosso e giallo, gli occhi esistono già).
+  Una è **buona** (ricarica), l'altra **cattiva** (scarica un po' e fa male).
+  Ogni `T_inversione` (300 s, dopo la taratura) i ruoli si scambiano, in
+  tutto il recinto.
+- **Zone**: le pile compaiono in una di K zone (K = 4, gli angoli); ogni
+  `T_zona` (200 s, sfasato dall'inversione) la zona attiva cambia. Una pila
+  non presa si spegne dopo 40 s e ricompare nella zona attiva (altrimenti le
+  cattive, evitate, si accumulano e riempiono la zona).
+- **Ricarica**: quasi fermo e con la pila **davanti al muso** (entro 20°),
+  l'essere la prende; una buona si consuma in 2 s, stando fermi; una
+  cattiva toglie 8 di energia e fa male. Il dolore pesa quanto il danno
+  rispetto a una pila buona (8/25), così avvicinarsi alle pile conviene già
+  prima di distinguere i colori.
+- **Energia**: cala col tempo e col movimento; a zero si muore. Tetto di età
+  (proposta 600 s) perché le vite finiscano anche senza morire di fame.
+- **Altri esseri**: hanno una luce blu sul muso (riconoscibile dagli occhi).
+- **Accoppiamento** (fase B): due esseri con energia sopra una soglia, muso
+  contro muso (angolo < 30°), vicini, per qualche secondo (proposta 2 s);
+  costa energia a entrambi. Lascia una "coppia registrata" nel recinto.
+- **Rinascita** (fase B): chi muore rinasce subito in un punto a caso con i
+  geni di un figlio (incrocio + mutazione) dell'ultima coppia registrata;
+  se non c'è ancora nessuna coppia, da due esseri vivi a caso (da decidere:
+  vedi "Dubbi").
+- **Fase A**: chi muore rinasce con **lo stesso cervello di partenza** del
+  suo tipo, senza ciò che aveva imparato. Nessuna evoluzione: si misura
+  solo l'apprendimento.
+
+## I sensi (fissi)
+
+| senso | come i robot | proposta |
+|---|---|---|
+| occhi colorati | la telecamera | ventaglio davanti, 3 direzioni (sinistra, centro, destra) × 3 colori (rosso, giallo, blu) |
+| distanza | infrarossi | 3 raggi davanti, dicono quanto è vicino un muro o un oggetto |
+| contatto | | 1 |
+| energia | livello della batteria | 1, interno |
+| "mi guardano" | ricevitore infrarosso | 1: un altro essere vicino ha il muso verso di me |
+| gusto, dolore | | 2, interni (ricarica buona, pila cattiva) |
+
+Circa 17 canali. Nessun senso dell'acqua: qui non c'è acqua.
+
+## Il corpo
+
+Due motori di movimento come oggi (spinta e sterzo). Prendere la pila è
+automatico a contatto se si è quasi fermi; accoppiarsi è automatico se le
+condizioni sono vere (quindi il cervello deve *portarsi* in quelle
+condizioni).
+
+## I tre agenti
+
+1. **Il cervello di oggi** (`rate` e `spike-ei`), con il set di sensi
+   dell'arena (non ancora collegato: vedi "Stato").
+2. **Attore-critico classico** (riferimento): legge i sensi, un critico TD
+   continuo e un attore con lo stesso apprendimento collaudato dei manuali.
+   Non biologico nei dettagli; dice quanto bene si può fare in questo mondo.
+3. **Il cervello a sezioni** (`sezioni`), prima B, D, E, V con F fisso, poi
+   C, L, il modulatore dell'incertezza, i valori innati.
+
+Nella fase A tutti partono con un **istinto motorio minimo** uguale per
+tutti: i programmi di movimento (avvicinati a ciò che vedi, allontanati,
+esplora) sono innati in F; da imparare c'è **quale** colore inseguire e
+**dove** andare, non come muoversi.
+
+Il **guidato** (controllo del mondo, non un concorrente) sa il colore buono
+e dov'è la zona: insegue il buono, evita il cattivo davanti, altrimenti va
+verso la zona.
+
+## Le misure
+
+Per ogni inversione e ogni cambio di zona:
+
+- **scelta**: pile buone sul totale, prima e dopo l'inversione;
+- **tempo per adattarsi**: secondi dopo l'inversione finché la scelta torna
+  sopra il 75% (o non ci torna);
+- **tempo per trovare la zona nuova** dopo un cambio;
+- **sopravvivenza**: durata della vita, morti di fame;
+- **accoppiamenti** (fase B) e quanta energia ci si spende;
+- **emersione** nel cervello a sezioni: selettività di B, uso delle unità di
+  E, contenuto di D;
+- **lesioni**: le stesse misure togliendo una sezione alla volta.
+
+Il confronto principale: quanto il cervello a sezioni si avvicina
+all'attore-critico, e quanto supera il cervello di oggi.
+
+## Fasi di lavoro
+
+1. **Il mondo in NumPy** (`evonets/sim/pile.py`), con un essere guidato da
+   una regola scritta a mano ("vai verso le pile del colore buono") per
+   controllare che il mondo sia giusto e tarare i numeri.
+2. **Il mondo sulla GPU** (`evonets/gpu/pile.py`): centinaia di recinti in
+   parallelo; prova che dà gli stessi risultati della versione NumPy.
+3. **I sensi fissi** dell'arena e i **cervelli di oggi** che ci girano.
+4. **L'attore-critico di riferimento**, e la prima tabella delle misure
+   (fase A).
+5. **Il cervello a sezioni** (B, D, E, V, F fisso): prima in NumPy con le
+   prove di ogni sezione da sola, poi la **diagnosi con il gradiente**, poi
+   in JAX.
+6. **Fase A** completa: i tre agenti, misure e lesioni.
+7. **C, L, incertezza, valori innati** nel cervello a sezioni; di nuovo
+   fase A.
+8. **Fase B**: accoppiamento, rinascita con incrocio, valori innati che
+   evolvono.
+9. **Impostazioni iniziali e visualizzatore**: l'arena e il cervello a
+   sezioni selezionabili; nel visualizzatore le sezioni colorate.
+
+Ogni fase finisce con i suoi test (`tests/test_pile.py`, poi quelli del
+cervello) e una nota dei risultati in questo documento.
+
+## Stato (2026-10-28)
+
+Fatto: il mondo in NumPy (`evonets/sim/pile.py`), il guidato,
+l'attore-critico, il cervello a sezioni (`evonets/net/sections.py`), le
+prove e le misure (`evonets/evo/pile_test.py`), la fase B (accoppiamento,
+rinascita da incrocio, valori innati che evolvono), i test
+(`tests/test_pile.py`), la versione **GPU** (`evonets/gpu/pile.py`: stesso
+algoritmo in JAX, molti passi per chiamata; numeri casuali diversi, medie
+uguali: 200 recinti × 25 minuti in circa 45 s, contro circa 10 minuti per
+100 recinti in NumPy; è il motore predefinito, `--motore numpy` per il
+riferimento), la voce nel **menu** (Mondo = "arena delle pile": cervello,
+fase, lesione, recinti, esseri per recinto) e la **schermata**
+(`evonets/viz/pile_view.py`, docs/INTERFACCIA.md). Non ancora: i cervelli
+di oggi nell'arena, la diagnosi con il gradiente, i salvataggi delle corse
+delle pile.
+
+**Taratura.** Con i numeri della prima proposta nemmeno il guidato
+sopravviveva, e un essere che impara prendeva circa 1 pila al minuto: due
+esperienze tra un'inversione e l'altra (90 s), troppo poche per chiunque.
+Cambiati: inversione 300 s, zona 200 s, 8 pile, pile che scadono, presa
+solo davanti al muso, si mangia fermi, consumo 0,15 + 0,25·spinta, dolore
+proporzionato al danno, selezione dei programmi "appiccicosa" (senza, un
+esploratore a caso cambiava programma ogni 0,25 s e non arrivava mai a una
+pila).
+
+## Risultati dopo la correzione del riflesso (fase A, GPU, 200 recinti × 6 esseri, 25 minuti)
+
+**Difetto trovato (2026-10-28):** il riflesso dei muri girava verso il lato
+"più libero"; in un angolo i due lati si scambiavano a ogni passo e l'essere
+oscillava per sempre spingendo contro i muri: il 76-79% degli esseri che
+imparano era fermo in un angolo (il guidato no: la sua guida verso la zona
+scavalcava il riflesso). Ora il verso della fuga, una volta scelto, resta
+finché davanti è libero: negli angoli 0-1%. **I risultati sotto la tabella
+successiva (quelli di prima) sono falsati da questo difetto.**
+
+| agente | pile/min | buone | morti di fame/min | prima dell'inversione | 0-15 s dopo | 15-30 | 30-60 | 60-90 |
+|---|---|---|---|---|---|---|---|---|
+| guidato | 2,56 | 77% | 0,001 | 75% | 90% | 79% | 76% | 75% |
+| attore-critico | 3,32 | 52% | 0,09 | 61% | 37% | 39% | 43% | 46% |
+| sezioni | 2,90 | 52% | 0,11 | 61% | 34% | 38% | 43% | 45% |
+| sezioni senza B / D / C / L / V | 2,85-2,89 | 52-53% | 0,10-0,11 | 61-62% | 35-36% | 37-40% | 40-43% | 43-46% |
+| sezioni senza U | 3,32 | 55% | 0,09 | 63% | 38% | 39% | 45% | 48% |
+
+- Ora trovano molte pile (più del guidato), ma scelgono il colore quasi a
+  caso: prima dell'inversione 61%, subito dopo 34-37% (inseguono il colore
+  che era buono), dopo 90 s ancora 45%. Imparano, ma disimparano troppo
+  lentamente.
+- I pesi sono stabili (nessuna esplosione: |w_e| massimo circa 2, |u_c|
+  circa 2, |w_v| circa 0,4), ma il critico prevede poco (δ resta quasi la
+  ricompensa grezza) e B porta poca informazione sul colore (0,26): i suoi
+  prototipi si specializzano su ciò che è frequente (muri, energia,
+  contatto), non su ciò che conta. Per questo C e D, che leggono B, non
+  servono: nessuna lesione cambia qualcosa; U peggiora.
+
+## Primi risultati (fase A, 100 recinti × 6 esseri, 25 minuti; falsati dal difetto del riflesso)
+
+| agente | pile/min | buone | morti di fame/min | prima dell'inversione | 0-15 s dopo | 15-30 | 30-60 | 60-90 |
+|---|---|---|---|---|---|---|---|---|
+| guidato (sa tutto) | 2,65 | 77% | 0,001 | 75% | 89% | 80% | 76% | 75% |
+| attore-critico | 1,06 | 60% | 0,11 | 65% | 39% | 41% | 50% | 54% |
+| sezioni | 0,94 | 58% | 0,12 | 66% | 38% | 41% | 44% | 50% |
+| sezioni senza B | 0,92 | 58% | 0,12 | 66% | 39% | 37% | 45% | 51% |
+| sezioni senza D | 0,98 | 58% | 0,12 | 66% | 35% | 37% | 43% | 49% |
+| sezioni senza C | 0,88 | 56% | 0,12 | 63% | 39% | 37% | 41% | 47% |
+| sezioni senza L | 0,90 | 59% | 0,12 | 63% | 37% | 43% | 47% | 52% |
+| sezioni senza U | 1,20 | 64% | 0,11 | 68% | 36% | 45% | 53% | 56% |
+| sezioni senza V | 1,11 | 61% | 0,11 | 67% | 39% | 42% | 48% | 56% |
+
+- **Si impara il colore dentro la vita**: prima di un'inversione circa due
+  pile su tre sono buone, subito dopo si scende sotto il 40% (si insegue il
+  colore che era buono: perseverazione), poi si risale lentamente; in 90 s
+  nessuno torna al 75%.
+- **Il cervello a sezioni non fa meglio dell'attore-critico**, e nessuna
+  lesione peggiora in modo chiaro; senza U (e senza V) va un po' meglio. In
+  questo compito le sezioni in più non servono ancora: il colore si lega
+  subito al boccone (la pila presa è davanti agli occhi un attimo prima),
+  quindi non serve memoria; e manca il senso dello spazio per il "dove"
+  (vedi sotto). B porta informazione sul colore (circa 0,5), ma togliendolo
+  non cambia niente.
+- **Il collo di bottiglia è trovare le pile**: chi impara ne prende una al
+  minuto, il guidato 2,65, e muore di fame dopo circa 9 minuti in media.
+
+## Dubbi ancora aperti
+
+0. **Dove: manca un senso dello spazio.** Gli esseri non hanno posizione,
+   bussola o punti di riferimento: imparare *dove* è la zona è quasi
+   impossibile, e il "dove" pesa molto sulla sopravvivenza (il guidato, che
+   lo sa, prende 2,6 pile al minuto; chi impara circa 1). Possibilità: una
+   bussola (come il senso magnetico che esiste già nel progetto), fari di
+   colore diverso negli angoli, o un programma "verso il faro".
+
+1. **Fase B senza coppie:** chi muore prima che ci sia stato un
+   accoppiamento, da chi rinasce? Proposta: da un incrocio di due esseri
+   vivi scelti a caso, così la popolazione non si blocca.
+2. **I numeri** (dimensione del recinto, tempi di inversione e di zona,
+   energia di una pila, costo dell'accoppiamento) sono proposte da tarare
+   nella fase 1, con l'essere guidato a mano.
+3. **Il riposo** per il consolidamento verso L: da decidere quando arriva L.
