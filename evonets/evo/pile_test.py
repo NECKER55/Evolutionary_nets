@@ -151,7 +151,7 @@ class NumpyRun:
         b = self.brain
         keys = ("genome", "w_e", "w_v", "value", "program", "pi", "bite", "p_bite", "delta", "teach", "proto", "pred",
                 "win_rate", "state_b", "mem", "w_gate", "c_in", "u_c", "u_l", "code", "unc", "d_slow", "teacher",
-                "obs_err", "o_pl", "o_pa", "o_assoc", "o_e", "o_err", "o_out")
+                "obs_err", "o_pl", "o_pa", "o_assoc", "o_e", "o_err", "o_out", "k_on", "k_ev", "k_used")
         out = {k: np.asarray(getattr(b, k))[i] for k in keys if hasattr(b, k)}
         out.update(att_target=b.att.target[i], att_new=b.att.new[i], att_prob=b.att.prob[i],
                    att_has=b.att.has_pos[i], att_parts=b.att.parts[i])

@@ -23,6 +23,21 @@ rappresentano emerge (si misura con `selectivity` e le lesioni).
   (piacere + dolore: conta, buono o cattivo che sia) e l'incertezza; e due
   neuroni, "quanto vale ciò che guardo" e "quanto vale ciò che ho preso"
   (D), letti dal critico e da E. I valori di partenza sono geni.
+- K contesti (lo stato nascosto del mondo): ciò che non si vede e si deduce
+  dagli esiti (per esempio quale colore è buono adesso). Ogni contesto ha il
+  suo cassetto di O (piacere e dolore per caratteristica): la memoria a lungo
+  termine è legata al contesto, come nell'indicizzazione dell'ippocampo e
+  negli stati della corteccia orbitofrontale. Dopo ogni episodio ogni
+  contesto confronta la sua previsione con l'esito, e accumula una "prova"
+  (l'errore recente, `k_rate`); vince il contesto che prevede meglio, con un
+  vantaggio per quello in corso (`k_stick`); impara solo quello attivo. Se
+  nessuno spiega gli esiti (errore oltre `k_new` volte il solito) si recluta
+  un contesto nuovo, che parte dai valori innati (una causa nuova). Prima si
+  decide il contesto, poi impara solo il suo cassetto: così, quando
+  il mondo torna com'era, il vecchio cassetto è intatto e ci si torna in
+  pochi episodi invece di reimparare. Prima versione: un neurone per
+  contesto (`Sizes.k`); il passo successivo è un contesto sparso, un pattern
+  su più neuroni, in cui contesti simili condividano ciò che sanno.
 - Attenzione (S): una mappa di priorità fatta di posizioni, come il
   collicolo superiore: `MAP` neuroni-direzione che coprono il campo visivo,
   ognuno con l'oggetto più vicino nella sua direzione (un oggetto nuovo
@@ -43,10 +58,15 @@ rappresentano emerge (si misura con `selectivity` e le lesioni).
   preso" quando arriva il gusto o il dolore. Un cancello decide quando
   scrivere (innato: un oggetto nuovo nella fovea), e impara con δ.
 - C memoria veloce: ingresso fisso, casuale e sparso (come le cellule di
-  Kenyon del corpo a fungo); si accendono tutti i neuroni sopra soglia (non
-  un numero fisso: con "i 4 più attivi" tra tanti pari merito vinceva il
-  caso, e ogni incontro con lo stesso oggetto accendeva neuroni diversi);
-  impara solo
+  Kenyon del corpo a fungo: molti più neuroni che ingressi, 6 connessioni
+  ciascuno). Un'inibizione che cresce con l'attività (come il neurone APL)
+  lascia accesi circa `c_sparse` dei neuroni, i più eccitati: quelli che
+  ricevono più caratteristiche insieme. Così il codice di un oggetto è la
+  sua combinazione ("rossa e grande"), non l'unione delle sue
+  caratteristiche (con un solo ingresso per accendersi, "rossa grande" e
+  "gialla grande" condividevano più neuroni di "rossa grande" e "rossa
+  piccola"). Se al confine ci sono troppi pari merito, l'inibizione sale e
+  li esclude: lo stesso oggetto dà sempre lo stesso codice. Impara solo
   l'uscita verso E, in fretta, e dimentica in minuti. Legge soprattutto
   che cos'è l'oggetto (il colore nella fovea e in D, non dove sta), più un
   po' di contesto (B, con peso `context`): così lo stesso oggetto accende
@@ -80,10 +100,24 @@ Due regole sull'apprendimento con δ, solo nel cervello a sezioni:
 - tracce strette: una sinapsi di E o del cancello di D si marca solo se il
   neurone da cui parte è acceso sopra `tag` (in natura si marca solo dove il
   neurone si attiva davvero);
-- soglia adattiva: insegna solo la parte di δ che supera `floor` volte la
-  sorpresa media degli ultimi minuti (la dopamina ha un livello di base e
-  adatta la sua scala: Tobler, Fiorillo, Schultz 2005). Il critico impara
-  invece da tutto δ: è il suo errore.
+- soglia e scala adattive: insegna solo la parte di δ che supera `floor`
+  volte la sorpresa media degli ultimi minuti, misurata in unità di quella
+  sorpresa media (la dopamina ha un livello di base e adatta la sua scala
+  alla distribuzione dei premi: Tobler, Fiorillo, Schultz 2005), con il
+  tetto della dopamina. Così E, C e il cancello di D imparano allo stesso
+  modo con premi grandi o piccoli, e con qualunque passo di tempo. Il tetto
+  schiaccia però le sorprese grandi e rare (il dolore di un morso cattivo):
+  si sceglie un po' peggio (59% di pile buone invece di 66%) ma si mangia e
+  si sopravvive meglio (docs/TRAGUARDI_PILE.md). Il critico impara invece da
+  tutto δ: è il suo errore.
+- inerzia legata agli oggetti: quando E sceglie, le sinapsi da C (il codice
+  dell'oggetto guardato) al programma scelto si marcano per qualche secondo
+  (la stessa traccia che serve a imparare), e finché la marcatura dura
+  votano per quel programma (`stick`): tornando su un oggetto guardato poco
+  fa, riaffiora ciò che si era deciso per lui; un oggetto nuovo non ha
+  inerzia. È la memoria di lavoro nelle sinapsi (Mongillo, Barak, Tsodyks
+  2008). Quando l'oggetto guardato cambia, E decide subito. L'inerzia sul
+  programma resta solo quando non si guarda niente.
 
 Arbitraggio (Daw, Niv, Dayan 2005; l'incertezza inattesa e la noradrenalina,
 Yu e Dayan 2005): quando le sorprese sono tante (U alta) il mondo è cambiato,
@@ -110,7 +144,7 @@ imparare da lui: `obs_err`, la media di |errore| sui suoi episodi.
 
 Lesioni (`lesions`): "B" (E, V, C, D leggono A invece di B), "D", "C", "L",
 "U", "V" (niente critico: δ = ricompensa grezza), "S" (salienza solo innata),
-"O" (niente valore degli oggetti: non impara e dice zero),
+"O" (niente valore degli oggetti: non impara e dice zero), "K" (un contesto solo),
 "R" (niente arbitraggio: U accelera E, aggiunge caso e non sposta i voti,
 com'era prima).
 """
@@ -169,13 +203,13 @@ class Genes:
 
     # Velocità di apprendimento.
     eta_b: float = 0.05  # B, per secondo
-    eta_c: float = 20.0  # C, per aggiornamento (δ è già per passo): in un colpo, poi satura (c_max)
-    eta_e: float = 1.0
+    eta_c: float = 0.1  # C, per passo (la sorpresa è in unità di quella solita): in fretta, poi satura (c_max)
+    eta_e: float = 0.01  # E: lento (le abitudini)
     eta_v: float = 0.5
     eta_vc: float = 5.0  # V: la parte che legge C impara in fretta (il valore di un oggetto in un colpo)
     eta_l: float = 0.01  # L, per secondo di riposo
     eta_o: float = 1.5  # O, per episodio (× l'incertezza della caratteristica)
-    eta_gate: float = 0.5  # il cancello di D
+    eta_gate: float = 0.003  # il cancello di D
     eta_predict: float = 0.5  # B: la previsione del prossimo ingresso, per secondo
     # Tempi (s).
     tau_a: float = 0.3  # A: "cosa è cambiato"
@@ -207,7 +241,8 @@ class Genes:
     gate_bias: float = -6.0  # D: chiuso a riposo (un cancello socchiuso cancellerebbe il ricordo)
     context: float = 0.1  # C: peso del contesto (B) rispetto all'oggetto guardato (1)
     memory: float = 0.5  # C: peso dell'oggetto ricordato in D
-    c_threshold: float = 0.9  # C: si accendono tutti i neuroni sopra questa soglia
+    c_threshold: float = 0.4  # C: sotto questo ingresso nessun neurone si accende (niente da vedere né ricordare)
+    c_sparse: float = 0.05  # C: quota di neuroni che l'inibizione lascia accesi
     c_max: float = 0.3  # C: ogni voto satura qui (conta l'ultima esperienza)
     rest_energy: float = 0.6  # L: "riposo" = carichi oltre questa quota e fermi a ricaricarsi
     tag: float = 0.5  # tracce strette: si marca solo da neuroni accesi sopra questo
@@ -232,12 +267,18 @@ class Genes:
     sal_import: float = 0.5  # attenzione: quanto attira ciò che conta, buono o cattivo (O)
     trace_o: float = 0.5  # O: quanto resta "in mente" ciò che si è guardato o preso (s)
     assoc_rate: float = 0.3  # O: quanto in fretta l'incertezza segue le sorprese, per episodio
+    assoc_slow: float = 0.03  # O: la sorpresa "solita", per episodio (più lenta)
+    k_rate: float = 0.3  # K: quanto pesa l'ultimo episodio nella prova di ogni contesto
+    k_stick: float = 0.15  # K: di quanto un altro contesto deve prevedere meglio per prendere il posto
+    k_new: float = 1.5  # K: si recluta un contesto nuovo se tutti sbagliano oltre questo × l'errore solito
+    k_wait: float = 4.0  # K: episodi minimi tra un cambio di contesto e un reclutamento
+    pain_weight: float = 2.0  # O: quanto pesa il dolore rispetto al piacere nel valore (la perdita pesa di più)
 
     LOG = ("eta_b", "eta_c", "eta_e", "eta_v", "eta_vc", "eta_l", "h_short", "h_mid", "h_long", "eta_o", "eta_gate", "eta_predict", "tau_a", "tau_b",
            "tau_d", "horizon", "trace_actor", "trace_critic", "forget", "win_window", "u_fast", "u_slow",
            "decide_every", "inhibit_time", "new_tau", "novelty_tau", "temperature", "c_threshold", "c_max",
            "sal_temperature", "observe", "trace_o")
-    UNIT = ("rest_energy", "tag", "arb_slow", "att_shift", "memory", "need", "critic_mix", "assoc_rate")
+    UNIT = ("rest_energy", "tag", "c_sparse", "k_rate", "arb_slow", "att_shift", "memory", "need", "critic_mix", "assoc_rate", "assoc_slow")
     SIGNED = ("gate_bias",)
 
 
@@ -245,6 +286,7 @@ GENE_NAMES = tuple(f.name for f in fields(Genes))
 INNATE_CAP = 0.2  # tetto dei valori innati legati ai sensi (per secondo di senso pieno)
 DELTA_MAX = 3.0  # δ satura qui
 WEIGHT_MAX = 5.0  # nessun peso imparato oltre questo
+VOLATILITY_MAX = 4.0  # O: al massimo tante volte più veloce quando il mondo è appena cambiato
 RATE_MAX_O = 1.9  # O: passo massimo per episodio (con il passo normalizzato, da 2 in su si diverge)
 OBS_AVG = 0.1  # quanto pesa ogni episodio del maestro nella media di quanto si impara ancora da lui
 N_MOTOR = N_FOUT * N_FIN
@@ -310,8 +352,9 @@ class Sizes:
 
     b: int = 16  # prototipi di B
     b_winners: int = 3
-    c: int = 64  # neuroni di C
-    c_fan_in: int = 4
+    c: int = 256  # neuroni di C (molti più degli ingressi, come le cellule di Kenyon)
+    c_fan_in: int = 6
+    k: int = 4  # contesti (un neurone ciascuno, per ora)
     lesions: frozenset = field(default_factory=frozenset)
 
 
@@ -336,11 +379,15 @@ def priority_map(objs, MAPN, xp=np):
 def o_read(o_pl, o_pa, o_assoc, feat, energy, p: dict, xp=np):
     """Ciò che O dice di oggetti con caratteristiche `feat` (n, ..., F):
     (valore, importanza, incertezza), ognuno (n, ...). Lo sfondo (l'ultimo
-    peso) non entra: è ciò che capita senza un oggetto."""
+    peso) non entra: è ciò che capita senza un oggetto. Il dolore pesa
+    `pain_weight` volte il piacere. `o_assoc` (n, 2, F + 1): la sorpresa di
+    adesso (l'incertezza) e quella solita."""
     F = feat.shape[-1]
     need = 1.0 + p["need"] * (2.0 * (1.0 - energy) - 1.0)  # la fame di adesso
-    value = o_pl[:, :F] * need[:, None] - o_pa[:, :F]
-    weight = xp.maximum(o_pl[:, :F], 0.0) + xp.maximum(o_pa[:, :F], 0.0)
+    pain = p["pain_weight"][:, None] * o_pa[:, :F]
+    value = o_pl[:, :F] * need[:, None] - pain
+    weight = xp.maximum(o_pl[:, :F], 0.0) + xp.maximum(pain, 0.0)
+    o_assoc = o_assoc[:, 0]
     extra = (1,) * (feat.ndim - 2)
     shape = lambda w: w.reshape(w.shape[:1] + extra + w.shape[1:])
     return ((feat * shape(value)).sum(-1), (feat * shape(weight)).sum(-1), (feat * shape(o_assoc[:, :F])).sum(-1))
@@ -352,18 +399,23 @@ def o_learn(o_pl, o_pa, o_assoc, trace, pleasure, pain, rate, p: dict, xp=np):
     l'esito, `rate` (n,) la velocità (zero: non si impara). Le
     caratteristiche competono sulla stessa previsione. -> (o_pl, o_pa,
     o_assoc, |errore|)."""
-    rate = xp.minimum(rate, RATE_MAX_O)  # oltre, la regola diventa instabile
     err_pl = pleasure - (o_pl * trace).sum(1)
     err_pa = pain - (o_pa * trace).sum(1)
+    # Volatilità (Behrens e colleghi, 2007): si impara più in fretta quando
+    # le sorprese di adesso superano quelle solite (il mondo è cambiato), più
+    # piano quando il mondo è stabile.
+    now, usual = o_assoc[:, 0], o_assoc[:, 1]
+    boost = xp.clip(now / xp.maximum(usual, 0.05), 0.5, VOLATILITY_MAX)
     # Diviso per quanta traccia c'è: con molte caratteristiche accese insieme
     # la correzione totale supererebbe l'errore, e i pesi rimbalzerebbero.
-    step = rate[:, None] * o_assoc * trace / (1.0 + (trace**2).sum(1))[:, None]
+    step = xp.minimum(rate[:, None] * boost, RATE_MAX_O) * trace / (1.0 + (trace**2).sum(1))[:, None]
     o_pl = xp.clip(o_pl + step * err_pl[:, None], -WEIGHT_MAX, WEIGHT_MAX)
     o_pa = xp.clip(o_pa + step * err_pa[:, None], -WEIGHT_MAX, WEIGHT_MAX)
-    size = xp.minimum(xp.abs(err_pl) + xp.abs(err_pa), 1.0)
+    size = xp.minimum(xp.abs(err_pl) + xp.abs(err_pa), 2.0)[:, None]
     on = (rate > 0)[:, None]
-    o_assoc = xp.where(on, o_assoc + p["assoc_rate"][:, None] * trace * (size[:, None] - o_assoc), o_assoc)
-    return o_pl, o_pa, o_assoc, xp.abs(err_pl) + xp.abs(err_pa)
+    now = xp.where(on, now + p["assoc_rate"][:, None] * trace * (size - now), now)
+    usual = xp.where(on, usual + p["assoc_slow"][:, None] * trace * (size - usual), usual)
+    return o_pl, o_pa, xp.stack([now, usual], 1), xp.abs(err_pl) + xp.abs(err_pa)
 
 
 def o_episodes(st: dict, felt, xp=np) -> tuple[dict, object]:
@@ -384,22 +436,80 @@ def o_episodes(st: dict, felt, xp=np) -> tuple[dict, object]:
     return new, done
 
 
+def o_active(st: dict, xp=np):
+    """Il cassetto di O del contesto attivo: (o_pl, o_pa, o_assoc)."""
+    idx = xp.arange(st["k_on"].shape[0])
+    return st["o_pl"][idx, st["k_on"]], st["o_pa"][idx, st["k_on"]], st["o_assoc"][idx, st["k_on"]]
+
+
+def k_learn(st: dict, trace, pleasure, pain, rate, mask, p: dict, les, xp=np) -> dict:
+    """Un episodio finito (`mask` (n,)) insegna a K e a O. Prima si decide a
+    quale contesto appartiene (la prova di ognuno; si cambia o si recluta un
+    contesto nuovo, che parte dai valori innati), poi impara solo quel
+    cassetto: così i primi esiti di un regime nuovo non rovinano il cassetto
+    vecchio (vedi la docstring del modulo). -> stato nuovo e |errore| del
+    contesto scelto."""
+    n, NK = st["k_ev"].shape
+    idx = xp.arange(n)
+    on, used = st["k_on"], st["k_used"]
+    o_pl, o_pa, o_assoc = st["o_pl"], st["o_pa"], st["o_assoc"]
+    # La prova: quanto bene ogni contesto avrebbe previsto questo esito.
+    err_all = (xp.abs(pleasure[:, None] - (o_pl * trace[:, None, :]).sum(-1))
+               + xp.abs(pain[:, None] - (o_pa * trace[:, None, :]).sum(-1)))
+    ev = xp.where(mask[:, None] & used, st["k_ev"] + p["k_rate"][:, None] * (xp.minimum(err_all, 2.0) - st["k_ev"]),
+                  st["k_ev"])
+    since = st["k_since"] + mask
+    k_on, stale = on, st["k_stale"]
+    if "K" not in les:
+        hot = xp.arange(NK)[None] == on[:, None]
+        stale = xp.where(mask[:, None] & ~hot, stale + 1.0, xp.where(hot, 0.0, stale))
+        ev_used = xp.where(used, ev, 1e9)
+        best = xp.argmin(ev_used, axis=1)
+        switch = mask & (ev_used[idx, best] < ev[idx, on] - p["k_stick"]) & (best != on)
+        # Nessuno spiega: una causa nuova (il primo contesto libero, o il meno usato di recente),
+        # che parte dai valori innati. Solo se nessun contesto esistente spiega
+        # nemmeno questo esito: se uno lo spiega, è la sua prova che deve vincere.
+        limit = p["k_new"] * xp.maximum(st["k_usual"], 0.05)
+        none_now = xp.where(used, err_all, 1e9).min(1) > limit
+        recruit = mask & (ev[idx, on] > limit) & none_now & (since >= p["k_wait"])
+        slot = xp.argmax(xp.where(used, stale, 1e9) * ~hot, axis=1)
+        new_hot = (xp.arange(NK)[None] == slot[:, None]) & recruit[:, None]
+        o_pl = xp.where(new_hot[:, :, None], st["o_prior"][:, None, 0], o_pl)
+        o_pa = xp.where(new_hot[:, :, None], st["o_prior"][:, None, 1], o_pa)
+        o_assoc = xp.where(new_hot[:, :, None, None], 0.5, o_assoc)
+        ev = xp.where(new_hot, st["k_usual"][:, None], ev)
+        used = used | new_hot
+        k_on = xp.where(recruit, slot, xp.where(switch, best, on))
+        changed = k_on != on
+        since = xp.where(changed, 0.0, since)
+        stale = xp.where(changed[:, None] & (xp.arange(NK)[None] == k_on[:, None]), 0.0, stale)
+    # Impara solo il cassetto scelto.
+    a_pl, a_pa, a_as, err = o_learn(o_pl[idx, k_on], o_pa[idx, k_on], o_assoc[idx, k_on], trace, pleasure, pain, rate,
+                                    p, xp)
+    hot = xp.arange(NK)[None] == k_on[:, None]
+    o_pl = xp.where(hot[:, :, None], a_pl[:, None], o_pl)
+    o_pa = xp.where(hot[:, :, None], a_pa[:, None], o_pa)
+    o_assoc = xp.where(hot[:, :, None, None], a_as[:, None], o_assoc)
+    usual = xp.where(mask, st["k_usual"] + p["assoc_slow"] * (xp.minimum(err, 2.0) - st["k_usual"]), st["k_usual"])
+    return {"o_pl": o_pl, "o_pa": o_pa, "o_assoc": o_assoc, "k_ev": ev, "k_used": used, "k_on": k_on,
+            "k_usual": usual, "k_since": since, "k_stale": stale}, err
+
+
 def o_step(st: dict, felt, energy, master, on, p: dict, les, xp=np) -> dict:
-    """Un passo di O, prima dell'attenzione: chiude gli episodi finiti e
+    """Un passo di O e K, prima dell'attenzione: chiude gli episodi finiti e
     impara dai propri e (chi osserva, `on` (n,)) da quelli del maestro del
     proprio recinto (`master` (n,): il suo indice). -> gli array cambiati."""
     if "O" in les:
         return {}
     new, done = o_episodes(st, felt, xp)
     pl, pa, e = st["ep_pl"], st["ep_pa"], st["ep_e"]
-    o_pl, o_pa, o_assoc, err = o_learn(st["o_pl"], st["o_pa"], st["o_assoc"], e, pl, pa, p["eta_o"] * done, p, xp)
-    out = dict(new, o_err=xp.where(done, err, st["o_err"]))
+    k_out, err = k_learn(st, e, pl, pa, p["eta_o"] * done, done, p, les, xp)
+    out = dict(new, o_err=xp.where(done, err, st["o_err"]), **k_out)
     # Dal maestro: la stessa regola, con ciò che lui aveva in mente e il suo esito.
     seen = on & done[master]
-    o_pl, o_pa, o_assoc, err_m = o_learn(o_pl, o_pa, o_assoc, e[master], pl[master], pa[master],
-                                         p["eta_o"] * p["observe"] * seen, p, xp)
-    out.update(o_pl=o_pl, o_pa=o_pa, o_assoc=o_assoc,
-               obs_err=xp.where(seen, st["obs_err"] + OBS_AVG * (err_m - st["obs_err"]), st["obs_err"]))
+    k_out, err_m = k_learn(dict(st, **k_out), e[master], pl[master], pa[master], p["eta_o"] * p["observe"] * seen, seen,
+                           p, les, xp)
+    out.update(k_out, obs_err=xp.where(seen, st["obs_err"] + OBS_AVG * (err_m - st["obs_err"]), st["obs_err"]))
     return out
 
 
@@ -425,6 +535,7 @@ class Attention:
         self.prob = np.zeros((n, MAP))  # la mappa: probabilità di ogni posizione (per lo schermo)
         self.has_pos = np.zeros((n, MAP), dtype=bool)
         self.parts = np.zeros((n, MAP, 4))  # per lo schermo: innata, valore, importanza, incertezza
+        self.changed = np.zeros(n, dtype=bool)
 
     def update(self, objs: dict, decide: np.ndarray, p: dict, extra=None, learned=None, o=None) -> None:
         """Sceglie l'oggetto (a ogni decisione, o subito se quello attento è
@@ -434,6 +545,7 @@ class Attention:
         dt, n = self.dt, self.n
         vis = objs["vis"]
         idx = np.arange(n)
+        before = self.target.copy()
         self.novelty = self.novelty * np.exp(-dt / p["novelty_tau"])[:, None] + (vis & ~self.prev_vis)
         self.prev_vis = vis.copy()
         self.inhib_t = np.maximum(self.inhib_t - dt, 0.0)
@@ -463,13 +575,13 @@ class Attention:
         prob = np.where(has, np.exp(z), 0.0)
         prob /= np.maximum(prob.sum(1, keepdims=True), 1e-12)
         self.prob = prob
-        if not choose.any():
-            return
-        place = (np.cumsum(prob, 1) < self.rng.random((n, 1))).sum(1).clip(0, MAP - 1)
-        sel = np.where(choose, obj[idx, place], self.target)
-        changed = choose & (sel != self.target)
-        self.new = np.where(changed, 1.0, self.new)
-        self.target = sel
+        if choose.any():
+            place = (np.cumsum(prob, 1) < self.rng.random((n, 1))).sum(1).clip(0, MAP - 1)
+            sel = np.where(choose, obj[idx, place], self.target)
+            changed = choose & (sel != self.target)
+            self.new = np.where(changed, 1.0, self.new)
+            self.target = sel
+        self.changed = self.target != before  # l'oggetto guardato è cambiato (anche: sparito)
 
     def leave(self, mask: np.ndarray, p: dict) -> None:
         """"Lascialo": l'oggetto attento viene ignorato per qualche secondo."""
@@ -490,7 +602,7 @@ class Attention:
     def reset(self, who) -> None:
         for x, v in ((self.target, -1), (self.inhib, -1), (self.inhib_t, 0.0), (self.novelty, 0.0),
                      (self.prev_vis, False), (self.new, 0.0), (self.prob, 0.0), (self.has_pos, False),
-                     (self.parts, 0.0)):
+                     (self.parts, 0.0), (self.changed, False)):
             x[who] = v
 
 
@@ -625,7 +737,7 @@ class _Learner(Agent):
         self.delta = reward + self.trust * (full - reward)
         return self.delta
 
-    def _act(self, logits, f_e, teach, eta, temp, decide, f_tag=None):
+    def _act(self, logits, f_e, teach, eta, temp, decide, f_tag=None, stick_on=None):
         """Attore: impara con la parte di δ che insegna, sulla traccia; poi chi
         è al momento di decidere (`decide`, (n,)) sceglie. `f_tag`: gli
         ingressi che possono marcare."""
@@ -635,7 +747,8 @@ class _Learner(Agent):
         self.e_e *= np.exp(-dt / p["trace_actor"])[:, None, None]
         if not decide.any():
             return self.program
-        z = (logits[:, :N_PROGRAMS] + p["stick"][:, None] * np.eye(N_PROGRAMS)[self.program]) / temp[:, None]
+        on = np.ones(self.n) if stick_on is None else stick_on
+        z = (logits[:, :N_PROGRAMS] + (p["stick"] * on)[:, None] * np.eye(N_PROGRAMS)[self.program]) / temp[:, None]
         z -= z.max(1, keepdims=True)
         pi = np.exp(z)
         pi /= pi.sum(1, keepdims=True)
@@ -703,12 +816,28 @@ class ActorCritic(_Learner):
         self._born(who)
 
 
-def c_threshold(fov, p: dict, xp=np):
-    """La soglia di C: se si guarda qualcosa, ciò che si vede (sopra la soglia:
-    solo i neuroni che lo ricevono); altrimenti ciò che si ricorda in D (con
-    peso `memory`, la soglia scende in proporzione)."""
-    seeing = fov[:, :IDENTITY].max(1) > 0
-    return xp.where(seeing, p["c_threshold"], p["c_threshold"] * p["memory"])
+def c_code(z, p: dict, xp=np):
+    """I neuroni di C accesi (vedi la docstring del modulo): l'inibizione lascia
+    accesi circa `c_sparse` dei neuroni, i più eccitati; i pari merito al
+    confine solo se non sono troppi. `z` (n, C): l'ingresso di ogni neurone."""
+    n, C = z.shape
+    k = xp.clip(xp.round(p["c_sparse"] * C), 1, C).astype(int)
+    thr = xp.take_along_axis(-xp.sort(-z, axis=1), (k - 1)[:, None], axis=1)
+    eps = 1e-6
+    hi = z > thr + eps
+    tie = xp.abs(z - thr) <= eps
+    n_hi, n_tie = hi.sum(1, keepdims=True), tie.sum(1, keepdims=True)
+    allow = (n_hi + n_tie <= 2 * k[:, None]) | (n_hi == 0)
+    return ((hi | (tie & allow)) & (z >= p["c_threshold"][:, None])).astype(z.dtype)
+
+
+def teach_of(delta, d_slow, p: dict, xp=np):
+    """La sorpresa che insegna: la parte di δ sopra `floor` volte la sorpresa
+    solita (`d_slow`), in unità di quella sorpresa solita (la scala si
+    adatta), con il tetto della dopamina."""
+    usual = xp.maximum(d_slow, 1e-4)
+    teach = xp.sign(delta) * xp.maximum(xp.abs(delta) - p["floor"] * usual, 0.0) / usual
+    return xp.clip(teach, -DELTA_MAX, DELTA_MAX)
 
 
 def teacher_mask(N: int, group: int, xp=np):
@@ -767,8 +896,18 @@ class Sections(_Learner):
         # O: piacere e dolore per caratteristica (più lo sfondo), incertezza,
         # traccia, l'episodio in corso; i due neuroni di uscita.
         F1 = N_FEATURES + 1
-        self.o_pl, self.o_pa = np.zeros((n, F1)), np.zeros((n, F1))
-        self.o_assoc = np.ones((n, F1))
+        NK = s.k
+        self.o_pl, self.o_pa = np.zeros((n, NK, F1)), np.zeros((n, NK, F1))  # un cassetto per contesto
+        self.o_assoc = np.full((n, NK, 2, F1), 0.5)  # sorpresa di adesso (l'incertezza) e quella solita
+        # K: il contesto attivo, la prova di ognuno, quali sono in uso, l'errore solito.
+        self.k_on = np.zeros(n, dtype=int)
+        self.k_ev = np.zeros((n, NK))
+        self.k_used = np.zeros((n, NK), dtype=bool)
+        self.k_used[:, 0] = True
+        self.k_usual = np.full(n, 0.5)
+        self.k_since = np.zeros(n)
+        self.k_stale = np.zeros((n, NK))
+        self.o_prior = np.zeros((n, 2, F1))  # i valori innati delle cose (dal genoma): da qui parte un contesto nuovo
         self.o_e = np.zeros((n, N_FEATURES))
         self.ep_on = np.zeros(n, dtype=bool)
         self.ep_pl, self.ep_pa = np.zeros(n), np.zeros(n)
@@ -798,7 +937,8 @@ class Sections(_Learner):
         self.c_in[who] = (self.start("c_in", who) > 0.5).astype(float)
         self.w_e[who], self.w_v[who] = self.start("e0", who), self.start("v0", who)
         o0 = self.start("o0", who)
-        self.o_pl[who], self.o_pa[who] = o0[:, 0], o0[:, 1]  # i valori innati delle cose (geni)
+        self.o_pl[who], self.o_pa[who] = o0[:, None, 0], o0[:, None, 1]  # i valori innati delle cose (geni)
+        self.o_prior[who] = o0
 
     # --- B ---------------------------------------------------------------------------
 
@@ -849,7 +989,7 @@ class Sections(_Learner):
             return np.zeros((self.n, s.c))
         h = np.concatenate([fov[:, :IDENTITY], p["memory"][:, None] * m[:, :IDENTITY], p["context"][:, None] * b], 1)
         z = np.einsum("ncj,nj->nc", self.c_in, h)
-        self.code = (z >= c_threshold(fov, p)[:, None]).astype(float)
+        self.code = c_code(z, p)
         return self.code
 
     def _chose(self, deviation):
@@ -869,8 +1009,10 @@ class Sections(_Learner):
         for k_, v in o_step(self.__dict__, reward, raw[:, ENERGY], master, on, p, self.les).items():
             setattr(self, k_, v)
         extra = np.where(self.teacher[:, None], np.where(objs["good"], 10.0, -10.0), 0.0) if teaching else None
-        o = None if "S" in self.les else (self.o_pl, self.o_pa, self.o_assoc, raw[:, ENERGY])
+        o = None if "S" in self.les else (*o_active(self.__dict__), raw[:, ENERGY])
         self.att.update(objs, decide, p, extra=extra, learned=1.0 - p["att_shift"] * k, o=o)
+        decide = decide | self.att.changed  # un oggetto diverso: si decide subito
+        self.clock[self.att.changed] = 0.0
         fov = self.att.fovea(objs)
         a = self.a(raw, fov, np.exp(-dt / p["tau_a"]))
         r = value_of(reward, raw[:, ENERGY], p) + self.innate_reward(raw)
@@ -881,7 +1023,7 @@ class Sections(_Learner):
         if "O" not in self.les:
             self.o_e = o_trace(self.o_e, fov, m, p, dt)
             ids = np.stack([fov[:, :IDENTITY], m[:, :IDENTITY]], 1)
-            self.o_out = o_read(self.o_pl, self.o_pa, self.o_assoc, ids, raw[:, ENERGY], p)[0]
+            self.o_out = o_read(*o_active(self.__dict__), ids, raw[:, ENERGY], p)[0]
         vo = self.o_out
         one = np.ones((self.n, 1))
         f_v = np.concatenate([fov, m, c, raw[:, ENERGY:ENERGY + 1], p["critic_b"][:, None] * b, vo, one], 1)
@@ -892,7 +1034,7 @@ class Sections(_Learner):
         delta = self._td(f_v, r, horizons, eta_v, use_critic="V" not in self.les)
         # Soglia adattiva: insegna solo la parte di δ sopra la sorpresa solita.
         self.d_slow += (dt / p["u_slow"]) * (np.abs(delta) - self.d_slow)
-        teach = np.sign(delta) * np.maximum(np.abs(delta) - p["floor"] * self.d_slow, 0.0)
+        teach = teach_of(delta, self.d_slow, p)
         self.teach = teach
         # U: le sorprese vere (sopra la soglia) di adesso rispetto al solito (con
         # la media di tutto δ i pochi dolori di un'inversione si perdevano nel
@@ -921,10 +1063,14 @@ class Sections(_Learner):
         habit = (self.w_e * f_e[:, None, :]).sum(-1)
         if "L" not in self.les:
             habit += np.einsum("npc,nc->np", self.u_l, c)
-        self.votes = {"E+L": habit, "C": np.einsum("npc,nc->np", self.u_c, c), "k": k}
-        logits = (1.0 - p["arb_slow"] * k)[:, None] * habit + (1.0 + p["arb_fast"] * k)[:, None] * self.votes["C"]
+        # L'inerzia legata all'oggetto: le sinapsi C -> E marcate dalle ultime scelte.
+        bound = p["stick"][:, None] * np.einsum("npc,nc->np", self.e_c, c) / np.maximum(c.sum(1), 1.0)[:, None]
+        self.votes = {"E+L": habit, "C": np.einsum("npc,nc->np", self.u_c, c), "k": k, "inerzia": bound}
+        logits = ((1.0 - p["arb_slow"] * k)[:, None] * habit + (1.0 + p["arb_fast"] * k)[:, None] * self.votes["C"]
+                  + bound)
         temp = p["temperature"] * (1.0 + (0.0 if arbitrate else p["surprise_explore"]) * self.unc)
-        program = self._act(logits, f_e, teach, p["eta_e"] * slow_boost, temp, decide, f_tag)
+        seeing = self.att.target >= 0
+        program = self._act(logits, f_e, teach, p["eta_e"] * slow_boost, temp, decide, f_tag, stick_on=~seeing)
         if teaching:
             # Il maestro decide da sé (come il guidato).
             has, _, near, _ = self.att.seen(objs)
@@ -951,9 +1097,12 @@ class Sections(_Learner):
         self.win_rate[who] = 1.0 / self.s.b
         for x in (self.state_b, self.prev_b, self.mem, self.w_gate, self.e_gate, self.u_c, self.e_c, self.u_l,
                   self.code, self.d_fast, self.unc, self.o_assoc, self.o_e, self.ep_pl, self.ep_pa, self.ep_e,
-                  self.o_err, self.o_out, self.obs_err):
+                  self.o_err, self.o_out, self.obs_err, self.k_ev, self.k_since, self.k_stale):
             x[who] = 0.0
-        self.o_assoc[who] = 1.0
+        self.o_assoc[who] = 0.5
+        self.k_on[who], self.k_usual[who] = 0, 0.5
+        self.k_used[who] = False
+        self.k_used[who, 0] = True
         self.ep_on[who] = False
         self.d_slow[who] = 1e-3
         self.t_slow[who] = 1e-4

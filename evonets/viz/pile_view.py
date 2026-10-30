@@ -79,6 +79,13 @@ SECTION_HELP = {
           "competizione (Rescorla-Wagner); anche da ciò che succede al maestro. Il valore di adesso è piacere × "
           "fame − dolore: da sazi il cibo vale meno senza imparare niente. In alto i due neuroni di uscita, letti "
           "da E e dal critico: quanto vale ciò che guardo, e ciò che ho appena preso."),
+    "K": ("K  contesti: in che situazione nascosta sono?",
+          "Ciò che non si vede ma si deduce dagli esiti (per esempio quale colore è buono adesso). Ogni neurone è un "
+          "contesto con il suo cassetto di O; dopo ogni morso ogni contesto confronta la sua previsione con l'esito, e "
+          "vince chi prevede meglio. Se nessuno spiega ciò che succede, se ne recluta uno nuovo (parte dai valori "
+          "innati). "
+          "Quando il mondo torna com'era, il vecchio cassetto è intatto. Pieno: attivo; grigio: usato; scuro: libero. "
+          "Prima versione: un neurone per contesto; poi un contesto sparso su più neuroni."),
     "V": ("V  critico: va meglio o peggio del previsto?",
           "Prevede quanto bene arriverà da B, D, C. δ = ciò che arriva meno ciò che prevedeva: positivo = meglio "
           "del previsto. È il maestro interno: le linee viola lo portano a chi impara."),
@@ -506,7 +513,7 @@ class PileScreen(Screen):
         self._legend(s, area)
 
     LABELS = {"A": "A sensi", "B": "B cosa c'è", "D": "D appena", "C": "C/L ricordi", "E": "E scelta",
-              "F": "F motore", "V": "V critico (δ)", "U": "U", "S": "S attenzione", "O": "O valore"}
+              "F": "F motore", "V": "V critico (δ)", "U": "U", "S": "S attenzione", "O": "O valore", "K": "K"}
 
     def _objects(self, world):
         """Gli oggetti in vista nel recinto guardato (1, n, M)."""
@@ -574,9 +581,10 @@ class PileScreen(Screen):
         pygame.draw.rect(s, (30, 34, 46), r)
         pygame.draw.rect(s, BORDER, r, 1)
         n_f = len(FEATURES)
-        pl = np.asarray(br.get("o_pl", np.zeros(n_f + 1)))
-        pa = np.asarray(br.get("o_pa", np.zeros(n_f + 1)))
-        un = np.asarray(br.get("o_assoc", np.zeros(n_f + 1)))
+        k_on = int(br.get("k_on", 0))
+        pl = np.asarray(br.get("o_pl", np.zeros((1, n_f + 1))))[k_on]
+        pa = np.asarray(br.get("o_pa", np.zeros((1, n_f + 1))))[k_on]
+        un = np.asarray(br.get("o_assoc", np.zeros((1, 2, n_f + 1))))[k_on, 0]
         out = np.asarray(br.get("o_out", np.zeros(2)))
         s.blit(app.small.render(f"guardo {out[0]:+.2f} preso {out[1]:+.2f}", True,
                                 POS if out[0] > 0 else (NEG if out[0] < 0 else TEXT)), (r.x + 5, r.y + 2))
@@ -589,6 +597,15 @@ class PileScreen(Screen):
                 pygame.draw.rect(s, BORDER, (xx, yy + 1, 30, 7), 1)
                 pygame.draw.rect(s, col if v >= 0 else lerp(col, (40, 40, 40), 0.6), (xx, yy + 1, w, 7))
             pygame.draw.rect(s, DELTA_C, (r.x + 142, yy + 1, int(24 * float(np.clip(un[k], 0.0, 1.0))), 7))
+        # K: i neuroni-contesto (pieno: attivo; vuoto: non ancora usato) e la loro prova.
+        self._label(s, "K", r.right - 78, y - 22)
+        used = np.asarray(br.get("k_used", [True]))
+        ev = np.asarray(br.get("k_ev", np.zeros(len(used))))
+        for j in range(len(used)):
+            c = (r.right - 50 + j * 13, y - 14)
+            col = (250, 230, 140) if j == k_on else ((120, 126, 150) if used[j] else (40, 44, 58))
+            pygame.draw.circle(s, col, c, 5 if j == k_on else 4)
+        self.targets.append((pygame.Rect(r.right - 82, y - 26, 82, 24), ("section", "K")))
         self.targets.append((r, ("section", "O")))
 
     def _links(self, s, links):
@@ -718,10 +735,11 @@ class PileScreen(Screen):
         self._label(s, "C", x - 10, top - 20, 130)
         code, u_c, u_l, c_in = br["code"], br["u_c"], br["u_l"], br["c_in"]
         n = len(code)
-        cols = 8
+        cols = 8 if n <= 64 else 16
+        step = 18 if n <= 64 else 11
         pos = []
         for j in range(n):
-            p = (x + 14 + (j % cols) * 18, top + 60 + (j // cols) * 18)
+            p = (x + 14 + (j % cols) * step, top + 60 + (j // cols) * step)
             pos.append(p)
         src = self._fovea_pos + D_pos + B_pos  # l'ordine degli ingressi di C: fovea, D, B (contesto)
         lit = np.flatnonzero(code > 0)
@@ -737,8 +755,9 @@ class PileScreen(Screen):
             pygame.draw.line(s, col, pos[j], E_pos[p_], width)
         for j, p in enumerate(pos):
             on = code[j] > 0
-            pygame.draw.circle(s, (250, 230, 140) if on else (44, 48, 62), p, 6 if on else 4)
-            self.targets.append((pygame.Rect(p[0] - 8, p[1] - 8, 16, 16), ("C", j)))
+            big = step > 11
+            pygame.draw.circle(s, (250, 230, 140) if on else (44, 48, 62), p, (6 if on else 4) if big else (4 if on else 2))
+            self.targets.append((pygame.Rect(p[0] - step // 2, p[1] - step // 2, step, step), ("C", j)))
         return pos
 
     def _weights_to_E(self, s, w_e, src, f, E_pos, limit=14):

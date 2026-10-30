@@ -426,7 +426,7 @@ def test_o_learns_whatever_feature_matters_and_attention_follows():
     impara la grandezza buona e ignora il colore; e quando nella mappa ci sono
     pile buone e cattive, lo sguardo va più spesso alle buone."""
     from evonets.evo.pile_test import make_run
-    from evonets.net.sections import MAP, N_FEATURES, o_read, priority_map
+    from evonets.net.sections import MAP, N_FEATURES, o_active, o_read, priority_map
 
     r = make_run("sezioni", "A", 20, 0, (), PileConfig(good_by="grandezza"), "numpy")
     b, K = r.brain, r.cfg.batteries
@@ -438,7 +438,7 @@ def test_o_learns_whatever_feature_matters_and_attention_follows():
         f = np.zeros((b.n, 1, N_FEATURES))
         i = np.arange(b.n)
         f[i, 0, colour], f[i, 0, 3 + (1 - big)] = 1.0, 1.0
-        return o_read(b.o_pl, b.o_pa, b.o_assoc, f, r.w.energy.ravel() / r.cfg.energy_max, b.p)[0][:, 0]
+        return o_read(*o_active(b.__dict__), f, r.w.energy.ravel() / r.cfg.energy_max, b.p)[0][:, 0]
 
     size = (V(0, good) + V(1, good) - V(0, 1 - good) - V(1, 1 - good)) / 2
     colour = (V(0, 1) + V(0, 0) - V(1, 1) - V(1, 0)) / 2
@@ -543,3 +543,80 @@ def test_the_ghost_teacher_is_unseen_and_eats_its_own_copy():
     assert w.bon[0, 0]  # per gli altri la pila c'è ancora
     assert w.ghost_hide[0, 0] > 0 and not w.objects()["vis"][0, 0, 0]  # per lui no
     assert w.objects()["vis"][0, 1, 0]
+
+
+def test_c_codes_are_combinations_not_unions():
+    """C come le cellule di Kenyon: oggetti con una caratteristica in comune
+    (stessa grandezza, colore diverso) hanno codici quasi disgiunti; lo stesso
+    oggetto dà sempre lo stesso codice; con niente da vedere né ricordare non
+    si accende niente."""
+    from evonets.net.sections import FOVEA, IDENTITY, c_code
+
+    b = Sections(1, 0.05, seed=0)
+    nf = len(FOVEA)
+
+    def code(feats):
+        fov = np.zeros((1, nf))
+        fov[0, list(feats)] = 1.0
+        h = np.concatenate([fov[:, :IDENTITY], b.p["memory"][:, None] * fov[:, :IDENTITY], np.zeros((1, b.nb))], 1)
+        return c_code(np.einsum("ncj,nj->nc", b.c_in, h), b.p)[0] > 0
+
+    red_big, yellow_big, red_small = code((0, 3)), code((1, 3)), code((0, 4))
+    assert 3 <= red_big.sum() <= 0.15 * b.s.c
+    assert (red_big & yellow_big).sum() <= 0.25 * red_big.sum()
+    assert (red_big & red_small).sum() <= 0.25 * red_big.sum()
+    assert (code((0, 3)) == red_big).all() and code(()).sum() == 0
+
+
+def test_a_new_object_makes_e_decide_at_once():
+    """Quando l'oggetto guardato cambia, E decide subito (non aspetta il suo
+    turno) e il suo ritmo riparte da lì."""
+    b = Sections(1, 0.05, seed=0)
+    raw = np.zeros((1, N_SENSES))
+    feat = np.zeros((1, 2, 6))
+    feat[0, 0, [0, 3]] = 1.0
+    feat[0, 1, [1, 4]] = 1.0
+    objs = {"vis": np.array([[True, False]]), "feat": feat, "near": np.array([[0.5, 0.5]]),
+            "ang": np.array([[0.0, 0.2]]), "good": np.zeros((1, 2), bool)}
+    b.step(raw, np.zeros((1, 3)), objs)
+    b.att.target[:] = 0  # guarda il primo (E potrebbe averlo appena lasciato)
+    b.step(raw, np.zeros((1, 3)), objs)
+    assert not b.att.changed[0] and 0.0 < b.clock[0] < b.p["decide_every"][0]  # a metà del turno
+    objs["vis"] = np.array([[False, True]])  # il primo sparisce: si guarda il secondo
+    b.step(raw, np.zeros((1, 3)), objs)
+    assert b.att.changed[0] and b.clock[0] == 0.0
+
+
+def test_k_keeps_the_old_drawer_and_returns_to_it():
+    """K: quando gli esiti smettono di tornare con il cassetto attivo e nessun
+    altro li spiega, si recluta un contesto nuovo (dai valori innati) e il
+    vecchio cassetto resta intatto; quando il mondo torna com'era, si torna al
+    vecchio cassetto senza reimparare."""
+    from evonets.net.sections import N_FEATURES, o_step
+
+    b = Sections(1, 0.05, seed=0)
+    red, yellow = np.zeros(N_FEATURES), np.zeros(N_FEATURES)
+    red[0], yellow[1] = 1.0, 1.0
+
+    def episode(seen, pleasure, pain):
+        b.o_e[0] = seen
+        for felt in (np.array([[pleasure, pain, 0.0]]), np.zeros((1, 3))):
+            out = o_step(b.__dict__, felt, np.array([0.5]), np.array([0]), np.array([False]), b.p, set())
+            for k, v in out.items():
+                setattr(b, k, v)
+
+    for _ in range(30):  # il rosso è buono, il giallo fa male
+        episode(red, 1.0, 0.0)
+        episode(yellow, 0.0, 0.32)
+    first = b.k_on[0]
+    learned = b.o_pl[0, first, 0]
+    assert learned > 0.5
+    for _ in range(30):  # si invertono
+        episode(red, 0.0, 0.32)
+        episode(yellow, 1.0, 0.0)
+    assert b.k_on[0] != first and b.k_used[0].sum() >= 2
+    assert abs(b.o_pl[0, first, 0] - learned) < 0.3  # il vecchio cassetto è quasi intatto
+    for _ in range(4):  # tornano come prima: bastano pochi episodi
+        episode(red, 1.0, 0.0)
+        episode(yellow, 0.0, 0.32)
+    assert b.k_on[0] == first

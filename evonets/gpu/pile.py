@@ -217,7 +217,7 @@ def init_brain(agent: str, N: int, dt: float, seed: int, cfg: P.PileConfig, geno
     out = {"genome": b.genome, "clock": b.clock, "program": b.program.astype(np.int32), "pi": b.pi,
            "bite": b.bite, "p_bite": b.p_bite,
            "att_target": at.target.astype(np.int32), "att_inhib": at.inhib.astype(np.int32),
-           "att_prob": at.prob, "att_has": at.has_pos, "att_parts": at.parts,
+           "att_prob": at.prob, "att_has": at.has_pos, "att_parts": at.parts, "att_changed": at.changed,
            "att_inhib_t": at.inhib_t, "att_prev_vis": at.prev_vis, "att_novelty": at.novelty, "att_new": at.new}
     if agent == "guidato":
         return out, b.blocks
@@ -230,7 +230,9 @@ def init_brain(agent: str, N: int, dt: float, seed: int, cfg: P.PileConfig, geno
                    w_gate=b.w_gate, e_gate=b.e_gate, c_in=b.c_in, u_c=b.u_c, e_c=b.e_c, u_l=b.u_l, code=b.code,
                    d_fast=b.d_fast, d_slow=b.d_slow, t_slow=b.t_slow, unc=b.unc, counts=np.zeros((N, b.nb, 4)),
                    teacher=b.teacher, obs_err=b.obs_err, o_pl=b.o_pl, o_pa=b.o_pa, o_assoc=b.o_assoc, o_e=b.o_e,
-                   ep_on=b.ep_on, ep_pl=b.ep_pl, ep_pa=b.ep_pa, ep_e=b.ep_e, o_err=b.o_err, o_out=b.o_out)
+                   ep_on=b.ep_on, ep_pl=b.ep_pl, ep_pa=b.ep_pa, ep_e=b.ep_e, o_err=b.o_err, o_out=b.o_out,
+                   k_on=b.k_on.astype(np.int32), k_ev=b.k_ev, k_used=b.k_used, k_usual=b.k_usual, k_since=b.k_since,
+                   k_stale=b.k_stale, o_prior=b.o_prior)
     return out, b.blocks
 
 
@@ -243,6 +245,7 @@ def _attend(br, objs, decide, p, dt, key, extra=None, learned=None, o=None):
     vis = objs["vis"]
     n, m = vis.shape
     idx = jnp.arange(n)
+    before = br["att_target"]
     br["att_novelty"] = br["att_novelty"] * jnp.exp(-dt / p["novelty_tau"])[:, None] + (vis & ~br["att_prev_vis"])
     br["att_prev_vis"] = vis
     br["att_inhib_t"] = jnp.maximum(br["att_inhib_t"] - dt, 0.0)
@@ -277,6 +280,7 @@ def _attend(br, objs, decide, p, dt, key, extra=None, learned=None, o=None):
     changed = choose & (sel != target)
     br["att_new"] = jnp.where(changed, 1.0, br["att_new"])
     br["att_target"] = sel
+    br["att_changed"] = sel != before
 
 
 def _seen(br, objs):
@@ -321,14 +325,15 @@ def _td(br, p, f_v, reward, horizons, eta, dt, use_critic=True):
     return br["delta"]
 
 
-def _act(br, logits, f_e, teach, eta, temp, p, dt, decide, key, f_tag=None, code=None):
+def _act(br, logits, f_e, teach, eta, temp, p, dt, decide, key, f_tag=None, code=None, stick_on=None):
     """`decide` (N,): chi decide in questo passo."""
     np_ = S.N_PROGRAMS
     k_prog, k_bite = jax.random.split(key)
     norm = 1.0 + (f_e**2).sum(1)
     br["w_e"] = jnp.clip(br["w_e"] + (eta * teach / norm)[:, None, None] * br["e_e"], -S.WEIGHT_MAX, S.WEIGHT_MAX)
     br["e_e"] = br["e_e"] * jnp.exp(-dt / p["trace_actor"])[:, None, None]
-    z = (logits[:, :np_] + p["stick"][:, None] * jax.nn.one_hot(br["program"], np_)) / temp[:, None]
+    on = jnp.ones_like(temp) if stick_on is None else stick_on
+    z = (logits[:, :np_] + (p["stick"] * on)[:, None] * jax.nn.one_hot(br["program"], np_)) / temp[:, None]
     pi = jax.nn.softmax(z, axis=1)
     choice = jax.random.categorical(k_prog, z, axis=1).astype(jnp.int32)
     chosen = jax.nn.one_hot(choice, np_)
@@ -355,10 +360,13 @@ def _sections(br, p, raw, objs, reward, dt, sz: S.Sizes, les: frozenset, decide,
     n = raw.shape[0]
     master = jnp.arange(n) // group * group
     on = ~teacher & teacher[master]
-    br.update(S.o_step(br, reward, raw[:, P.ENERGY], master, on, p, les, xp=jnp))  # O: gli episodi finiti insegnano
+    br.update(S.o_step(br, reward, raw[:, P.ENERGY], master, on, p, les, xp=jnp))  # O e K: gli episodi finiti insegnano
+    br["k_on"] = br["k_on"].astype(jnp.int32)
     extra = jnp.where(teacher[:, None], jnp.where(objs["good"], 10.0, -10.0), 0.0)  # il maestro sa quali sono buone
-    o = None if "S" in les else (br["o_pl"], br["o_pa"], br["o_assoc"], raw[:, P.ENERGY])
+    o = None if "S" in les else (*S.o_active(br, xp=jnp), raw[:, P.ENERGY])
     _attend(br, objs, decide, p, dt, k_att, extra=extra, learned=1.0 - p["att_shift"] * k, o=o)
+    decide = decide | br["att_changed"]  # un oggetto diverso: si decide subito
+    br["clock"] = jnp.where(br["att_changed"], 0.0, br["clock"])
     a = _interface(br, raw, objs, p, dt)
     fov = a[:, -len(S.FOVEA):]
     r = S.value_of(reward, raw[:, P.ENERGY], p, xp=jnp) + (p["innate"] * raw).sum(1) * dt
@@ -401,12 +409,12 @@ def _sections(br, p, raw, objs, reward, dt, sz: S.Sizes, les: frozenset, decide,
         h = jnp.concatenate([fov[:, :S.IDENTITY], p["memory"][:, None] * m[:, :S.IDENTITY],
                              p["context"][:, None] * b], 1)
         z = jnp.einsum("ncj,nj->nc", br["c_in"], h)
-        c = (z >= S.c_threshold(fov, p, xp=jnp)[:, None]).astype(F)
+        c = S.c_code(z, p, xp=jnp)
     br["code"] = c
     if "O" not in les:
         br["o_e"] = S.o_trace(br["o_e"], fov, m, p, dt, xp=jnp)
         ids = jnp.stack([fov[:, :S.IDENTITY], m[:, :S.IDENTITY]], 1)
-        br["o_out"] = S.o_read(br["o_pl"], br["o_pa"], br["o_assoc"], ids, raw[:, P.ENERGY], p, xp=jnp)[0]
+        br["o_out"] = S.o_read(*S.o_active(br, xp=jnp), ids, raw[:, P.ENERGY], p, xp=jnp)[0]
     vo = br["o_out"]
     one = jnp.ones((n, 1), F)
     f_v = jnp.concatenate([fov, m, c, raw[:, P.ENERGY:P.ENERGY + 1], p["critic_b"][:, None] * b, vo, one], 1)
@@ -416,7 +424,7 @@ def _sections(br, p, raw, objs, reward, dt, sz: S.Sizes, les: frozenset, decide,
     horizons = jnp.stack([p["h_short"], p["h_mid"], p["h_long"]], 1)
     delta = _td(br, p, f_v, r, horizons, eta_v, dt, use_critic="V" not in les)
     br["d_slow"] = br["d_slow"] + (dt / p["u_slow"]) * (jnp.abs(delta) - br["d_slow"])
-    teach = jnp.sign(delta) * jnp.maximum(jnp.abs(delta) - p["floor"] * br["d_slow"], 0.0)
+    teach = S.teach_of(delta, br["d_slow"], p, xp=jnp)
     br["teach"] = teach
     br["d_fast"] = br["d_fast"] + (dt / p["u_fast"]) * (jnp.abs(teach) - br["d_fast"])
     br["t_slow"] = br["t_slow"] + (dt / p["u_slow"]) * (jnp.abs(teach) - br["t_slow"])
@@ -439,9 +447,12 @@ def _sections(br, p, raw, objs, reward, dt, sz: S.Sizes, les: frozenset, decide,
     if "L" not in les:
         habit = habit + jnp.einsum("npc,nc->np", br["u_l"], c)
     fast = jnp.einsum("npc,nc->np", br["u_c"], c)
-    logits = (1.0 - p["arb_slow"] * k)[:, None] * habit + (1.0 + p["arb_fast"] * k)[:, None] * fast
+    bound = p["stick"][:, None] * jnp.einsum("npc,nc->np", br["e_c"], c) / jnp.maximum(c.sum(1), 1.0)[:, None]
+    logits = (1.0 - p["arb_slow"] * k)[:, None] * habit + (1.0 + p["arb_fast"] * k)[:, None] * fast + bound
     temp = p["temperature"] * (1.0 + (0.0 if arbitrate else p["surprise_explore"]) * br["unc"])
-    prog = _act(br, logits, f_e, teach, p["eta_e"] * slow_boost, temp, p, dt, decide, k_act, f_tag=f_tag, code=c)
+    seeing = br["att_target"] >= 0
+    prog = _act(br, logits, f_e, teach, p["eta_e"] * slow_boost, temp, p, dt, decide, k_act, f_tag=f_tag, code=c,
+                stick_on=(~seeing).astype(F))
     # Il maestro decide da sé.
     has, _, near, _ = _seen(br, objs)
     ok = has & objs["good"][jnp.arange(n), jnp.maximum(br["att_target"], 0)]
@@ -490,7 +501,8 @@ def _reborn(br, dead, child, agent, sz, key, blocks):
     def zero(x):
         return jnp.where(dead.reshape((-1,) + (1,) * (x.ndim - 1)), jnp.zeros_like(x), x)
 
-    for k in ("att_inhib_t", "att_prev_vis", "att_novelty", "att_new", "att_prob", "att_has", "att_parts"):
+    for k in ("att_inhib_t", "att_prev_vis", "att_novelty", "att_new", "att_prob", "att_has", "att_parts",
+              "att_changed"):
         br[k] = zero(br[k])
     br["att_target"] = jnp.where(dead, -1, br["att_target"])
     br["att_inhib"] = jnp.where(dead, -1, br["att_inhib"])
@@ -506,7 +518,13 @@ def _reborn(br, dead, child, agent, sz, key, blocks):
         for k in ("pred", "state_b", "prev_b", "mem", "w_gate", "e_gate", "u_c", "e_c", "u_l", "code", "d_fast",
                   "unc", "counts", "o_e", "ep_pl", "ep_pa", "ep_e", "o_err", "o_out", "obs_err"):
             br[k] = zero(br[k])
-        br["o_assoc"] = jnp.where(dead[:, None], 1.0, br["o_assoc"])
+        br["o_assoc"] = jnp.where(dead[:, None, None, None], 0.5, br["o_assoc"])
+        for k_ in ("k_ev", "k_since", "k_stale"):
+            br[k_] = zero(br[k_])
+        br["k_on"] = jnp.where(dead, 0, br["k_on"]).astype(jnp.int32)
+        br["k_usual"] = jnp.where(dead, 0.5, br["k_usual"])
+        first = jnp.arange(br["k_used"].shape[1])[None] == 0
+        br["k_used"] = jnp.where(dead[:, None], first, br["k_used"])
         br["ep_on"] = br["ep_on"] & ~dead
         br["win_rate"] = jnp.where(dead[:, None], 1.0 / sz.b, br["win_rate"])
         br["d_slow"] = jnp.where(dead, 1e-3, br["d_slow"])
@@ -519,8 +537,9 @@ def _reborn(br, dead, child, agent, sz, key, blocks):
             br[key_] = jnp.where(dead.reshape((-1,) + (1,) * (br[key_].ndim - 1)), start(name), br[key_])
     if "o0" in blocks:  # i valori innati delle cose
         o0 = start("o0")
-        br["o_pl"] = jnp.where(dead[:, None], o0[:, 0], br["o_pl"])
-        br["o_pa"] = jnp.where(dead[:, None], o0[:, 1], br["o_pa"])
+        br["o_pl"] = jnp.where(dead[:, None, None], o0[:, None, 0], br["o_pl"])
+        br["o_pa"] = jnp.where(dead[:, None, None], o0[:, None, 1], br["o_pa"])
+        br["o_prior"] = jnp.where(dead[:, None, None], o0, br["o_prior"])
     if "c_in" in blocks:
         br["c_in"] = jnp.where(dead[:, None, None], (start("c_in") > 0.5).astype(F), br["c_in"])
     return br

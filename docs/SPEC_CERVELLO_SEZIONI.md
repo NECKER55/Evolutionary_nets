@@ -526,3 +526,13 @@ Impara dagli esiti (Rescorla-Wagner alla fine di ogni episodio di piacere o
 dolore), anche da quelli del maestro; la fame si applica quando si legge il
 valore. La leggono il critico, E e l'attenzione, che non impara più niente
 da sola. Dettagli e misure: SPEC_ARENA_PILE.md.
+
+## K, i contesti (2026-10-29)
+
+Lo stato nascosto del mondo, dedotto dagli esiti. Ogni contesto ha il suo
+cassetto di O; vince quello che ha previsto meglio gli ultimi esiti; se
+nessuno spiega l'esito appena avvenuto se ne recluta uno nuovo, che parte dai
+valori innati. Prima si decide il contesto, poi impara solo il suo cassetto.
+Prima versione: un neurone per contesto. Il passo successivo è un contesto
+sparso (un pattern su più neuroni), in cui contesti simili condividano ciò
+che sanno. Misure: TRAGUARDI_PILE.md.

@@ -33,7 +33,8 @@ BRAIN_ATTR = {"att_target": ("att", "target"), "att_inhib": ("att", "inhib"), "a
 BRAIN_KEYS = ("genome", "program", "pi", "bite", "p_bite", "w_e", "e_e", "w_v", "e_v", "v_prev", "value", "trust", "fresh", "delta",
               "teach", "proto", "pred", "win_rate", "state_b", "prev_b", "mem", "w_gate", "e_gate", "c_in", "u_c",
               "e_c", "u_l", "code", "d_fast", "d_slow", "t_slow", "unc", "teacher", "obs_err", "o_pl", "o_pa",
-              "o_assoc", "o_e", "ep_on", "ep_pl", "ep_pa", "ep_e", "o_err", "o_out")
+              "o_assoc", "o_e", "ep_on", "ep_pl", "ep_pa", "ep_e", "o_err", "o_out", "k_on", "k_ev", "k_used",
+              "k_usual", "k_since", "k_stale", "o_prior")
 OBSERVING = ("teacher", "obs_err")
 BY = ("good_by", "bad_by", "deaths_by")
 

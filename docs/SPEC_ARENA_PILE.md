@@ -217,6 +217,26 @@ Comportamento (15 minuti; nelle misure non entra il primo di ogni recinto):
 - Con il critico che insegna (0,5) va ancora peggio che senza (53,8%): con
   il maestro il critico non è più forzato a 0,5.
 
+### Dove si perde (diagnosi) e due correzioni a O
+
+- E non usa O: i pesi dai neuroni di O verso avvicinati e mordi restano a
+  0,00-0,01 (0,08 anche con E 50 volte più veloce). Le differenze di
+  scelta vengono da C. Il piacere arriva spalmato nei 2 s di ricarica, quando
+  lo sguardo è già altrove: il legame "valeva ciò che guardavo" si diluisce.
+- Tetto se E seguisse O (regola a mano, assaggiando ciò che non si conosce):
+  66,8% (solo il morso) o 61,1% con 4,07 pile al minuto e metà delle morti.
+- O sapeva che la buona è buona, non che la cattiva è cattiva (−0,03).
+  Correzione: `pain_weight` (2): nel valore il dolore pesa il doppio del
+  piacere (la perdita pesa di più). Ora buona − cattiva +0,71/+0,83 invece
+  di +0,45; pile buone 60,4% invece di 58,1%.
+- Volatilità (Behrens e colleghi): O ha due medie della sorpresa per
+  caratteristica (adesso, `assoc_rate`; solita, `assoc_slow`) e impara fino
+  a `VOLATILITY_MAX` volte più in fretta quando la prima supera la seconda.
+  Effetto piccolo (velocità ×1,1 dopo un'inversione): gli errori di O sono
+  già intorno a 0,5 nel mondo stabile, e dopo un'inversione ogni essere ha
+  pochi episodi. Riadattamento 0,40 0,46 0,53 0,57 contro 0,40 0,45 0,50
+  0,54.
+
 ## Il maestro: imparare il valore osservando (2026-10-28)
 
 **Che cos'è.** Opzione "Maestro" nel menu (o `--maestro`): il primo essere di
