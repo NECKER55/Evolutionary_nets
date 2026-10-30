@@ -486,6 +486,11 @@ pezzo di corteccia:
 - Ogni neurone ha, tra i suoi geni, una **regola di plasticità** per le
   sinapsi che riceve: Δw = η · M · (A·pre·post + B·pre + C·post + D). η, A, B,
   C e D sono geni: l'evoluzione sceglie *come* imparare, non *cosa*.
+- La regola è **innata**: alla partenza A vale in media 1 (B, C, D in media 0),
+  cioè rafforza ciò che era attivo prima del piacere e indebolisce ciò che lo
+  era prima del dolore, come dopamina × attività recente in moltissime specie.
+  Si eredita e muta come gli altri geni; ciò che il singolo impara invece no.
+  Da zero l'evoluzione non la trovava (docs/SPEC_CAPACITA.md).
 - Un gene può rendere un neurone interno **modulatore** (come i neuroni a
   dopamina): non trasmette, ma rilascia M, che si diffonde nel cervello e
   arriva ai neuroni vicini calando con la distanza. M dice alle sinapsi quando
@@ -1040,3 +1045,9 @@ interni già collegati, e un neurone che compare in un figlio nasce collegato.
 **Piacere secondo il bisogno** (arena continua, motore JAX). Mangiare e bere
 danno un segnale positivo al sistema di valore tanto più forte quanto più si
 ha fame o sete: da affamati un cibo vale come prima, da sazi quasi niente.
+
+**Traccia di eleggibilità** (tutte le arene, dal 2026-10-25). La regola
+modulata non cambia subito la sinapsi: il cambiamento proposto resta in una
+traccia per circa 2 s (un gene la allunga o la accorcia), e il piacere o il
+dolore che arriva intanto lo applica con il suo segno. Così si impara anche
+quando la conseguenza arriva dopo l'azione.

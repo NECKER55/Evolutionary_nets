@@ -100,6 +100,54 @@ Tre schede, come nelle altre corse (`V` o clic sui bottoni in alto a destra):
   chi manda. `Invio`: si torna al mondo seguendo l'essere scelto. Le azioni
   (mordere, luce, odore, nutrire) compaiono tra i motori.
 
+## L'arena delle pile
+
+Nel menu, Mondo = "arena delle pile" (docs/SPEC_ARENA_PILE.md) mostra righe
+proprie: il cervello (a sezioni, attore-critico di riferimento, guidato a
+mano), la fase (A popolazione fissa, B con accoppiamento), una lesione (una
+sezione tolta), quanti recinti e quanti esseri per recinto, il seme, i
+minuti. Gira sulla GPU se c'è.
+
+La schermata (`evonets/viz/pile_view.py`):
+
+- **a sinistra il recinto**: pile rosse e gialle (il cerchio bianco segna il
+  colore buono adesso), la zona attiva, gli esseri (azzurro pieno quello
+  seguito, con i tre settori della vista e i tre raggi per i muri; il
+  puntino blu è la luce sul muso); sotto, l'energia dell'essere seguito, i
+  tempi della prossima inversione e del prossimo cambio di zona, le pile
+  prese nell'ultimo minuto in tutti i recinti;
+- **a destra il suo cervello** (corpo nuovo: in A gli occhi sono una griglia
+  colore × sinistra/centro/destra, con i quattro muri colorati, poi distanza,
+  urti, corpo e fovea; in E la casella "mordi"; in F 4 neuroni motori, con le
+  linee dai programmi che pesano quanto il loro contributo adesso, e la
+  bocca; nel recinto i muri colorati e un puntino rosso quando l'essere
+  morde), da sinistra a destra come scorre il segnale:
+  A (i sensi: barra = valore, tacca chiara = quanto è appena salito), B (16
+  neuroni in gara; le linee verso A: a cosa risponde ciascuno), D (la copia
+  che resta per qualche secondo), C (64 neuroni, accesi i 4 della situazione
+  di adesso; le linee grigie sono i loro ingressi fissi, quelle verdi e rosse
+  i voti verso E: spesse C, sottili L), E (i 5 programmi, barra =
+  probabilità, cornice gialla = quello in corso), F (il movimento fisso di
+  ciascuno), V (δ: verde meglio del previsto, rosso peggio; linee viola
+  verso chi impara), U (l'incertezza) e S (l'attenzione: i pesi imparati
+  per colore, verde = attira lo sguardo, rosso = lo respinge). In A, sotto i
+  sensi, la fovea: colore, vicinanza e lato dell'oggetto attento; nel
+  recinto un anello azzurro e una linea indicano l'oggetto su cui l'essere
+  seguito è concentrato. Verde = rafforza, rosso =
+  indebolisce, grigio = fisso.
+- **Il mouse su qualsiasi cosa** apre una spiegazione: cosa fa la sezione, a
+  cosa risponde quel neurone (per B anche quale colore domina la vista quando
+  vince), cosa vota (C), la probabilità (E).
+
+Comandi: clic su un essere o Tab per seguirlo, PagSu/PagGiù (o [ ]) per
+cambiare recinto, +/- velocità (x1 = tempo reale), T turbo, Spazio pausa,
+Ctrl+S salva (in "Salva in"), P prova le reti una a una (ognuna da sola nel
+suo recinto, con ciò che ha imparato: PagSu/PagGiù passa da una rete
+all'altra, sotto i suoi conti e la posizione in classifica; Esc torna alla
+corsa), H aiuto, Esc torna al menu (salvando, se ci sono novità). Nel menu
+"Riprendi da" riapre un salvataggio delle pile, e "Esplora" ne prova le reti
+una a una.
+
 ## La corsa: la pagina principale
 
 In alto la generazione, la rete, la popolazione e lo stato della generazione

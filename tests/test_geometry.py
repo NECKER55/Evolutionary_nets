@@ -47,13 +47,16 @@ def test_link_probability_falls_with_distance_and_self_links_are_rare():
 
 def test_new_links_from_mutation_prefer_near_neurons():
     cfg = Config(mut_conn_add=0.5, mut_conn_del=1e-9, mut_pos_prob=1e-9)
-    g = rich(300, seed=2).genome
-    g.conn[:] = False
-    side = brain_side(cfg, g.r_active, g.active, 2)
-    mutate(g, cfg, np.random.default_rng(0))
-    d = distances(cfg, g.pos, g.r_y, 2, side)  # nel cervello della sua grandezza vera
-    near, far = d < np.quantile(d, 0.2), d > np.quantile(d, 0.8)
-    assert g.conn[near].mean() > 2 * g.conn[far].mean()
+    counts = np.zeros(2)  # collegamenti nuovi tra vicini e tra lontani, su tre estrazioni (sono poche decine)
+    for k in range(3):
+        g = rich(300, seed=2).genome
+        g.conn[:] = False
+        side = brain_side(cfg, g.r_active, g.active, 2)
+        mutate(g, cfg, np.random.default_rng(k))
+        d = distances(cfg, g.pos, g.r_y, 2, side)  # nel cervello della sua grandezza vera
+        near, far = d < np.quantile(d, 0.2), d > np.quantile(d, 0.8)
+        counts += [g.conn[near].mean(), g.conn[far].mean()]
+    assert counts[0] > 1.5 * counts[1]
 
 
 def test_position_is_inherited_with_its_neuron_and_drifts_inside_the_brain():

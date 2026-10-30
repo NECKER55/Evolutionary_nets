@@ -18,7 +18,7 @@ import numpy as np
 
 from ..config import Config
 from ..net import womb
-from ..net.brain import META, Genome
+from ..net.brain import META, Genome, fit_traits
 from ..net.controllers import NeuralController
 from ..net.development import develop, population_stats
 from ..net.geometry import brain_side, connect_prob, distances
@@ -680,7 +680,7 @@ class Ecology:
 
     # --- Salvataggi -----------------------------------------------------------
 
-    LIVE = ("w_eff", "early", "bias_now", "avg", "clock", "state", "charge", "spikes")
+    LIVE = ("w_eff", "early", "elig", "critic", "bias_now", "avg", "clock", "state", "charge", "spikes")
 
     def save(self, path) -> None:
         """Salva tutto ciò che serve per riprendere: genomi di tutti i posti,
@@ -769,7 +769,7 @@ class Ecology:
             for k, v in keep.items():
                 setattr(cfg, k, v)
             w, b, task = e.world, e.ctrl.brains, e.world.task
-            b.set_genome(Genome(*(d[f] for f in Genome.FIELDS)))
+            b.set_genome(fit_traits(Genome(*(d[f] for f in Genome.FIELDS)), b.N_TRAITS))
             for k in cls.LIVE:
                 if "live_" + k in d and hasattr(b, k) and getattr(b, k).shape == d["live_" + k].shape:
                     setattr(b, k, d["live_" + k].copy())
@@ -815,12 +815,12 @@ class Ecology:
             e.history, e.log = json.loads(str(d["history"])), json.loads(str(d["log"]))
             e.exams = json.loads(str(d["exams"]))
             if "ar_weights" in d:
-                ar = Genome(*(d["ar_" + f] for f in Genome.FIELDS))
+                ar = fit_traits(Genome(*(d["ar_" + f] for f in Genome.FIELDS)), b.N_TRAITS)
                 body = d["ar_body"] if "ar_body" in d else np.zeros((len(d["ar_eaten"]), 3))
                 e.archive = [(int(x), ar.take([k]), body[k].copy()) for k, x in enumerate(d["ar_eaten"])]
             e._was_alive = w.alive.copy()
             if "ch_weights" in d:
-                ch = Genome(*(d["ch_" + f] for f in Genome.FIELDS))
+                ch = fit_traits(Genome(*(d["ch_" + f] for f in Genome.FIELDS)), b.N_TRAITS)
                 e.champions = [(int(gen), int(a), ch.take([k]), int(i)) for k, (gen, a, i)
                                in enumerate(zip(d["ch_generation"], d["ch_age"], d["ch_id"]))]
             key = d["gpu_key"].copy() if "gpu_key" in d else None

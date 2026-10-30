@@ -32,7 +32,7 @@ le sinapsi che il neurone *riceve*):
 | Gene | Significato |
 |---|---|
 | η | velocità di apprendimento: η = η0 · e^gene (η0 = 0,001, `plasticity_initial_rate`) |
-| A, B, C, D | la regola: Δw ∝ A·pre·post + B·pre + C·post + D |
+| A, B, C, D | la regola: Δw ∝ A·pre·post + B·pre + C·post + D (alla partenza A in media 1, `plasticity_innate_rule`; B, C, D in media 0) |
 | mod | se > 0, un neurone interno è **modulatore** |
 
 **Modulatori.** Non trasmettono: i loro collegamenti in uscita non esistono e
@@ -97,3 +97,16 @@ loro neurone, come gli altri geni propri.
 
 Formato 5. I salvataggi precedenti si aprono senza plasticità (η quasi nullo)
 e senza modulatori; il registro lo annota.
+
+## Traccia di eleggibilità (2026-10-25)
+
+Il test di capacità (docs/SPEC_CAPACITA.md) ha mostrato che la regola
+modulata usava solo l'attività dell'istante: se il piacere o il dolore
+arrivava anche un secondo dopo l'azione, il suo segno non contava più. Ora la
+regola propone un cambiamento, che resta in una traccia della sinapsi (media
+mobile con tempo τ_e = `eligibility_initial_tau` · e^gene, partenza 2 s, gene
+"elig" in coda ai geni del neurone); la sinapsi cambia di η · M · traccia, con
+il segno di M, anche se M arriva dopo (Izhikevich 2007; la dopamina nello
+striato). Con τ_e quasi nullo è la regola di prima. La traccia provvisoria
+dell'hebbiano e il suo consolidamento con |M| restano com'erano. Vale in
+tutte le arene.

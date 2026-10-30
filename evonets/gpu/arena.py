@@ -409,7 +409,7 @@ def make_run(net_type: str, n_hidden: int, substeps: int, geo: tuple):
 # --- Dal processore alla GPU e ritorno ---------------------------------------------
 
 BRAIN_PARAMS = ("links", "target_on", "eta", "rule", "kmod", "learns", "upkeep", "hebb", "sign", "intrinsic",
-                "boost", "closure", "value", "early_keep", "homeo", "target_act")
+                "boost", "closure", "value", "early_keep", "elig_keep", "homeo", "target_act")
 SENSE_PARAMS = ("angles", "body", "active", "centre", "half", "mu_c", "sg_c", "g_c", "c_press", "mu_m", "sg_m", "g_m",
                 "mu_t", "sg_t", "g_t", "g_mag", "c_body", "keep", "sub", "div", "c_food", "c_fruit", "c_being",
                 "c_pool", "c_water", "c_quench")
@@ -429,7 +429,7 @@ def pack_params(brains) -> dict:
     return {k: np.asarray(v, dtype=np.float32) for k, v in out.items()}
 
 
-BRAIN_STATE = ("state", "w_eff", "avg", "early", "bias_now", "clock", "charge", "spikes")
+BRAIN_STATE = ("state", "w_eff", "avg", "early", "elig", "critic", "bias_now", "clock", "charge", "spikes")
 STATE_NAME = {"w_eff": "w"}  # come si chiamano sulla GPU
 
 

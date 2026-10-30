@@ -32,8 +32,28 @@ class Screen:
         """La finestra si sta chiudendo."""
 
 
+def pile_meta(path) -> dict | None:
+    """La descrizione di un salvataggio dell'arena delle pile (None se è d'altro tipo)."""
+    try:
+        with np.load(path) as d:
+            if "kind" in d and str(d["kind"]) == "pile":
+                return json.loads(str(d["meta"]))
+    except Exception:
+        pass
+    return None
+
+
+def pile_facts(meta: dict) -> str:
+    les = f", senza {','.join(meta['lesions'])}" if meta.get("lesions") else ""
+    return (f"arena delle pile · {meta['agent']}{les} · fase {meta['phase']} · {meta['enclosures']} recinti × "
+            f"{meta['beings']} · minuto {meta['minutes']:.1f}")
+
+
 def save_info(path) -> str:
     """Una riga che descrive un salvataggio, senza caricarlo per intero."""
+    meta = pile_meta(path)
+    if meta is not None:
+        return pile_facts(meta)
     try:
         with np.load(path) as d:
             if "kind" in d and str(d["kind"]) == "arena":
@@ -103,6 +123,8 @@ def summarize(path) -> SaveSummary:
     path = Path(path)
     when = datetime.fromtimestamp(path.stat().st_mtime)
     key = (str(path), when.timestamp())
+    if key not in _SUMMARIES and pile_meta(path) is not None:
+        _SUMMARIES[key] = SaveSummary(str(path), when, path.name, pile_facts(pile_meta(path)))
     if key not in _SUMMARIES:
         try:
             with np.load(path) as d:
@@ -312,10 +334,11 @@ class Launcher(Screen):
         self.genome.select(defaults.get("genome") or "diretto")
         self.task = Choice("Mondo", [("bersaglio", "bersaglio e veleno (il mondo di prima)"),
                                      ("cibo", "nutrirsi: cibo, prede e predatori"),
-                                     ("arena", "arena continua: tutti insieme, nascite e morti")],
+                                     ("arena", "arena continua: tutti insieme, nascite e morti"),
+                                     ("pile", "arena delle pile: cervello a sezioni, sensi fissi")],
                            help="Il compito. Nel mondo del cibo si riproduce chi mangia almeno N cibi; il veleno "
                                 "è spento. Nell'arena continua si vive insieme, senza generazioni "
-                                "(docs/SPEC_ARENA.md). Ignorato se si riprende un salvataggio.")
+                                "(docs/SPEC_ARENA.md). Pile: docs/SPEC_ARENA_PILE.md.")
         self.task.select(defaults.get("task") or "bersaglio")
         self.ladder = Choice("Scala", [("scala", "adattiva: sale se va bene, scende se va male"),
                                        ("basico", "ferma al mondo basico (controllo)"),
@@ -334,6 +357,28 @@ class Launcher(Screen):
         self.select = Number("Selezione finale", 0, step=1,
                              help="Finite le generazioni, i sopravvissuti rifanno la prova questo numero di "
                                   "volte, senza figli: chi fallisce è eliminato. 0 = niente.")
+        # L'arena delle pile (docs/SPEC_ARENA_PILE.md): righe proprie.
+        self.p_agent = Choice("Cervello", [("sezioni", "a sezioni (A B C D E L U V F)"),
+                                           ("attore-critico", "attore-critico classico (riferimento)"),
+                                           ("guidato", "guidato a mano: sa colore e zona (controllo)")],
+                              help="Chi guida gli esseri: il progetto, il riferimento o il controllo del mondo.")
+        self.p_phase = Choice("Fase", [("A", "A: popolazione fissa, si misura l'apprendimento"),
+                                       ("B", "B: accoppiamento e rinascita da incrocio (evoluzione)")],
+                              help="A: si rinasce col cervello di partenza. B: coi geni di una coppia.")
+        self.p_lesion = Choice("Lesione", [("", "nessuna")] + [(k, f"senza {k}") for k in "BDCLUV"],
+                               help="Solo per il cervello a sezioni: toglierne una per vedere a cosa serve.")
+        self.p_good = Choice("Pile buone per", [("colore", "colore (rosse o gialle)"),
+                                                ("grandezza", "grandezza (grandi o piccole; il colore non conta)")],
+                             help="Che cosa distingue le pile buone: serve a provare che si impara qualunque cosa.")
+        self.p_teacher = Choice("Maestro", [("", "no"),
+                                            ("fantasma", "fantasma: nessuno lo vede, mangia la sua copia delle pile"),
+                                            ("visibile", "visibile: un compagno vero (si mangia le pile buone)")],
+                                help="Solo per il cervello a sezioni: il primo di ogni recinto, guidato a mano; gli "
+                                     "altri imparano il valore delle cose (O) anche da ciò che succede a lui. M lo "
+                                     "toglie o lo rimette.")
+        self.p_encl = Number("Recinti", 200, step=50, low=1,
+                             help="Recinti che girano insieme (GPU); se ne guarda uno alla volta.")
+        self.p_beings = Number("Esseri per recinto", 6, step=1, low=1, help="Quanti esseri in ogni recinto.")
         load = defaults.get("load")
         self.extra = [load] if load and Path(load).exists() and Path(load).parent.resolve() != RUNS.resolve() else []
         self.picker: SavePicker | None = None
@@ -348,12 +393,19 @@ class Launcher(Screen):
         self.fields = [self.mode, self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.cap,
                        self.chance, self.seed,
                        self.gens, self.exam_every, self.select, self.load, self.save]
+        self.pile_fields = [self.task, self.p_agent, self.p_phase, self.p_lesion, self.p_good, self.p_teacher, self.p_encl,
+                            self.p_beings,
+                            self.chance, self.seed, self.gens, self.load, self.save]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
         self.inspect_btn = Button("Esplora reti e genomi del salvataggio", self.explore)
         self.quit_btn = Button("Esci", self.quit)
         if load:
             self._choose(load)
+
+    def _visible(self) -> list:
+        """Le righe da mostrare: l'arena delle pile ha le sue."""
+        return self.pile_fields if self.task.value == "pile" else self.fields
 
     def _files(self) -> list[Path]:
         return sorted(RUNS.glob("*.npz"), key=lambda p: p.stat().st_mtime, reverse=True) + \
@@ -385,7 +437,8 @@ class Launcher(Screen):
         """Scelto un salvataggio (o nessuno). Le righe che vengono dal file si
         disattivano e mostrano i valori del file; tornando a "nessuno" riprendono
         quelli scelti a mano."""
-        fields = (self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.chance, self.seed)
+        fields = (self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.chance, self.seed,
+                  self.p_agent, self.p_phase, self.p_lesion, self.p_good, self.p_encl, self.p_beings)
         if path is not None and getattr(self, "_mine", None) is None:
             self._mine = [f.value if isinstance(f, Number) else f.index for f in fields]
         if path is None and getattr(self, "_mine", None) is not None:
@@ -399,6 +452,8 @@ class Launcher(Screen):
             self._show_saved(path)
         self.net.enabled = self.agents.enabled = self.chance.enabled = self.task.enabled = path is None
         self.sim.enabled = self.genome.enabled = path is None
+        for f in (self.p_agent, self.p_phase, self.p_lesion, self.p_good, self.p_teacher, self.p_encl, self.p_beings):
+            f.enabled = path is None
         if path is not None:
             self.save.value, self.save.edited = path, False
         elif not self.save.edited:
@@ -406,6 +461,17 @@ class Launcher(Screen):
 
     def _show_saved(self, path) -> None:
         """Mette nelle righe disattivate i valori del salvataggio."""
+        meta = pile_meta(path)
+        if meta is not None:
+            self.task.select("pile")
+            self.p_agent.select(meta["agent"])
+            self.p_phase.select(meta["phase"])
+            self.p_lesion.select(meta["lesions"][0] if meta.get("lesions") else "")
+            self.p_encl.value, self.p_beings.value = meta["enclosures"], meta["beings"]
+            self.p_good.select(meta.get("good_by", "colore"))
+            self.chance.select("fixed")
+            self.seed.value = meta["seed"]
+            return
         try:
             with np.load(path) as d:
                 saved = json.loads(str(d["config"])) if "config" in d else {}
@@ -482,7 +548,44 @@ class Launcher(Screen):
             self.message, self.error = f"non riesco ad aprire il salvataggio: {err}", True
             return None
 
+    def _pile(self, explore: bool = False) -> None:
+        from ..evo import pile_saves
+        from ..evo.pile_test import make_run
+        from ..sim.pile import PileConfig
+        from .pile_view import PileScreen
+
+        save = self.save.value.strip() or self._fresh_name()
+        if self.load.value:  # riprendere un salvataggio, o provarne le reti una a una
+            try:
+                run = pile_saves.alone(self.load.value) if explore else pile_saves.load(self.load.value)
+            except Exception as err:
+                self.message, self.error = f"non riesco ad aprire il salvataggio: {err}", True
+                return
+            screen = PileScreen(self.app, run, 0 if explore else self.gens.fixed(), save=None if explore else save)
+            self.app.active_run = screen
+            self.app.show(screen)
+            return
+        if explore:
+            self.message, self.error = "scegli prima un salvataggio da provare", False
+            return
+        if self.chance.value == "random":
+            self.seed.value = secrets.randbelow(2**31)
+        cfg = PileConfig(beings=self.p_beings.fixed(), good_by=self.p_good.value)
+        lesions = (self.p_lesion.value,) if self.p_lesion.value and self.p_agent.value == "sezioni" else ()
+        try:
+            run = make_run(self.p_agent.value, self.p_phase.value, self.p_encl.fixed(), self.seed.fixed(), lesions,
+                           cfg, teacher=self.p_teacher.value if self.p_agent.value == "sezioni" else "")
+        except Exception as err:
+            self.message, self.error = f"non riesco ad avviare l'arena delle pile: {err}", True
+            return
+        screen = PileScreen(self.app, run, self.gens.fixed(), save=save)
+        self.app.active_run = screen
+        self.app.show(screen)
+
     def start(self) -> None:
+        if self.task.value == "pile":
+            self._pile()
+            return
         if self._is_arena():
             from .arena_view import ArenaScreen
 
@@ -507,6 +610,9 @@ class Launcher(Screen):
     def explore(self) -> None:
         from .inspector import Inspector
 
+        if self.task.value == "pile":
+            self._pile(explore=True)  # le reti del salvataggio, ognuna da sola nel suo recinto
+            return
         if self._is_arena():
             self.message, self.error = ("l'esploratore delle reti non c'è ancora per l'arena continua: "
                                         "avviala e segui un essere"), False
@@ -534,9 +640,11 @@ class Launcher(Screen):
                     self._choose(result[1])
                 self.picker = None
             return
-        field = self.fields[self.focus]
+        fields = self._visible()
+        self.focus = min(self.focus, len(fields) - 1)
+        field = fields[self.focus]
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-            for k, f in enumerate(self.fields):
+            for k, f in enumerate(fields):
                 if f.rect.collidepoint(ev.pos):
                     self.focus = k
                     f.click(ev.pos)
@@ -551,9 +659,9 @@ class Launcher(Screen):
             elif ev.key == pygame.K_ESCAPE:
                 self.quit()
             elif ev.key in (pygame.K_DOWN, pygame.K_TAB):
-                self.focus = (self.focus + 1) % len(self.fields)
+                self.focus = (self.focus + 1) % len(fields)
             elif ev.key == pygame.K_UP:
-                self.focus = (self.focus - 1) % len(self.fields)
+                self.focus = (self.focus - 1) % len(fields)
             elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT) and not isinstance(field, Text):
                 field.change(1 if ev.key == pygame.K_RIGHT else -1)
             else:
@@ -580,10 +688,15 @@ class Launcher(Screen):
         s.blit(app.font.render("nuova corsa, ripresa di un salvataggio o esplorazione delle sue reti", True, DIM),
                (60, 76))
         y = 100
-        for k, f in enumerate(self.fields):
+        fields = self._visible()
+        self.focus = min(self.focus, len(fields) - 1)
+        pile = fields is self.pile_fields
+        self.gens.label = "Minuti di mondo" if pile else self.gens.label
+        self.p_lesion.enabled = self.p_agent.value == "sezioni"
+        for k, f in enumerate(fields):
             f.draw(s, app.font, 60, y, 175, 540, k == self.focus)
             y += ROW_H  # righe fitte: con il tetto dell'arena sono 15
-        field = self.fields[self.focus]
+        field = fields[self.focus]
         help = field.help if field.enabled or field is not self.select else \
             "La selezione finale parte quando le generazioni finiscono: imposta prima Generazioni."
         s.blit(app.small.render(help, True, DIM), (235, y + 2))

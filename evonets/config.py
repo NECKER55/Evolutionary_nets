@@ -226,6 +226,12 @@ class Config:
     plasticity: bool = True
     plasticity_initial_rate: float = 0.001  # η0: velocità di partenza (il gene la moltiplica)
     plasticity_initial_rule: float = 0.5  # deviazione dei coefficienti A, B, C, D alla partenza
+    # La regola innata: alla partenza A (pre·post) è in media questo, B, C, D in
+    # media 0: rafforza ciò che era attivo prima del piacere, indebolisce ciò che
+    # lo era prima del dolore (come dopamina × attività recente, comune a
+    # moltissime specie). Da zero (media 0) l'evoluzione non la trova:
+    # docs/SPEC_CAPACITA.md. Poi muta come gli altri geni.
+    plasticity_innate_rule: float = 1.0
     # Apprendimento hebbiano di base, sempre attivo (BCM sulle sinapsi
     # eccitatorie, Vogels sulle inibitorie, traccia provvisoria che si
     # consolida solo con un modulatore: vedi Brains._learn): velocità di
@@ -249,7 +255,23 @@ class Config:
     # ogni neurone moltiplica. Consolidamento: dove arriva un modulatore, la
     # traccia diventa stabile a questa velocità (per secondo e per unità di |M|).
     early_initial_tau: float = 30.0
+    # Traccia di eleggibilità: la regola modulata propone un cambiamento che
+    # resta pronto per questo tempo di partenza (s, il gene "elig" lo
+    # moltiplica); il modulatore che arriva intanto lo applica con il suo
+    # segno. In natura (dopamina nello striato) dura circa 1-2 s; con un
+    # tempo quasi nullo la regola torna quella istantanea di prima.
+    eligibility_initial_tau: float = 2.0
     capture_rate: float = 1.0
+    # Sorpresa (docs/SPEC_FASE_E.md, "Sorpresa"): la dopamina segnala il piacere
+    # ricevuto meno quello atteso (Schultz 1997). Un critico impara dai sensi
+    # quanto piacere aspettarsi (V, scontato su surprise_horizon s) e M diventa
+    # gusto − dolore − V/orizzonte + dV/dt (TD continuo, Doya 2000; dV/dt
+    # misurato su surprise_smooth s). surprise: 0 = piacere grezzo (com'era),
+    # 1 = solo la sorpresa. critic_rate: velocità del critico (per s).
+    surprise: float = 0.0
+    surprise_horizon: float = 2.0
+    surprise_smooth: float = 0.2
+    critic_rate: float = 2.0
     modulatory_initial_share: float = 0.1  # quota di neuroni che nasce modulatrice
     modulation_range: float = 0.2  # quanto lontano arriva il modulatore, in lati del cervello
     synapse_max: float = 4.0  # forza massima di una sinapsi: le sinapsi vere saturano

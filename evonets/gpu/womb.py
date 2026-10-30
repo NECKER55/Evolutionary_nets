@@ -11,7 +11,7 @@ from . import engine
 
 _compiled: dict = {}
 
-KEYS = ("links", "target_on", "rule", "kmod", "mod_sign", "learns", "hebb", "sign", "intrinsic", "early_keep",
+KEYS = ("links", "target_on", "rule", "kmod", "mod_sign", "learns", "hebb", "sign", "intrinsic", "early_keep", "elig_keep",
         "homeo", "target_act", "boost", "closure", "value")
 
 
@@ -47,7 +47,8 @@ def run(b, rows: np.ndarray, obs: np.ndarray) -> tuple[np.ndarray, ...]:
         P.update(keep_n=f32(b.keep), active_n=f32(b.active))
     racing = np.zeros(n, dtype=np.float32)
     racing[rows] = 1.0
-    s = dict(state=jnp.zeros((n, T)), w=f32(b.w_eff), early=jnp.zeros(b.w_eff.shape), bias_now=f32(b.bias_now),
+    s = dict(state=jnp.zeros((n, T)), w=f32(b.w_eff), early=jnp.zeros(b.w_eff.shape), elig=jnp.zeros(b.w_eff.shape), critic=jnp.zeros((n, 2 * b.n_in + 1)),
+             bias_now=f32(b.bias_now),
              avg=jnp.zeros((n, T)), clock=jnp.zeros(n),  # il grembo è l'età 0
              taste=jnp.zeros(n), pain=jnp.zeros(n))  # nel grembo non si mangia e non si soffre
     if b.KIND == "spike-ei":

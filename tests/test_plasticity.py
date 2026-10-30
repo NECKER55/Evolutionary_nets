@@ -326,3 +326,55 @@ def test_brain_mode_has_taste_and_pain_and_a_fixed_value_system():
     assert np.array_equal(kids.value, np.zeros((30, 2)))  # dato, come i sensi
     free = reproduce(Brains(Config(), 30, 2, 0).genome, 30, Config(), np.random.default_rng(0))
     assert (free.value != 0).any()  # nella simulazione completa evolve
+
+
+def test_a_delayed_reward_reaches_the_synapse_with_its_sign():
+    """La traccia di eleggibilità: la sinapsi senso -> motore attiva un
+    secondo, poi dopo 2 s piacere o dolore. Con la regola pre·post·M il
+    piacere la rafforza e il dolore la indebolisce (prima della traccia, con
+    il ritardo, i due davano lo stesso effetto)."""
+    from evonets.evo.capacity import mechanism
+
+    rows = mechanism(Config(net_type="spike-ei"), n=20, delays=(0.0, 2.0), after=5.0, rule=(1, 0, 0, 0))
+    for r in rows:
+        assert r["pleasure"] > 0 > r["pain"] and r["valence"] == 1.0
+    assert rows[1]["pleasure"] < rows[0]["pleasure"]  # la traccia svanisce: con il ritardo l'effetto è minore
+
+
+def test_surprise_moves_from_the_reward_to_the_cue():
+    """La sorpresa (TD continuo): un senso acceso un secondo, poi il cibo,
+    dieci volte. Con il piacere grezzo M arriva sempre al cibo; con la
+    sorpresa, imparato il legame, arriva al segnale e non più al cibo
+    (come la dopamina, Schultz 1997)."""
+    from evonets.evo.capacity import FIELDS
+    from evonets.net.brain import PLASTICITY_CONSTANTS, plasticity
+
+    def trials(surprise):
+        cfg = Config(net_type="spike-ei", surprise=surprise)
+        b = SpikingBrains(cfg, 2, 4, 0)
+        p = {k: np.array(getattr(b, k), dtype=float) for k in FIELDS}
+        consts = {k: getattr(cfg, k) for k in PLASTICITY_CONSTANTS}
+        T, S = p["w_eff"].shape[1:]
+        R, dt, taste, out = b.n_in, cfg.dt, 0.0, []
+        for _ in range(10):
+            cue = food = 0.0
+            for k in range(int(4 / dt)):
+                now = k * dt
+                pre = np.zeros((2, S))
+                pre[:, 0] = 1.0 if 0.5 <= now < 1.5 else 0.0
+                taste = 1.0 if abs(now - 1.5) < dt / 2 else taste * np.exp(-dt / cfg.taste_tau)
+                p["signal"] = np.tile([taste, 0.0], (2, 1))
+                c = p["critic"]
+                value = (c[:, :R] * pre[:, :R]).sum(1)
+                delta = taste * p["value"][:, 0] - value / cfg.surprise_horizon + (value - c[:, 2 * R]) / cfg.surprise_smooth
+                m = ((1 - surprise) * taste * p["value"][:, 0] + surprise * delta).mean() * dt
+                cue, food = (cue + m, food) if now < 1.5 - dt / 2 else (cue, food + m)
+                res = plasticity(consts, np, p, pre, np.zeros((2, T)), np.zeros((2, T)), R, b.CENTRED)
+                p["w_eff"], p["early"], p["bias_now"], p["avg"], p["elig"], p["critic"] = res
+            out.append((cue, food))
+        return out
+
+    raw, td = trials(0.0), trials(1.0)
+    assert raw[-1][0] < 0.01 and abs(raw[-1][1] - raw[1][1]) < 1e-6  # grezzo: sempre al cibo (resta un filo del gusto prima)
+    assert td[0][1] > 0.4 and td[-1][1] < 0.1 * td[0][1]  # sorpresa: il cibo atteso non insegna più
+    assert td[-1][0] > 0.15  # ma il segnale che lo annuncia sì
