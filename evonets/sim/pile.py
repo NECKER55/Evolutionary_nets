@@ -161,7 +161,6 @@ class PileConfig:
     energy_start: float = 60.0
     drain: float = 0.15  # energia/s da fermi
     move_cost: float = 0.25  # energia/s in più a tutta spinta
-    age_max: float = 600.0  # s
     eye_range: float = 350.0
     ray_range: float = 80.0
     watch_angle: float = 30.0  # gradi: "mi guardano" se il muso di un altro punta verso di me entro questo angolo
@@ -220,7 +219,7 @@ class PileWorld:
         self.ghost_hide = np.zeros((B, K))
         # Contatori e registro degli eventi (per le misure).
         self.taken = []  # (t, recinto, essere, colore, buona)
-        self.deaths = {"fame": 0, "vecchiaia": 0}
+        self.deaths = {"fame": 0}
         self.matings = []  # (t, recinto, a, b)
         self.inversions = []  # tempi delle inversioni
         self.zone_changes = []  # tempi dei cambi di zona
@@ -347,12 +346,9 @@ class PileWorld:
             self.zone_changes.append(self.t)
             self.next_zone += cfg.zone_every
 
-        # Morti: per fame o per età; rinascono subito altrove.
-        starved = self.energy <= 0.0
-        old = self.age >= cfg.age_max
-        dead = starved | old
-        self.deaths["fame"] += int(starved.sum())
-        self.deaths["vecchiaia"] += int((old & ~starved).sum())
+        # Morti: solo per fame (nessun tetto di età); rinascono subito altrove.
+        dead = self.energy <= 0.0
+        self.deaths["fame"] += int(dead.sum())
         if dead.any():
             self.reborn(dead)
         return {"pleasure": pleasure, "pain": hurt, "spent": spent / cfg.good_energy, "dead": dead, "mates": mates}

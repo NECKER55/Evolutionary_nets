@@ -178,9 +178,8 @@ def world_step(cfg: P.PileConfig, w: dict, thrust, steer, bite, key):
     next_zone = w["next_zone"] + zc * cfg.zone_every
 
     # Morti e rinascite.
-    starved = energy <= 0.0
-    aged = age >= cfg.age_max
-    dead = starved | aged
+    starved = energy <= 0.0  # solo per fame: nessun tetto di età
+    dead = starved
     pos = jnp.where(dead[..., None], jax.random.uniform(k5, (B, n, 2), F, cfg.radius, cfg.size - cfg.radius), pos)
     heading = jnp.where(dead, jax.random.uniform(k6, (B, n), F, -jnp.pi, jnp.pi), heading)
     energy = jnp.where(dead, cfg.energy_start, energy)
@@ -192,7 +191,7 @@ def world_step(cfg: P.PileConfig, w: dict, thrust, steer, bite, key):
              bwait=bwait,
              bage=bage, t=t, good=good, next_inv=next_inv, zone=zone, next_zone=next_zone, pair_time=pair_time)
     outs = dict(pleasure=pleasure, pain=hurt, spent=spent / cfg.good_energy, dead=dead, mated=mated, partner=partner, good_each=took & ok, bad_each=bad,
-                good_taken=(took & ok).sum(), bad_taken=bad.sum(), starved=starved.sum(), aged=(aged & ~starved).sum(),
+                good_taken=(took & ok).sum(), bad_taken=bad.sum(), starved=starved.sum(),
                 matings=mated.sum() // 2, inversion=inv, zone_change=zc)
     return w, outs
 
@@ -613,7 +612,7 @@ def make_run(cfg: P.PileConfig, agent: str, phase: str, sizes: S.Sizes, blocks: 
             child = mix.reshape(N, -1)
         br = _reborn(br, dead, child, agent, sizes, k_reborn, blocks)
         misc["reward"] = jnp.where(dead[:, None], 0.0, misc["reward"])
-        series = {k: out[k] for k in ("starved", "aged", "matings", "inversion", "zone_change")}
+        series = {k: out[k] for k in ("starved", "matings", "inversion", "zone_change")}
         series["good_taken"] = (out["good_each"].reshape(N) * misc["counted"]).sum()  # il maestro non si conta
         series["bad_taken"] = (out["bad_each"].reshape(N) * misc["counted"]).sum()
         return {"world": w, "brain": br, "misc": misc}, series
@@ -645,8 +644,7 @@ class PileGpu:
         self.state = jax.tree_util.tree_map(to, {"world": world, "brain": brain, "misc": misc})
         self.key = jax.random.PRNGKey(seed)
         self._run = make_run(cfg, agent, phase, self.sizes, self.blocks)
-        self.series = {k: [] for k in ("good_taken", "bad_taken", "starved", "aged", "matings", "inversion",
-                                       "zone_change")}
+        self.series = {k: [] for k in ("good_taken", "bad_taken", "starved", "matings", "inversion", "zone_change")}
         self.t = 0.0
         self.teacher_kind = teacher or "fantasma"
         if teacher:

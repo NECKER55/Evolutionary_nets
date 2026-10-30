@@ -35,7 +35,7 @@ meglio e mangiare meno, o il contrario.
 | a3b4edd arbitraggio con U, genoma con pesi e connessioni, salvataggi | 56,0% | 3,45 | 1,94 | 36,2 | 0,192 | 0,63 · 0,39 · 0,42 · 0,45 · 0,50 |
 | e09d770 costanti come geni, critico legato al corpo, attenzione a mappa di priorità, maestro, O | 57,9% | 3,14 | 1,82 | 34,8 | 0,178 | 0,63 · 0,43 · 0,45 · 0,50 · 0,54 |
 | O con dolore pesato (×2) e volatilità | 59,8% | 3,11 | 1,86 | 36,5 | 0,183 | 0,64 · 0,45 · 0,49 · 0,53 · **0,58** |
-| **attuale**: + C come cellule di Kenyon, scala della sorpresa adattata, inerzia legata agli oggetti | 58,9% | **3,54** | **2,09** | **40,5** | 0,145 | 0,64 · 0,38 · 0,43 · 0,46 · 0,50 |
+| + C come cellule di Kenyon, scala della sorpresa adattata, inerzia legata agli oggetti | 58,9% | **3,54** | **2,09** | **40,5** | 0,145 | 0,64 · 0,38 · 0,43 · 0,46 · 0,50 |
 | variante: senza la scala adattata (C nuovo e inerzia sì) | **66,0%** | 2,46 | 1,62 | 33,9 | 0,167 | **0,77** · 0,29 · 0,37 · 0,44 · 0,52 |
 | variante: solo l'inerzia legata agli oggetti | 62,2% | 2,71 | 1,68 | 33,9 | 0,193 | 0,70 · 0,39 · 0,47 · 0,52 · 0,58 |
 
@@ -67,14 +67,16 @@ cervello.
   dopo l'inversione migliora (0,50 → 0,54 a 60-90 s).
 - **O con dolore e volatilità**: la scelta sale al 59,8%, il riadattamento è
   il migliore (0,58).
-- **C come cellule di Kenyon, scala adattata, inerzia sugli oggetti
-  (attuale)**: più cibo e più energia di sempre, morti di fame al minimo
+- **C come cellule di Kenyon, scala adattata, inerzia sugli oggetti**: più cibo e più energia di sempre, morti di fame al minimo
   dalla seconda versione; ma il riadattamento dopo l'inversione torna
   indietro (0,58 → 0,50).
+- **K e niente morte per vecchiaia (attuale)**: sul banco circa uguale
+  (più energia, 42,1); tra chi sopravvive K toglie quasi del tutto il crollo
+  quando torna un regime già vissuto (dettagli sotto).
 
 ## Migliorando una cosa se ne peggiora un'altra?
 
-Sì, in tre punti:
+Sì, in quattro punti:
 
 1. **Scelta contro quantità.** La variante senza la scala adattata sceglie
    meglio di tutte (66%, 77% prima di un'inversione) ma mangia poco (2,46
@@ -92,12 +94,16 @@ Sì, in tre punti:
    sceglie a caso. Una causa misurata: la bocca resta aperta a vuoto (senza
    niente davanti si morde il 60% delle volte) e mordere costa. Il riflesso
    del morso (proposto, non fatto) la toglierebbe.
+4. **Esperienza contro freschezza.** Chi ha vissuto più regimi non sceglie
+   meglio di chi è appena nato (57% contro 61% a regime): ciò che C ed E
+   hanno imparato nei regimi passati frena. K aiuta solo nel primo minuto
+   dopo il ritorno di un regime.
 
-## Il critico che insegna, sulla versione attuale (2026-10-29)
+## Il critico che insegna, (2026-10-29, prima di K)
 
 | peso del critico | buone | pile/min | energia/min | morti/min |
 |---|---|---|---|---|
-| 0 (attuale) | 58,9% | 3,54 | 40,5 | 0,145 |
+| 0 (quello in uso) | 58,9% | 3,54 | 40,5 | 0,145 |
 | 0,25 | 58,4% | 2,49 | 28,0 | 0,192 |
 | 0,5 | 58,0% | 2,36 | 26,3 | 0,200 |
 | 1 | 57,6% | 2,30 | 25,3 | 0,201 |
@@ -108,7 +114,7 @@ quei momenti arrivano spesso subito dopo aver finito di mangiare, e il
 critico prevede il valore della situazione con questo comportamento, non
 quello dell'oggetto.
 
-## K, i contesti (2026-10-29)
+## K, i contesti (2026-10-29, corretto il 2026-10-30)
 
 Prima versione: un neurone per contesto (4), un cassetto di O per contesto
 (è il passo iniziale; l'obiettivo è un contesto sparso su più neuroni).
@@ -116,32 +122,53 @@ Prima versione: un neurone per contesto (4), un cassetto di O per contesto
 | | buone | pile/min | buone/min | energia/min | morti/min | inversione |
 |---|---|---|---|---|---|---|
 | con K | 58,7% | 3,58 | 2,10 | 40,7 | 0,144 | 0,64 · 0,39 · 0,45 · 0,47 · 0,51 |
+| **attuale**: con K e senza morte per vecchiaia (2026-10-30) | 57,8% | 3,81 | 2,20 | 42,1 | 0,142 | 0,64 · 0,40 · 0,44 · 0,47 · 0,51 |
 
-Sul banco non cambia niente, perché pochi esseri tornano a un regime già
-conosciuto, che è il caso in cui K serve. La causa principale è la fame: in
-15 minuti le morti sono 2680 di fame e 366 di vecchiaia (12%), e la vita
-media è intorno ai 400 s. Alla seconda inversione (600 s) solo il 35% degli
-esseri ha vissuto la prima, e più di metà di loro (il 19% del totale, chi è
-nato all'inizio) muore di vecchiaia proprio in quel momento: ne resta circa il
-16%. Prima di morire, 107 esseri su 360 avevano già il cassetto pronto
-(preferenza +0,87 per il colore che sarebbe tornato buono).
+**Perché sul banco K non si vede.** K serve solo quando torna un regime già
+vissuto, e sul banco pochi esseri ci arrivano. La causa principale è la fame,
+non la vecchiaia (una prima spiegazione diceva il contrario, ed era
+sbagliata): in 15 minuti le morti erano 2680 di fame e 366 di vecchiaia
+(12%), e la vita media è intorno ai 400 s. Alla seconda inversione (600 s)
+solo il 35% degli esseri aveva vissuto la prima, e più di metà di loro (chi
+era nato all'inizio, il 19% del totale) moriva di vecchiaia proprio lì.
 
-Con una vita di un'ora (prova, non il mondo di partenza), tra chi ha già
-vissuto un'inversione:
+**La morte per vecchiaia è stata tolta** (2026-10-30): ora si muore solo di
+fame, e chi sopravvive vive più inversioni. Sul banco: un po' più di pile e
+di energia, un punto in meno di scelta, morti uguali.
 
-| | torna al vecchio contesto | scelta 0..30 s dopo | 30..120 s dopo |
-|---|---|---|---|
-| con K | 41% | 0,554 | 0,597 |
-| senza K | — | 0,528 | 0,582 |
+**Chi sopravvive** (prova di 30 minuti, 6 inversioni, seme 0): quota di
+buone per numero di inversioni vissute, nel primo minuto dopo un'inversione
+e nel resto del regime.
 
-Il meccanismo funziona (e un test lo verifica in condizioni pulite), ma
-l'effetto sulla scelta è piccolo: anche con il cassetto giusto la scelta
-resta intorno al 60%, il limite del resto della catena (E usa poco O). Il 27%
-degli esseri riempie tutti e 4 i contesti: si recluta anche per rumore.
+| inversioni vissute | con K, primo minuto | con K, poi | senza K, primo minuto | senza K, poi |
+|---|---|---|---|---|
+| 0 (nato in questo regime) | 60% | 61% | 61% | 62% |
+| 1 (primo cambio) | 41% | 58% | 41% | 58% |
+| 2 | 54% | 56% | 49% | 57% |
+| 3 | 56% | 57% | 51% | 57% |
+| 4 o più | 57% | 57% | 50% | 58% |
+
+- **K funziona come previsto**: quando torna un regime già vissuto, nel primo
+  minuto si sceglie 5-7 punti meglio che senza K, e il crollo dopo il cambio
+  quasi sparisce. Il 33% degli esseri torna proprio al contesto di due regimi
+  prima. Un test lo verifica anche in condizioni pulite.
+- **Al primo cambio K non può aiutare** (41% con e senza): quel regime non è
+  mai stato vissuto.
+- **L'esperienza non si accumula**: passato il primo minuto, chi ha vissuto 4
+  inversioni sceglie il 57%, chi è appena nato il 61%. K e O tengono i
+  cassetti separati, ma C ed E (lenti) conservano le abitudini dei regimi
+  passati e frenano. La scelta resta intorno al 57-60% anche con il cassetto
+  giusto: il limite è il resto della catena (E usa poco O).
+- **Reclutamento per rumore**: il 27% degli esseri riempie tutti e 4 i
+  contesti, perché gli errori di O sono intorno a 0,5 anche nel mondo stabile.
 
 ## Ancora lontano
 
 Il guidato prende 54,7 di energia al minuto e non muore mai; il cervello a
-sezioni 40,5 e muore 0,145 volte al minuto. I limiti misurati: E usa poco O
-(i pesi dai neuroni di O restano quasi a zero); O si riadatta in minuti, non
-in secondi; il morso a vuoto.
+sezioni 42,1 e muore 0,142 volte al minuto. I limiti misurati:
+- E usa poco O (i pesi dai neuroni di O restano quasi a zero): il sapere
+  arriva poco alle azioni;
+- l'esperienza non migliora la scelta (C ed E portano con sé i regimi
+  passati);
+- O si riadatta in minuti, non in secondi;
+- il morso a vuoto, che costa energia e spiega parte delle morti di fame.

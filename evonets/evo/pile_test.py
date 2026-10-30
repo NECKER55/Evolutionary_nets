@@ -25,7 +25,7 @@ from ..net.sections import AGENTS, EXPLORE, GENE_NAMES, Sections, Sizes, decode,
 from ..sim.pile import EYES, N_PROGRAMS, PROGRAMS, Motor, PileConfig, PileWorld
 
 WINDOWS = ((-30, 0), (0, 15), (15, 30), (30, 60), (60, 90))  # s rispetto all'inversione
-SERIES = ("good_taken", "bad_taken", "starved", "aged", "matings", "inversion", "zone_change")
+SERIES = ("good_taken", "bad_taken", "starved", "matings", "inversion", "zone_change")
 
 
 def start_genomes(agent: str, phase: str, N: int, seed: int, cfg: PileConfig, lesions=()):
@@ -110,7 +110,6 @@ class NumpyRun:
         self.series["good_taken"].append(sum(self.counted[x[1] * n + x[2]] for x in new if x[4]))
         self.series["bad_taken"].append(sum(self.counted[x[1] * n + x[2]] for x in new if not x[4]))
         self.series["starved"].append(w.deaths["fame"] - before[1]["fame"])
-        self.series["aged"].append(w.deaths["vecchiaia"] - before[1]["vecchiaia"])
         self.series["matings"].append(len(w.matings) - before[2])
         self.series["inversion"].append(len(w.inversions) > before[3])
         self.series["zone_change"].append(len(w.zone_changes) > before[4])

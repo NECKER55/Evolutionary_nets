@@ -44,8 +44,8 @@ dentro la vita**.
   cattiva toglie 8 di energia e fa male. Il dolore pesa quanto il danno
   rispetto a una pila buona (8/25), così avvicinarsi alle pile conviene già
   prima di distinguere i colori.
-- **Energia**: cala col tempo e col movimento; a zero si muore. Tetto di età
-  (proposta 600 s) perché le vite finiscano anche senza morire di fame.
+- **Energia**: cala col tempo e col movimento; a zero si muore. Nessun tetto
+  di età: si muore solo di fame (il tetto di 600 s è stato tolto).
 - **Altri esseri**: hanno una luce blu sul muso (riconoscibile dagli occhi).
 - **Accoppiamento** (fase B): due esseri con energia sopra una soglia, muso
   contro muso (angolo < 30°), vicini, per qualche secondo (proposta 2 s);
