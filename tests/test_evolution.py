@@ -1,9 +1,9 @@
 import numpy as np
 
 from evonets import Config
-from evonets.evo import Evolution
-from evonets.evo.evolution import NORMAL, ONE_PARENT, RANDOM, RESTART
-from evonets.net.brain import Genome, pad
+from evonets.arenas.generational.evolution import Evolution
+from evonets.arenas.generational.evolution import NORMAL, ONE_PARENT, RANDOM, RESTART
+from evonets.brains.freeform.genome import Genome, pad
 
 FIELDS = Genome.FIELDS
 # Tutti i tassi al minimo e nessuna deriva dei tassi stessi: copie esatte.
@@ -210,7 +210,7 @@ def test_each_generation_with_winners_keeps_its_oldest_winner_as_champion(tmp_pa
 
 
 def test_a_trial_tests_one_network_on_fixed_arenas_and_is_reproducible():
-    from evonets.evo.trial import Trial
+    from evonets.arenas.generational.trial import Trial
 
     e = evo()
     g = e.ctrl.brains.genome.take([3])
@@ -286,7 +286,7 @@ def test_the_champion_is_the_oldest_winner_and_on_a_tie_the_first_born():
 
 
 def test_a_trial_can_test_a_group_and_tells_each_network_apart():
-    from evonets.evo.trial import Trial
+    from evonets.arenas.generational.trial import Trial
 
     e = evo()
     g = e.ctrl.brains.genome.take([1, 2, 3])

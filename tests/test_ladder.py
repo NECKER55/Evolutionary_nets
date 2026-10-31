@@ -5,9 +5,10 @@ import numpy as np
 import pytest
 
 from evonets import Config
-from evonets.evo import Evolution, ladder
-from evonets.evo.evolution import run_together
-from evonets.evo.exam import LESIONS, LEVELS, LEVELS_VERSION, battery, lesioned
+from evonets.arenas.generational import ladder
+from evonets.arenas.generational.evolution import Evolution
+from evonets.arenas.generational.evolution import run_together
+from evonets.arenas.generational.exam import LESIONS, LEVELS, LEVELS_VERSION, battery, lesioned
 
 
 def forage(**kw):

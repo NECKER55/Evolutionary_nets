@@ -49,7 +49,7 @@ class Config:
     # metabolismo di base. Come in natura, un filo lungo deve valere il suo prezzo.
     wire_cost: float = 0.004
 
-    # Fisica dei segnali (sim/signals.py), per i recettori universali. Ogni
+    # Fisica dei segnali (arenas/signals.py), per i recettori universali. Ogni
     # fenomeno ha un asse della "qualità" in [0, 1]: colore, molecola,
     # frequenza, temperatura. Cosa emette ogni oggetto è scritto qui: dare un
     # suono al bersaglio o un odore al veleno è cambiare un numero.
@@ -129,13 +129,13 @@ class Config:
     net_hidden_slots: int = 8
     receptor_slots: int = 4
     # Tipo di simulazione: "evoluzione" = evolvono sensi e cervello;
-    # "cervello" = sensi fissi decisi da noi (net/senses.py, set `sensor_set`),
+    # "cervello" = sensi fissi decisi da noi (brains/freeform/senses.py, set `sensor_set`),
     # evolve solo il cervello.
     sim_mode: str = "evoluzione"
     sensor_set: str = "naturale"
     # Genoma del cervello: "diretto" = scrive ogni sinapsi (peso e
     # collegamento); "sviluppo" = scrive le regole per costruirle (marcatori,
-    # gradienti, tabella di affinità, guadagno: net/development.py), come in
+    # gradienti, tabella di affinità, guadagno: brains/freeform/development.py), come in
     # natura. I salvataggi di prima dello sviluppo si aprono con "diretto".
     genome: str = "diretto"
     # Sviluppo: posti e marcatori accesi alla partenza (i posti crescono come
@@ -166,7 +166,7 @@ class Config:
     # debole, con forza synapse_young · (attrazione − develop_threshold) per il
     # guadagno di chi la riceve; la rinforzano poi l'attività e Hebb.
     synapse_young: float = 1.0
-    # Il grembo (net/womb.py, solo con lo sviluppo): secondi di attività
+    # Il grembo (brains/freeform/womb.py, solo con lo sviluppo): secondi di attività
     # spontanea prima della nascita. I sensi ricevono onde che scorrono lungo
     # l'ordine dei nervi (come le onde della retina): velocità (lati del
     # cervello al secondo), larghezza, intervallo medio tra due onde (s) e
@@ -206,14 +206,14 @@ class Config:
     # intensità massima, sottrattiva e divisiva, sorteggiate tra 0 e questo valore.
     receptor_initial_tau: float = 1.0
     receptor_initial_adaptation: float = 0.2
-    # Geometria (vedi net/geometry.py): il cervello è un quadrato di lato 1,
+    # Geometria (vedi brains/freeform/geometry.py): il cervello è un quadrato di lato 1,
     # sensi a sinistra, motori a destra. Alla nascita un collegamento esiste con
     # probabilità net_conn_prob * exp(-distanza / net_conn_range): locale quasi
     # sempre, lungo di rado. Con questi valori una rete casuale ha in media
     # tanti collegamenti quanti ne avrebbe con il 15% uniforme, ma lunghi la
     # metà, e quasi sempre almeno un percorso dai sensi ai motori.
     # Il cervello cresce con le sue cellule: cellule per unità di superficie
-    # (con 100 cellule il lato è 1). Vedi net/geometry.py.
+    # (con 100 cellule il lato è 1). Vedi brains/freeform/geometry.py.
     brain_density: float = 100.0
     net_conn_prob: float = 0.75  # probabilità a distanza 0
     net_conn_range: float = 0.3  # portata tipica di un collegamento (valore iniziale: poi è un gene)
@@ -333,7 +333,7 @@ class Config:
 
     # Il mondo del cibo. Ogni agente ha la sua copia di cibo e predatori.
     # Manopole della difficoltà, da 0 (basico) a 1 (complesso); le muove la
-    # progressione adattiva (evo/ladder.py).
+    # progressione adattiva (arenas/generational/ladder.py).
     forage_abundance: float = 0.0  # da 12 cibi di raggio 4 a 4 di raggio 2
     forage_need: float = 0.0  # cibi da mangiare per riprodursi: da 1 a 10
     forage_prey: float = 0.0  # da cibo fermo a prede che fuggono a 12 u/s
@@ -400,7 +400,7 @@ class Config:
     predator_smell: float = 1.0
     odor_range: float = 25.0  # u
     scent_time_max: float = 3.0  # s, con la manopola a 1
-    # La scala di difficoltà (evo/ladder.py): "" = nessuna, "scala" =
+    # La scala di difficoltà (arenas/generational/ladder.py): "" = nessuna, "scala" =
     # progressione adattiva, "basico" / "complesso" = controlli con le
     # manopole ferme a 0 / a 1. Le soglie sono strumenti di addestramento.
     ladder: str = ""
@@ -629,7 +629,7 @@ class Config:
     # casuali e della precisione (32 bit sulla GPU).
     engine: str = "gpu"
 
-    # Esame (evo/exam.py): ogni quante generazioni metterlo in automatico ai
+    # Esame (arenas/generational/exam.py): ogni quante generazioni metterlo in automatico ai
     # più anziani della popolazione; 0 = mai (resta il tasto E). Non cambia
     # l'evoluzione: è solo una misura. Gira in processi separati, su tutti i
     # core tranne due: circa 12 s su 12 core (un minuto e più su uno solo).

@@ -2,7 +2,7 @@
 
 Stato: **approvata** (2026-10-15). Fatti i punti 1–5 dell'ordine di lavoro:
 mondo nei due motori con i test di equivalenza; scala adattiva
-(`evo/ladder.py`) e controlli nello stesso lotto (`--task cibo --ladder
+(`arenas/generational/ladder.py`) e controlli nello stesso lotto (`--task cibo --ladder
 --controls`); esame a livelli (versione 4), lesioni (`--lesion`) e misura
 della fortuna (`luck` nelle statistiche); interfaccia. Mancano taratura e
 primo esperimento; il compito predefinito resta `bersaglio` fino ad allora.
@@ -155,15 +155,15 @@ proposte, da tarare con le misure.
 
 **Punto 1: il mondo nel motore NumPy** (commit `80dc71b`)
 
-- `sim/tasks.py`, classe `Foraging`. Il cibo mangiato dà energia, fino al
+- `arenas/generational/tasks.py`, classe `Foraging`. Il cibo mangiato dà energia, fino al
   massimo `energy_init`, e ricompare da una coda di posizioni estratta
   all'inizio dell'arena: durante la vita non servono numeri casuali.
 - Le prede fuggono dall'agente vicino. I predatori lo inseguono e a contatto
   tolgono energia.
 - Ogni agente ha la sua copia di cibo e predatori.
-- `sim/signals.py` e `net/receptors.py`: il cibo e i predatori si vedono
+- `arenas/signals.py` e `brains/freeform/receptors.py`: il cibo e i predatori si vedono
   (dischi opachi del loro colore) e i predatori si sentono (vibrazioni).
-- `sim/world.py`: il compito si sceglie con `cfg.task` (`"bersaglio"` o
+- `arenas/generational/world.py`: il compito si sceglie con `cfg.task` (`"bersaglio"` o
   `"cibo"`). Il compito agisce sull'energia prima che si contino i vivi.
 - Corretto un difetto: chi muore per un morso non può mangiare nello stesso
   passo e tornare in vita.
@@ -175,7 +175,7 @@ proposte, da tarare con le misure.
 
 **Punto 2: il mondo nel motore GPU** (commit `80dc71b`)
 
-- `gpu/engine.py` e `gpu/sim.py` fanno la stessa fisica e gli stessi sensi.
+- `arenas/generational/gpu_engine.py` e `arenas/generational/gpu_worlds.py` fanno la stessa fisica e gli stessi sensi.
 - Cibo e predatori entrano nello stato GPU solo nel mondo del cibo: il mondo
   del bersaglio non rallenta.
 - Le manopole sono parametri di ogni mondo, quindi popolazioni con manopole
@@ -188,7 +188,7 @@ proposte, da tarare con le misure.
 
 **Punto 3: scala adattiva e più popolazioni** (commit `6ffcff4`)
 
-- `evo/ladder.py`: tutte le manopole si riassumono in una **posizione** x da
+- `arenas/generational/ladder.py`: tutte le manopole si riassumono in una **posizione** x da
   0 a 3, una unità per stadio. Lo stadio i ha le sue manopole a
   clip(x − i, 0, 1).
 - Gli stadi, nell'ordine: abbondanza e cibi necessari insieme, poi prede,
@@ -212,7 +212,7 @@ proposte, da tarare con le misure.
 
 **Punto 4: misure** (commit `6ffcff4`)
 
-- **Esame a livelli** (versione 4, `evo/exam.py`): 8 livelli alle posizioni
+- **Esame a livelli** (versione 4, `arenas/generational/exam.py`): 8 livelli alle posizioni
   0, 3/7, …, 3 della scala, con le manopole scritte nell'esame. Le corse nel
   mondo del bersaglio continuano a fare l'esame versione 3.
 - **Lesioni** (`--exam FILE --lesion X`): si può togliere un senso (la
@@ -233,7 +233,7 @@ Test: 165, tutti superati (12 nuovi in `tests/test_ladder.py`, 10 in
   dell'agente seguito. Si disegna la copia di mondo dell'agente seguito. Nel
   riquadro in alto: manopole, cibi mangiati su quelli necessari, distanza
   dal predatore più vicino. Lo stesso nel banco di prova.
-- **Pagina principale** (`viz/app.py`): grafico della scala (posizione 0–3 con
+- **Pagina principale** (`viz/generational/run.py`): grafico della scala (posizione 0–3 con
   gli stadi, cibi mangiati medi, manopole di adesso, fortuna vicini/lontani);
   riquadro dei cibi medi; esame a livelli con l'andamento della media e il
   profilo dell'ultimo esame (tacca bianca = primo esame, punto viola = ultima
@@ -344,15 +344,15 @@ posizione 0,94, e l'esame non migliorava più dalla generazione 200.
 
 ### Cosa cambia nel codice
 
-- `sim/tasks.py`: `Foraging.odors` (le nubi nei punti del corpo di ogni
+- `arenas/generational/tasks.py`: `Foraging.odors` (le nubi nei punti del corpo di ogni
   agente, nella sua copia di mondo) e `Foraging.scent` (forza di nube e
   traccia); per ogni posto di cibo l'età, la traccia e da quanto è stata
   lasciata.
-- `sim/signals.py`, `net/receptors.py`: le sostanze ricevono anche gli odori
+- `arenas/signals.py`, `brains/freeform/receptors.py`: le sostanze ricevono anche gli odori
   del compito.
-- `gpu/engine.py`, `gpu/sim.py`: lo stesso, con i test di equivalenza.
-- `evo/ladder.py`: lo stadio 2 è "prede e odore che sfugge".
-- `evo/exam.py`: **esame a livelli versione 5** (4 cibi al massimo, odori
+- `arenas/generational/gpu_engine.py`, `arenas/generational/gpu_worlds.py`: lo stesso, con i test di equivalenza.
+- `arenas/generational/ladder.py`: lo stadio 2 è "prede e odore che sfugge".
+- `arenas/generational/exam.py`: **esame a livelli versione 5** (4 cibi al massimo, odori
   accesi, nube che sfugge nei livelli dello stadio 2). I punteggi della
   versione 4 non si confrontano: la panoramica confronta solo esami della
   stessa versione.

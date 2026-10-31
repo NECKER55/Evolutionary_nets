@@ -4,7 +4,7 @@ neuroni interni in numero variabile, collegamenti fitti."""
 import numpy as np
 
 from evonets import Config
-from evonets.net import Brains, SpikingBrains
+from evonets.brains.freeform import Brains, SpikingBrains
 
 
 def rich(n=50, seed=0, R=10, H=12, net="rate", conn=0.3, **kw) -> Brains:

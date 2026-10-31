@@ -1,13 +1,14 @@
-"""Lo sviluppo del cervello dai marcatori (evonets/net/development.py)."""
+"""Lo sviluppo del cervello dai marcatori (evonets/brains/freeform/development.py)."""
 
 import numpy as np
 
 from evonets import Config
-from evonets.evo import Evolution, crossover, mutate, reproduce
-from evonets.net import Brains, SpikingBrains
-from evonets.net import development as dev
-from evonets.net.brain import META_INDEX, Genome
-from evonets.net.geometry import brain_side, distances
+from evonets.arenas.generational.evolution import Evolution
+from evonets.brains.freeform.genetics import crossover, mutate, reproduce
+from evonets.brains.freeform import Brains, SpikingBrains
+from evonets.brains.freeform import development as dev
+from evonets.brains.freeform.genome import Genome, META_INDEX
+from evonets.brains.freeform.geometry import brain_side, distances
 
 
 def grown(n=60, seed=0, kind=Brains, **kw):
@@ -179,7 +180,7 @@ def test_in_brain_mode_the_eyes_know_their_side():
     marcatore della destra, il sinistro quello della sinistra, e chi nasce con
     un riflesso lo ha molto più spesso verso il lato dello stimolo che al
     contrario (geometria.BILATERAL: motori 2 = destra, 3 = sinistra)."""
-    from evonets.net.senses import SETS
+    from evonets.brains.freeform.senses import SETS
 
     cfg, b = grown(n=1000, kind=SpikingBrains, sim_mode="cervello")
     g = b.genome
@@ -197,8 +198,8 @@ def test_in_brain_mode_the_eyes_know_their_side():
 def test_paired_senses_are_the_same_organ_and_neither_side_is_favoured():
     """Sensi fissi: sinistro e destro di una coppia hanno gli stessi marcatori
     propri (lo stesso organo) e alla nascita sono usati altrettanto spesso."""
-    from evonets.net.brain import live_links
-    from evonets.net.senses import SETS, organs
+    from evonets.brains.freeform.genome import live_links
+    from evonets.brains.freeform.senses import SETS, organs
 
     cfg, b = grown(n=3000, kind=SpikingBrains, sim_mode="cervello")
     g = b.genome
@@ -259,9 +260,9 @@ def test_saves_from_before_development_open_with_the_direct_genome(tmp_path):
     assert back.cfg.genome == "diretto" and back.ctrl.brains.genome.n_markers == 0
 
 
-# --- Il grembo (net/womb.py) ---------------------------------------------------
+# --- Il grembo (brains/freeform/womb.py) ---------------------------------------------------
 
-from evonets.net import womb  # noqa: E402
+from evonets.brains.freeform import womb  # noqa: E402
 
 
 def test_womb_waves_make_neighbouring_senses_fire_together():
@@ -343,7 +344,7 @@ def test_generation_statistics_count_markers_types_and_value():
     e = Evolution(Config(population=12, genome="sviluppo", engine="numpy"), 0)
     s = e.run_generation()
     assert s["markers"] == e.cfg.marker_initial and "types" in s and s["value"] == [1.0, 1.0]
-    from evonets.net.anatomy import Anatomy
+    from evonets.brains.freeform.anatomy import Anatomy
 
     a = Anatomy(e.cfg, e.ctrl.brains.genome.take([0]))
     assert a.summary()["markers"] == e.cfg.marker_initial and a.color.shape == (a.n_nodes, 3)

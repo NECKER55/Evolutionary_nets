@@ -2,16 +2,9 @@ import numpy as np
 import pytest
 
 from evonets import Config, World
-from evonets.net.receptors import (
-    Prepared,
-    ReceptorGenes,
-    respond,
-    scales,
-    spectral,
-    stimuli,
-)
-from evonets.sim import signals
-from evonets.sim.signals import CHEMICAL, INTERNAL, LIGHT, MAGNETIC, MECHANICAL, THERMAL
+from evonets.brains.freeform.receptors import Prepared, ReceptorGenes, respond, scales, spectral, stimuli
+from evonets.arenas import signals
+from evonets.arenas.signals import CHEMICAL, INTERNAL, LIGHT, MAGNETIC, MECHANICAL, THERMAL
 
 
 def genes(n=1, R=1, **kw):

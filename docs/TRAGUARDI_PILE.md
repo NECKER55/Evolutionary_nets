@@ -2,7 +2,7 @@
 
 Serve a tenere traccia dei passi principali e a capire se il sistema migliora
 davvero, o se migliorando una cosa ne peggiora un'altra. Ogni versione è
-misurata con **lo stesso banco di prova** (`evonets/evo/pile_bench.py`): le
+misurata con **lo stesso banco di prova** (`evonets/arenas/pile/bench.py`): le
 versioni salvate in git si rimisurano da un `git worktree` (istruzioni nella
 docstring del modulo).
 

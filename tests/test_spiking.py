@@ -2,8 +2,9 @@ import numpy as np
 from nets import rich
 
 from evonets import Config
-from evonets.evo import Evolution, crossover, reproduce
-from evonets.net import Brains, NeuralController, SpikingBrains
+from evonets.arenas.generational.evolution import Evolution
+from evonets.brains.freeform.genetics import crossover, reproduce
+from evonets.brains.freeform import Brains, NeuralController, SpikingBrains
 
 N_IN = 10
 

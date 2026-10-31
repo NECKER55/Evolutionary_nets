@@ -1,8 +1,8 @@
 import numpy as np
 
 from evonets import Config
-from evonets.net import NeuralController
-from evonets.net.anatomy import Anatomy, sizes
+from evonets.brains.freeform import NeuralController
+from evonets.brains.freeform.anatomy import Anatomy, sizes
 
 N_REC = 6
 

@@ -3,10 +3,10 @@ import dataclasses
 import numpy as np
 
 from evonets import Config, World
-from evonets.evo import Evolution
-from evonets.evo.exam import ENVIRONMENT, FROM_RUN, TESTS, Exam, candidates, exam_config
-from evonets.net import NeuralController
-from evonets.sim.tasks import FarTarget, MovingTarget
+from evonets.arenas.generational.evolution import Evolution
+from evonets.arenas.generational.exam import ENVIRONMENT, Exam, FROM_RUN, TESTS, candidates, exam_config
+from evonets.brains.freeform import NeuralController
+from evonets.arenas.generational.tasks import FarTarget, MovingTarget
 
 
 def small(**kw):
@@ -95,7 +95,7 @@ def test_same_score_in_parallel_and_here():
 
 def test_every_constant_is_either_exam_environment_or_from_the_run():
     """Se fallisce, è stata aggiunta (o tolta) una costante alla configurazione:
-    decidi se l'esame la fissa (ENVIRONMENT in evo/exam.py, con il valore
+    decidi se l'esame la fissa (ENVIRONMENT in arenas/generational/exam.py, con il valore
     d'esame) o se viene dalla corsa (FROM_RUN). Se l'esame deve cambiare
     davvero, alza anche VERSION."""
     fields = {f.name for f in dataclasses.fields(Config)}

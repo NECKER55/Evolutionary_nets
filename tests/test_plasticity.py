@@ -1,9 +1,9 @@
 import numpy as np
 
 from evonets import Config
-from evonets.evo import Evolution
-from evonets.net import Brains, SpikingBrains
-from evonets.net.brain import PLASTIC
+from evonets.arenas.generational.evolution import Evolution
+from evonets.brains.freeform import Brains, SpikingBrains
+from evonets.brains.freeform.genome import PLASTIC
 
 R = 1
 MOD = PLASTIC.index("mod")
@@ -316,8 +316,8 @@ def test_innate_value_consolidates_what_was_learned_while_eating():
 
 
 def test_brain_mode_has_taste_and_pain_and_a_fixed_value_system():
-    from evonets.evo import reproduce
-    from evonets.net.senses import senses
+    from evonets.brains.freeform.genetics import reproduce
+    from evonets.brains.freeform.senses import senses
 
     cfg = Config(sim_mode="cervello")
     assert {"gusto", "dolore"} <= {s.name for s in senses(cfg)}
@@ -333,7 +333,7 @@ def test_a_delayed_reward_reaches_the_synapse_with_its_sign():
     secondo, poi dopo 2 s piacere o dolore. Con la regola pre·post·M il
     piacere la rafforza e il dolore la indebolisce (prima della traccia, con
     il ritardo, i due davano lo stesso effetto)."""
-    from evonets.evo.capacity import mechanism
+    from evonets.arenas.generational.capacity import mechanism
 
     rows = mechanism(Config(net_type="spike-ei"), n=20, delays=(0.0, 2.0), after=5.0, rule=(1, 0, 0, 0))
     for r in rows:
@@ -346,8 +346,8 @@ def test_surprise_moves_from_the_reward_to_the_cue():
     dieci volte. Con il piacere grezzo M arriva sempre al cibo; con la
     sorpresa, imparato il legame, arriva al segnale e non più al cibo
     (come la dopamina, Schultz 1997)."""
-    from evonets.evo.capacity import FIELDS
-    from evonets.net.brain import PLASTICITY_CONSTANTS, plasticity
+    from evonets.arenas.generational.capacity import FIELDS
+    from evonets.brains.freeform.plasticity import PLASTICITY_CONSTANTS, plasticity
 
     def trials(surprise):
         cfg = Config(net_type="spike-ei", surprise=surprise)

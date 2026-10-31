@@ -2,10 +2,10 @@ import numpy as np
 from nets import rich
 
 from evonets import Config
-from evonets.evo import crossover, mutate, reproduce
-from evonets.evo.genetics import duplicate_neuron, duplicate_receptor, grow
-from evonets.net import Brains
-from evonets.net.brain import META_INDEX, Genome
+from evonets.brains.freeform.genetics import crossover, mutate, reproduce
+from evonets.brains.freeform.genetics import duplicate_neuron, duplicate_receptor, grow
+from evonets.brains.freeform import Brains
+from evonets.brains.freeform.genome import Genome, META_INDEX
 
 R, N_OUT = 10, 2
 # Tutti i tassi a zero (al minimo fisico) e nessuna deriva dei tassi stessi.
@@ -200,7 +200,7 @@ def test_a_birth_uses_the_inherited_rates_not_the_ones_it_passes_on():
 
 
 def test_breaking_is_easier_than_repairing_and_long_genes_break_more():
-    from evonets.evo.genetics import RECEPTOR_GENE_LENGTH, knockout
+    from evonets.brains.freeform.genetics import RECEPTOR_GENE_LENGTH, knockout
     cfg, g = population(n=50, conn=0.0)
     g.conn[:, 0, :] = True  # il neurone 0 riceve da tutti: gene lungo
     mu = np.full(50, 0.001)
@@ -232,7 +232,7 @@ def test_without_selection_brains_do_not_grow_by_themselves():
 
 
 def test_receptor_sensitivity_has_a_physical_maximum():
-    from evonets.evo.genetics import MAX_SENSITIVITY
+    from evonets.brains.freeform.genetics import MAX_SENSITIVITY
     cfg, g = population(n=20)
     g.r_sens[:] = 50.0  # derivata all'infinito
     mutate(g, cfg, np.random.default_rng(0))
@@ -269,7 +269,7 @@ def test_a_gene_only_one_parent_has_passes_to_half_the_children():
 
 
 def test_unequal_crossing_over_adds_or_removes_a_copy_of_similar_genes():
-    from evonets.evo.genetics import unequal_crossing_over
+    from evonets.brains.freeform.genetics import unequal_crossing_over
 
     cfg, g = population(n=1)
     g.r_active[:] = False
@@ -318,7 +318,7 @@ def test_more_food_more_children():
 
 
 def test_in_brain_mode_the_senses_never_change_and_only_the_brain_evolves():
-    from evonets.net import senses
+    from evonets.brains.freeform import senses
 
     cfg = Config(sim_mode="cervello", population=60)
     b = Brains(cfg, 60, N_OUT, 0)

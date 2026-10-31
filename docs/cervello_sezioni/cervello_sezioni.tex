@@ -1,0 +1,1769 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[italian]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{lmodern,microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,tabularx,longtable,array,multirow}
+\usepackage{enumitem}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,backgrounds}
+\usepackage[hyphens]{url}
+\usepackage{hyperref}
+
+\definecolor{acc}{RGB}{31,84,140}
+\definecolor{sens}{RGB}{214,232,247}
+\definecolor{mem}{RGB}{222,240,216}
+\definecolor{dec}{RGB}{252,231,207}
+\definecolor{val}{RGB}{248,219,219}
+\definecolor{mod}{RGB}{233,224,245}
+\definecolor{fix}{RGB}{232,232,232}
+\hypersetup{colorlinks=true,linkcolor=acc,urlcolor=acc,citecolor=acc,
+  pdftitle={Il cervello a sezioni},pdfauthor={Evolutionary nets}}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\emergencystretch=2em
+\setlist{nosep,leftmargin=1.4em}
+\renewcommand{\arraystretch}{1.25}
+
+% Le voci di ogni scheda.
+\newcommand{\voce}[1]{\par\smallskip\noindent{\bfseries\color{acc}#1}\par\nopagebreak}
+\newcommand{\gene}[1]{\texttt{#1}}
+\newcommand{\lesione}[1]{\textsf{\bfseries#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newenvironment{struttura}{\par\small\noindent\tabularx{\textwidth}{@{}>{\bfseries}L{2.7cm}Y@{}}\toprule}{\bottomrule\endtabularx\par\medskip}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\tikzset{
+  sec/.style={draw=black!65,rounded corners=2pt,minimum height=11mm,minimum width=20mm,
+              align=center,font=\small,line width=.5pt},
+  flow/.style={-{Stealth[length=2mm]},line width=.6pt,black!75},
+  soft/.style={flow,dashed},
+  teach/.style={-{Stealth[length=2mm]},line width=.9pt,red!70!black},
+  lab/.style={font=\scriptsize,fill=white,inner sep=1pt},
+}
+
+\title{\textbf{Il cervello a sezioni}\\[2mm]
+\large Com'è fatto, a che cosa serve ogni parte, che cosa succederebbe senza\\
+e a quali parti del cervello vero corrisponde}
+\author{Evolutionary nets}
+\date{30 ottobre 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent Questo documento descrive il cervello a sezioni come è scritto oggi in
+\texttt{evonets/brains/pile/}, con le formule e i valori di partenza del codice.
+Per ogni sezione dice che cosa fa, perché serve, che cosa succederebbe in teoria
+senza di lei e a quale struttura del cervello somiglia. Distingue sempre ciò che
+\emph{il codice fa}, ciò che \emph{ci si aspetta in teoria} e ciò che \emph{è stato
+misurato}: non sempre coincidono, e la sezione~\ref{sec:stato} dice dove.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ---------------------------------------------------------------------------
+\section{L'idea}
+
+\subsection{Il problema da cui nasce}
+
+Le reti a forma libera del progetto evolvono bene, ma il test di capacità
+(\texttt{docs/SPEC\_CAPACITA.md}) ha mostrato che \textbf{non imparano dentro la
+vita}, anche con la regola giusta. Le cause misurate sono tre:
+\begin{itemize}
+\item il cambiamento utile (0,3\% per frutto) affoga nel rumore dell'apprendimento
+  hebbiano (10\% in una vita);
+\item quando arriva il dolore il cervello non sa più \emph{che cosa} ha mangiato: il
+  frutto è fuori vista;
+\item il critico sui sensi grezzi peggiora le cose: l'occhio che si adatta durante
+  l'avvicinamento sembra una delusione.
+\end{itemize}
+La conclusione è che non mancano calcoli ma \textbf{parti con ruoli diversi}: una
+memoria di ciò che si è appena visto, una descrizione stabile, un posto dove la
+scelta viene fatta e imparata.
+
+\subsection{Il principio: si fissa la struttura, non il contenuto}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lYY}
+\toprule
+& \textbf{Fissato da noi} & \textbf{Emerge dall'esperienza} \\
+\midrule
+Architettura & sezioni, numero di neuroni, chi parla con chi & \\
+Velocità & quanto cambia e quanto dura ogni parte & \\
+Regole & una famiglia di regole per sezione & \\
+Contenuto & & che cosa rappresenta ogni neurone, quale colore è buono, quale scelta conviene \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Nessun neurone nasce con un significato. Tutte le 67 costanti del cervello sono
+geni (\texttt{Genes}): nella fase A valgono per tutti i valori di partenza, nella
+fase B le tara l'evoluzione, insieme ai pesi di partenza e alle connessioni di C.
+L'evoluzione \emph{tara} le regole, non le inventa: è la lezione del progetto Cyber
+Rodent (Elfwing, Uchibe, Doya, Christensen, 2011).
+
+\subsection{Il compito}
+
+Il cervello vive nell'\textbf{arena delle pile}, un recinto di $500\times500$ con 6
+esseri e 8 pile. Le pile sono rosse o gialle: una ricarica (+25 di energia, piacere),
+l'altra toglie 8 e fa male. \textbf{Ogni 300 secondi i ruoli si scambiano} senza che
+niente lo segnali. Ogni 200 secondi cambia l'angolo in cui compaiono le pile. Si
+mangia solo mordendo, e mordere costa. A energia zero si muore: nella fase A si
+rinasce con il cervello di partenza, senza ciò che si era imparato. Il mondo fa un
+passo ogni $\Delta t = 0{,}05$ s.
+
+Il compito è fatto apposta per chiedere ciò che le reti di prima non sanno fare:
+imparare in fretta \emph{quale} colore conviene e ricredersi quando il mondo cambia.
+
+% ---------------------------------------------------------------------------
+\section{Lo schema}\label{sec:schema}
+
+Le sezioni sono dodici più due meccanismi trasversali (l'arbitraggio e la soglia
+sulla sorpresa). Il percorso completo dai sensi ai motori, con i cicli, è nella
+sezione~\ref{sec:flusso}. La figura~\ref{fig:attivita} mostra chi manda \emph{attività} a chi
+mentre l'essere agisce; la figura~\ref{fig:apprendimento} mostra chi \emph{insegna} a
+chi. Sono due schemi separati perché rispondono a due domande diverse: il primo a
+``come decide?'', il secondo a ``come impara?''.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+\node[sec,fill=fix,minimum width=14mm] (W) at (0.6,6) {Sensi\\31};
+\node[sec,fill=sens] (A) at (3.0,6) {\textbf{A} interfaccia\\52 canali};
+\node[sec,fill=sens] (S) at (3.0,9) {\textbf{S} attenzione\\mappa di 9 posizioni};
+\node[sec,fill=sens] (B) at (6.0,6) {\textbf{B} nucleo\\16 prototipi};
+\node[sec,fill=mem] (D) at (5.6,3.6) {\textbf{D} mem. di lavoro\\10 canali, 4 s};
+\node[sec,fill=mem] (C) at (9.6,3.6) {\textbf{C} mem. veloce\\256 neuroni, 3 min};
+\node[sec,fill=mem] (L) at (9.6,1.2) {\textbf{L} mem. lunga\\stessa forma di C};
+\node[sec,fill=val] (O) at (9.2,9) {\textbf{O} valore\\degli oggetti};
+\node[sec,fill=val] (K) at (12.2,9) {\textbf{K} contesti\\4 cassetti di O};
+\node[sec,fill=dec] (E) at (12.2,6) {\textbf{E} selezione\\4 programmi + morso};
+\node[sec,fill=fix,minimum width=17mm] (F) at (15.2,6) {\textbf{F} motore\\4 neuroni};
+\node[sec,fill=fix,minimum width=17mm] (M) at (15.2,1.2) {Corpo\\e mondo};
+
+\draw[flow] (W) -- (A);
+\draw[flow] (S) -- node[lab,right] {sceglie la fovea} (A);
+\draw[flow] (A) -- (B);
+\draw[flow] (B) -- (E);
+\draw[flow] (E) -- (F);
+\draw[flow] (F) -- (M);
+% la fovea verso D e C
+\draw[flow] ([xshift=-5mm]A.south) |- node[lab,pos=.88,above] {fovea} (D.west);
+\draw[flow] ([xshift=5mm]A.south) -- ++(0,-3.3) -| node[lab,pos=.3,above] {che cos'è l'oggetto} ([xshift=-7mm]C.south);
+% B verso C
+\fill (8.9,6) circle (.6mm);
+\draw[flow] (8.9,6) -- ([xshift=-7mm]C.north);
+% D verso C, E, O
+\draw[flow] (D) -- (C);
+\fill (7.7,3.6) circle (.6mm);
+\draw[flow] (7.7,3.6) -- (7.7,4.9) -- (11.4,4.9) -- ([xshift=-8mm]E.south);
+\draw[flow] (7.7,4.9) -- (7.7,7.6) -- (8.7,7.6) -- ([xshift=-5mm]O.south);
+\node[lab] at (7.7,7.1) {ciò che ho preso};
+% C e L verso E
+\draw[flow] (C.east) -| (12.2,5.45);
+\draw[soft] (C) -- node[lab,right] {solo a riposo} (L);
+\draw[flow] (L.east) -| ([xshift=8mm]E.south);
+% O, K, S
+\draw[flow] (K) -- (O);
+\draw[flow] (O) -- node[lab,above=1pt,align=center] {valore, importanza,\\incertezza} (S);
+\draw[flow] ([xshift=5mm]O.south) -- (9.7,7.4) -- (11.4,7.4) -- ([xshift=-8mm]E.north);
+% lascialo
+\draw[flow] (13.9,6.55) -- (13.9,10.3) -- node[lab,above] {``lascialo'': l'oggetto viene ignorato per 3 s} (3.0,10.3) -- (S.north);
+% il morso non passa da F
+\draw[flow] (13.6,5.45) -- node[lab,pos=.45] {morso} (13.6,1.2) -- (M.west);
+% il mondo risponde
+\draw[flow] (M.south) -- ++(0,-.5) -| (W.south);
+\end{tikzpicture}
+\caption{Il flusso dell'attività. Da sinistra a destra: i sensi diventano canali (A),
+la situazione (B), i ricordi (D, C, L) e una scelta (E), che F trasforma in movimento.
+O colora gli oggetti di valore; S decide quale guardare. Azzurro: percezione. Verde:
+memorie. Rosso: valore. Arancio: decisione. Grigio: parti fisse.}
+\label{fig:attivita}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+\node[sec,fill=fix] (M) at (0.9,4) {Corpo\\piacere, dolore,\\energia spesa};
+\node[sec,fill=val] (R) at (3.9,4) {$r$ valore\\del momento};
+\node[sec,fill=val] (T) at (7.5,4) {$\hat\delta$ soglia e scala\\(la sorpresa che insegna)};
+\node[sec,fill=mod] (U) at (7.5,1.2) {\textbf{U} incertezza\\``adesso'' / ``il solito''};
+\node[sec,fill=mem,minimum width=33mm] (C) at (12.9,5.7) {\textbf{C} uscite verso E};
+\node[sec,fill=dec,minimum width=33mm] (E) at (12.9,4.2) {\textbf{E} pesi dell'abitudine};
+\node[sec,fill=mem,minimum width=33mm] (D) at (12.9,2.7) {\textbf{D} cancello};
+\node[sec,fill=dec,minimum width=33mm] (AR) at (12.9,1.2) {Arbitraggio: pesi di\\E+L, C, O$\to$S; accelera C};
+\node[sec,fill=val] (OK) at (3.9,7) {\textbf{O} e \textbf{K}\\Rescorla-Wagner};
+\node[sec,fill=sens] (B) at (3.9,1.2) {\textbf{B} prototipi};
+\node[sec,fill=val,dashed] (V) at (8.2,7) {\textbf{V} tre critici\\imparano ma non insegnano};
+\draw[teach] (M) -- (R);
+\draw[teach] (R) -- node[lab,above] {$\delta$} (T);
+\draw[teach] (T.east) -- (10.3,4) |- (C.west);
+\draw[teach] (T.east) -- (10.3,4) |- (E.west);
+\draw[teach] (T.east) -- (10.3,4) |- (D.west);
+\draw[teach] (T) -- (U);
+\draw[flow] (U.east) -- (AR.west);
+\draw[teach] (M.north) |- node[lab,pos=.72,above] {esito di ogni episodio} (OK.west);
+\draw[teach] (R.south) -- node[lab,right] {$|\delta|$: quanto conta il momento} (B.north);
+\draw[soft] (R.north east) ++(-3mm,0) -- (V.south west);
+\draw[soft] (V.south) ++(-.7,0) -- node[lab,right] {\gene{critic\_mix} = 0} (7.5,4.55);
+\end{tikzpicture}
+\caption{Il flusso dell'apprendimento. Il corpo è l'unico maestro. In rosso i segnali
+che insegnano davvero oggi. O e K imparano direttamente dagli esiti; C, E e il cancello
+di D imparano dalla sorpresa filtrata $\hat\delta$; U sposta il peso delle decisioni. Il
+tratteggio indica il critico V, che con i valori attuali non influisce su niente
+(sezione~\ref{sec:V}).}
+\label{fig:apprendimento}
+\end{figure}
+
+\subsection{L'ordine dei calcoli in un passo}
+
+L'ordine conta: ogni passaggio usa ciò che i precedenti hanno appena aggiornato.
+\begin{enumerate}
+\item Gli episodi di piacere o dolore appena finiti insegnano a K e a O.
+\item S sceglie l'oggetto da guardare; se è cambiato, E deciderà subito.
+\item A prepara i canali, compresa la fovea sull'oggetto scelto.
+\item Il corpo dà il valore del momento $r$.
+\item B, D e C si aggiornano; O legge i due valori ``ciò che guardo'' e ``ciò che ho preso''.
+\item I critici V imparano; da $r$ si ricava $\delta$, poi la soglia dà $\hat\delta$ e U si aggiorna.
+\item C impara e dimentica; a riposo L si avvicina a C.
+\item E somma i voti, tenendo conto dell'arbitraggio, impara e, se è il momento, sceglie.
+\item F traduce il programma in sterzo e spinta (è calcolato dall'arena, fuori dal cervello).
+\end{enumerate}
+
+\subsection{Le scale di tempo}
+
+Il motivo più profondo per avere tante sezioni è che \textbf{una sola velocità non può
+bastare}. Ciò che impara in fretta dimentica in fretta; ciò che è stabile non si adatta.
+Ogni sezione occupa una scala diversa (McClelland, McNaughton, O'Reilly, 1995).
+
+\begin{center}
+\begin{tabularx}{\textwidth}{llY}
+\toprule
+\textbf{Scala} & \textbf{Dove} & \textbf{Come dura} \\
+\midrule
+0,05 s -- 0,5 s & A, B, decisioni di E e S & attività che segue l'ingresso \\
+2 s & tracce di E, C, cancello & ``chi ha appena agito'' resta marcato \\
+4 s & D & attività che resta accesa, nessuna sinapsi cambia \\
+20 s / 200 s & U, soglia & medie della sorpresa: ``adesso'' e ``il solito'' \\
+3 minuti & C & sinapsi che imparano in un colpo e sbiadiscono \\
+minuti -- vita & O, K & sinapsi che cambiano a ogni episodio \\
+vita & B, L, E & sinapsi lente \\
+generazioni & geni & costanti, pesi di partenza, connessioni di C \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ---------------------------------------------------------------------------
+\section{L'anatomia completa}\label{sec:anatomia}
+
+Questa sezione è la mappa da tenere a fianco delle schede. I numeri sono quelli del codice e
+si riferiscono a un essere solo; tutte le costanti sono i valori di partenza dei geni.
+
+\subsection{Che cosa vuol dire ``neurone'' qui}
+
+Non ci sono impulsi: ogni neurone è un numero che cambia nel tempo. Non tutti però sono
+fatti allo stesso modo. Nel cervello a sezioni esistono \textbf{sei tipi di unità}.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}L{3.1cm}YL{2.7cm}@{}}
+\toprule
+\textbf{Tipo} & \textbf{Come calcola} & \textbf{Dove} \\
+\midrule
+Canale & copia un valore, non calcola & A, fovea \\
+Filtro & segue l'ingresso con ritardo: $x\leftarrow\kappa x+(1-\kappa)\,\text{ingresso}$ & A, D, B (uscita) \\
+Prototipo & risponde tanto più quanto l'ingresso è \emph{vicino} a un punto salvato nei suoi pesi: misura una distanza, non fa una somma pesata & B \\
+A soglia & somma pesata $z$, poi resta acceso solo chi vince una competizione & C \\
+Lineare & somma pesata $z=\sum w_i x_i$, senza soglia & V, O, E (punteggi), F \\
+Sigmoide & $\sigma(z)=1/(1+e^{-z})$: un valore tra 0 e 1 & cancello di D, morso di E \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Ogni sinapsi che impara ha quasi sempre accanto una \textbf{traccia di eleggibilità}: un
+numero che dice ``questa sinapsi ha appena lavorato''. Quando arriva la sorpresa, cambia
+solo la sinapsi con la traccia alta. È il modo con cui un segnale globale, che arriva
+uguale a tutti, modifica soltanto le connessioni giuste.
+
+\subsection{Quanto è grande ogni sezione}
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}lL{3.2cm}L{3.0cm}rY@{}}
+\toprule
+& \textbf{Unità} & \textbf{Connessioni fisse} & \textbf{Pesi che imparano} & \textbf{Altri numeri tenuti} \\
+\midrule
+A & 52 canali, di cui 11 con filtro & --- & 0 & 11 medie lente \\
+S & 9 posizioni & 7 pesi uguali per tutte & 0 & oggetto attento, novità di 14 oggetti \\
+B & 16 prototipi & --- & 1664 & attività, medie delle vittorie \\
+D & 10 memorie, 1 cancello & 10 copie dalla fovea & 10 & 10 tracce \\
+C & 256 neuroni & 1536 dagli ingressi & 1280 & 1280 tracce \\
+L & nessuna: solo sinapsi & --- & 1280 & --- \\
+O & 2 neuroni di uscita & --- & 56 & 56 incertezze, 6 tracce, episodio \\
+K & 4 contesti, 1 attivo & --- & 0 & prove, usi, conteggi \\
+E & 5 uscite & --- & 145 & 145 tracce \\
+V & 3 critici & --- & 888 & 888 tracce \\
+U & 1 unità & --- & 0 & 3 medie \\
+F & 4 neuroni motori & 56 pesi (13 non nulli) & 0 & deriva, verso di fuga \\
+\midrule
+\textbf{Totale} & & & \textbf{5323} & \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+I 5323 pesi sono ciò che l'essere impara in vita e perde quando muore. Il genoma ha 9201
+numeri: 67 costanti, 31 valori innati legati ai sensi, 56 pesi di F, 832 prototipi di partenza,
+7168 interruttori per le connessioni possibili di C ($256\times28$; una c'è se il suo gene
+supera 0,5), 145 pesi di partenza di E, 888 di V, 14 di O.
+
+\subsection{Tutte le connessioni}
+
+Ogni riga è un fascio di fibre. \emph{Fissa} significa che non cambia in vita (tutte le
+fisse sono però geni). \emph{Sorpresa} significa che impara con la sorpresa filtrata $\hat\delta$.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}L{2.5cm}rL{2.6cm}Y@{}}
+\toprule
+\textbf{Da $\to$ a} & \textbf{Numero} & \textbf{Regola} & \textbf{Note} \\
+\midrule
+Sensi, fovea $\to$ A & 41 & fissa, copia & più 11 canali ``è appena salito'' \\
+A $\to$ B & $16\times52$ & competitiva & sono i prototipi: si confrontano con l'ingresso \\
+B $\to$ previsione di A & $52\times16$ & errore locale & serve a B per sapere che cosa segue \\
+Fovea $\to$ D & 10 & fissa, una a una & passa solo a cancello aperto \\
+Fovea $\to$ cancello & 10 + 1 & sorpresa; fissa & 10 imparano; ``nuovo'' ha peso 8 \\
+Identità in fovea $\to$ C & \multirow{3}{*}{1536} & fissa, peso 1 & canali 1--6 \\
+Identità in D $\to$ C & & fissa, peso 0,5 & \\
+B $\to$ C & & fissa, peso 0,1 & il contesto \\
+C $\to$ E (voto veloce) & $5\times256$ & sorpresa & decade in 3 minuti, limite $\pm0{,}3$ \\
+C $\to$ E (voto di L) & $5\times256$ & media di C & cambia solo a riposo \\
+B, D, O, 1 $\to$ E & $5\times29$ & sorpresa & 16 + 10 + 2 + 1 ingressi; limite $\pm5$ \\
+Fovea, D, C, energia, B, O, 1 $\to$ V & $3\times296$ & TD & 10 + 10 + 256 + 1 + 16 + 2 + 1 ingressi \\
+Identità $\to$ O & $2\times7\times4$ & Rescorla-Wagner & piacere e dolore, 6 + sfondo, 4 cassetti \\
+O $\to$ S & 9 posizioni & fissa & tre pesi: 2, 0,5, 0,5 \\
+S, E $\to$ F & $4\times14$ & fissa & il programma combinato con la posizione \\
+Raggi $\to$ F & 3 & fissa & il riflesso dei muri \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ---------------------------------------------------------------------------
+\section{Sezione per sezione}
+
+Ogni scheda ha la stessa forma. \emph{Struttura} dice di che cosa è fatta la sezione:
+neuroni, connessioni e stato, con il nome che hanno nel codice. \emph{Come funziona}
+elenca che cosa fa a ogni passo di tempo, nell'ordine esatto. \emph{Perché
+serve} spiega il problema che risolve. \emph{Se mancasse} è il ragionamento teorico;
+dove esiste una lesione nel codice è indicata la sua lettera. \emph{Nel cervello} dà
+l'analogia più vicina: è un'ispirazione, non un'equivalenza. \emph{Misure} riporta i
+dati disponibili con la loro origine.
+
+% --- A ---
+\subsection{A --- Interfaccia sensoriale}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 52 canali, senza pesi. 31 grezzi + 11 ``è appena salito'' + 10 di fovea. \\
+I 31 grezzi & 9 occhi (rosso, giallo, blu $\times$ sinistra, centro, destra); 12 occhi per i muri (4 colori
+  $\times$ 3 direzioni); 3 raggi di distanza; 3 urti; energia; ``mi guardano''; gusto; dolore. Tutti tra 0 e 1. \\
+Gli 11 veloci & uno per ognuno dei 9 occhi, per il gusto e per il dolore. I muri e i raggi non li hanno. \\
+Stato & \texttt{slow}: 11 medie, una per canale veloce. \\
+Geni & \gene{tau\_a} = 0,3 s. \\
+Connessioni & riceve i sensi dal mondo e la fovea da S; manda tutti i 52 canali soltanto a B. \\
+\end{struttura}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item Per ognuno degli 11 canali calcola quanto il segnale supera la sua media recente, e lo
+  taglia tra 0 e 1. Una discesa dà 0: conta solo ciò che sale.
+\item Aggiorna la media:
+\end{enumerate}
+\[
+\text{veloce}_t=\bigl[x_t-\text{lento}_t\bigr]_0^1,
+\qquad
+\text{lento}_{t+1}=\kappa\,\text{lento}_t+(1-\kappa)\,x_t,
+\qquad \kappa=e^{-\Delta t/0{,}3\,\text{s}}.
+\]
+\begin{enumerate}[resume]
+\item Unisce sensi, veloci e fovea in un vettore di 52 numeri, in quest'ordine.
+\end{enumerate}
+Quindi una luce che si accende dà un impulso nel canale veloce, che sparisce in circa 0,3 s
+anche se la luce resta. La fovea ha una scheda sua (sezione~\ref{sec:fovea}).
+
+\voce{Perché serve}
+Separa ``com'è'' da ``che cosa è cambiato''. Un cervello che legge solo i valori
+assoluti non distingue l'inizio di un evento dal suo perdurare, e gli eventi sono
+proprio ciò che va imparato. Inoltre isola il resto del cervello dai sensori: per
+cambiare sensori basta cambiare A.
+
+\voce{Se mancasse}
+Il cervello non avrebbe più nessun ingresso, quindi non è una lesione possibile. Si
+può ragionare su pezzi di A. Senza i canali veloci B vedrebbe solo stati e avrebbe più
+difficoltà a segnare gli istanti in cui succede qualcosa. Senza la fovea non ci sarebbe
+il concetto di ``l'oggetto'': i sensi direbbero che c'è del rosso a sinistra, non che
+\emph{quella cosa} è rossa, grande e vicina, e D, C e O non avrebbero niente da leggere.
+
+\voce{Nel cervello}
+Retina e talamo sensoriale. I canali lenti e veloci ricordano le vie sostenute e
+transitorie della visione (parvocellulare e magnocellulare).
+
+% --- S ---
+\subsection{S --- Attenzione}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 9 neuroni-posizione. Coprono i $120^\circ$ davanti al muso, $13{,}3^\circ$ ciascuno. Un
+  neurone rappresenta una \emph{direzione}, non un oggetto: gli oggetti vengono e vanno, i neuroni no. \\
+Ingressi di ogni neurone & dell'oggetto più vicino in quella direzione (gli altri sono nascosti): vicinanza,
+  novità, se è già l'oggetto attento, se è appena stato lasciato, e i tre numeri di O. \\
+Connessioni & 7 pesi fissi, uguali per tutti i 9 neuroni. Nessuna sinapsi impara. \\
+Stato & \texttt{target}: l'oggetto attento. \texttt{inhib}, \texttt{inhib\_t}: l'oggetto lasciato e quanto manca.
+  \texttt{novelty}: quanto è nuovo ognuno dei 14 posti oggetto. \texttt{prev\_vis}: chi si vedeva prima.
+  \texttt{new}: il canale ``nuovo'' della fovea. \texttt{changed}: l'oggetto è cambiato. \\
+Geni & \gene{sal\_near} 2; \gene{sal\_novelty} 1,5; \gene{sal\_stick} 1; \gene{sal\_inhibit} 4; \gene{sal\_value} 2;
+  \gene{sal\_import} 0,5; \gene{sal\_unc} 0,5; \gene{sal\_temperature} 0,4; \gene{novelty\_tau} e \gene{new\_tau} 0,5 s;
+  \gene{inhibit\_time} 3 s; \gene{decide\_every} 0,5 s. \\
+\end{struttura}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item La novità di ogni oggetto cala con $\tau=0{,}5$ s; chi è appena comparso riceve +1.
+\item Il tempo di inibizione scende. Se l'oggetto attento non si vede più, \texttt{target} diventa
+  $-1$. Il canale \texttt{new} cala con $\tau=0{,}5$ s.
+\item Si costruisce la mappa: ogni oggetto in vista va nella posizione del suo angolo. Se in una
+  posizione ce ne sono più di uno, resta il più vicino.
+\item Ogni posizione occupata calcola il suo punteggio:
+\end{enumerate}
+\begin{align*}
+z={}&\underbrace{2\,\text{vicino}+1{,}5\,\text{novità}+1\,[\text{è l'attento}]-4\,[\text{appena lasciato}]}_{\text{innato}}\\
+&+\underbrace{\ell\,(2\,v_O+0{,}5\,i_O)+0{,}5\,u_O}_{\text{da O}},
+\qquad \ell=1-0{,}7\,k,
+\end{align*}
+dove $v_O$, $i_O$, $u_O$ sono valore, importanza e incertezza dell'oggetto e $k$ viene da U.
+\begin{enumerate}[resume]
+\item I punteggi diventano probabilità: $P_i\propto e^{z_i/0{,}4}$.
+\item Se è il momento di decidere (ogni 0,5 s) o non c'è un oggetto attento, si estrae una
+  posizione a caso con quelle probabilità. Con temperatura 0,4, una differenza di punteggio pari a 1
+  vale circa 12 volte in probabilità. Se l'oggetto è diverso da prima, \texttt{new} = 1.
+\item Se l'oggetto è cambiato si alza \texttt{changed}, ed E decide subito.
+\end{enumerate}
+Oltre a O e a U, su S agisce soltanto E, con il programma ``lascialo'', che mette l'oggetto in
+\texttt{inhib} per 3 s.
+
+\voce{Perché serve}
+Risolve il \textbf{problema del merito}. Se un essere guarda tre pile insieme e poi
+sente dolore, quale ha causato il dolore? Con un oggetto alla volta la domanda ha una
+risposta. Inoltre lega la caratteristica all'oggetto: ``rosso'' e ``vicino'' riguardano
+la stessa cosa. Infine porta il sapere nell'azione: vedere prima ciò che conviene è un
+modo di scegliere che non passa da E.
+
+Il punteggio ``importanza'' fa sì che anche il pericolo attiri lo sguardo; quello
+``incertezza'' spinge a guardare le cose di cui non si sa ancora abbastanza, che è il
+modo per imparare che cosa valgono.
+
+\voce{Se mancasse (lesione \lesione{S}: resta solo la salienza innata)}
+L'essere guarderebbe ciò che è vicino e nuovo, buono o cattivo che sia. O continuerebbe
+a imparare, ma il suo sapere arriverebbe alle azioni solo attraverso i pesi di E, che
+sono lenti. Ci si aspetta che la scelta cada molto, e che però il crollo dopo
+un'inversione sia più piccolo: non avendo imparato a preferire un colore, c'è meno da
+disimparare.
+
+Togliendo l'intera mappa di attenzione, senza un oggetto attento, si perderebbe anche
+la fovea, e con lei il funzionamento di D, C e O.
+
+\voce{Nel cervello}
+Il collicolo superiore: una mappa di posizioni, dove vince un punto e la testa o gli
+occhi si orientano. Il punteggio combinato è il concetto di \emph{mappa di priorità}
+della corteccia parietale e frontale (Fecteau e Munoz, 2006; Bisley e Goldberg, 2010).
+``Appena lasciato'' è l'\emph{inibizione del ritorno} (Posner). L'attrazione verso ciò
+che è incerto viene da Pearce e Hall (1980).
+
+\voce{Misure}
+Con 15 minuti di mondo (\texttt{SPEC\_ARENA\_PILE.md}, 29 ottobre): con O e S che lo
+legge 58,2\% di pile buone; con S che non lo legge 52,5\%, quanto senza O. In una misura
+precedente, senza S la quota di buone prima dell'inversione era 55\% contro 65\%, con un
+crollo minore dopo (47\% contro 37\%): il comportamento previsto.
+
+% --- fovea ---
+\subsection{La fovea}\label{sec:fovea}
+
+\voce{Che cos'è}
+La fovea \textbf{non è un sensore}: è un elenco di 10 numeri che descrive \emph{un solo
+oggetto}, quello scelto da S. Il nome è una metafora. Nel cervello a sezioni ``guardare
+una cosa'' non vuol dire voltarsi: vuol dire riempire questi 10 numeri con quella cosa.
+Se S non ha scelto niente, i primi 9 valgono zero.
+
+\voce{Com'è fatta}
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}clYl@{}}
+\toprule
+\textbf{N.} & \textbf{Canale} & \textbf{Come si calcola} & \textbf{Che cosa dice} \\
+\midrule
+1--3 & rosso, giallo, blu & 0 o 1 & che cos'è \\
+4--5 & grande, piccolo & 0 o 1 (solo le pile) & che cos'è \\
+6 & si muove & 1 se un essere va a più del 5\% della velocità massima & che cos'è \\
+7 & vicino & $1-\text{distanza}/350$ & dove sta \\
+8 & a sinistra & $\text{angolo}/60^\circ$ se è a sinistra, altrimenti 0 & dove sta \\
+9 & a destra & $\text{angolo}/60^\circ$ se è a destra, altrimenti 0 & dove sta \\
+10 & nuovo & 1 quando l'oggetto cambia, poi cala con $\tau=0{,}5$ s & da quando lo guardo \\
+\bottomrule
+\end{tabularx}
+\end{center}
+I primi 6 canali sono l'\textbf{identità} dell'oggetto, gli ultimi 4 il suo
+\textbf{rapporto con me}. Una pila ha sempre rosso o giallo, e grande o piccolo. Gli
+esseri hanno il blu (la luce sul muso) e, se si muovono, ``si muove''. Quindi il blu
+significa di fatto ``è un compagno''. I muri non sono oggetti: non entrano mai nella fovea.
+
+\voce{Un esempio}
+Una pila rossa grande, a 140 di distanza e $20^\circ$ a destra, appena scelta da S:
+\[
+\text{fovea}=(\underbrace{1,\ 0,\ 0}_{\text{rossa}},\ \underbrace{1,\ 0}_{\text{grande}},\
+\underbrace{0}_{\text{ferma}},\ \underbrace{0{,}6}_{\text{vicino}},\
+\underbrace{0}_{\text{sinistra}},\ \underbrace{0{,}33}_{\text{destra}},\
+\underbrace{1}_{\text{nuovo}}).
+\]
+
+\voce{Da dove vengono i numeri}
+Questo è il punto più importante, e il più diverso da un cervello vero. \textbf{La fovea
+non viene calcolata dagli occhi.} Il mondo passa direttamente al cervello un elenco degli
+oggetti in vista (funzione \texttt{objects\_of}), fino a 13 (8 pile e 5 compagni), con le
+loro caratteristiche esatte. Un oggetto è in vista se è entro $60^\circ$ dal muso e a
+meno di 350; un compagno anche se è rivolto verso di me. I 9 canali degli occhi sono
+un'altra via, molto più grossolana: ogni occhio dice soltanto quanto è vicino il colore
+più vicino in un settore di $40^\circ$.
+
+Vedere, separare gli oggetti dallo sfondo e riconoscerli è quindi \textbf{un lavoro già
+fatto} prima di arrivare al cervello. È una scelta precisa: il progetto studia che cosa
+si impara a fare degli oggetti, non come si impara a vederli.
+
+\voce{Dove va}
+\begin{itemize}
+\item In \textbf{A}, come ultimi 10 canali, e da lì in B.
+\item In \textbf{D}: ne resta una copia quando l'oggetto è nuovo.
+\item In \textbf{C}: solo i 6 canali dell'identità, perché il codice non cambi con la
+  distanza e lo stesso oggetto accenda gli stessi neuroni a ogni incontro.
+\item In \textbf{O}: l'identità diventa la traccia a cui andrà il merito di un esito.
+\item In \textbf{V}: tutti i 10 canali.
+\item In \textbf{F} no, formalmente: F riceve ``dove sta l'oggetto'' direttamente da S.
+  È la stessa informazione dei canali 7--9, presa dalla stessa fonte.
+\end{itemize}
+E non legge la fovea direttamente: la conosce attraverso B, D e i due neuroni di O.
+
+\voce{Perché serve}
+La fovea trasforma una scena in \emph{una cosa alla volta}, e con questo risolve due
+problemi insieme. Il primo è il merito: dopo un esito si sa a chi attribuirlo. Il secondo
+è il legame: i canali degli occhi dicono che c'è del rosso e c'è del grande, ma non che
+la stessa pila è rossa e grande. Nella fovea queste proprietà stanno per forza insieme,
+perché appartengono all'unico oggetto presente. Separare identità e posizione permette
+inoltre di imparare ``che cos'è'' senza confonderlo con ``dove si trova''.
+
+\voce{Se mancasse}
+Con i soli occhi, il cervello saprebbe che c'è del rosso a sinistra, ma due pile dello
+stesso settore sarebbero una cosa sola e la grandezza non si vedrebbe affatto, perché
+nessun occhio la misura. D non avrebbe niente da tenere, C niente da riconoscere e O
+niente a cui legare gli esiti. Anche F perderebbe un bersaglio preciso da inseguire.
+Nell'arena con le pile buone per grandezza il compito diventerebbe impossibile.
+
+\voce{Nel cervello}
+La fovea vera è la piccola zona centrale della retina, con la massima risoluzione, e per
+usarla bisogna muovere gli occhi. \textbf{Qui è diverso in due modi.} S può scegliere un
+oggetto ovunque nel ventaglio di $120^\circ$ senza muoversi, e questo somiglia di più
+all'\emph{attenzione nascosta}, che si sposta senza spostare lo sguardo (Posner, 1980).
+Inoltre la descrizione è perfetta, mentre quella vera è il risultato di decine di
+millisecondi di calcolo nella corteccia visiva. Il concetto più vicino è il \emph{file
+dell'oggetto} (Kahneman, Treisman, Gibbs, 1992): una scheda mentale che tiene insieme le
+proprietà di un oggetto mentre lo si segue. Lo stesso nome ``fovea'' resta qui per
+comodità.
+
+% --- B ---
+\subsection{B --- Nucleo stabile}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 16 neuroni-prototipo. Ogni neurone è un punto nello spazio dei 52 canali di A. \\
+Pesi & \texttt{proto}: $16\times52=832$. Sono il punto salvato da ogni neurone. Partono a caso tra 0 e 0,3
+  (dal genoma), quindi non significano niente. \\
+ & \texttt{pred}: $52\times16=832$. Da B prevedono il prossimo ingresso di A. Partono da zero. \\
+Ingressi & tutti i 52 canali di A, e $|\delta|$ come velocità di apprendimento. Nessun ritorno dall'alto. \\
+Uscite & 16 valori di attività (\texttt{state\_b}) verso C (peso 0,1), E e V (peso 0,2). \\
+Stato & \texttt{state\_b}, \texttt{prev\_b}; \texttt{win\_rate}: quanto spesso ha vinto ogni neurone di recente. \\
+Geni & \gene{b\_winners} = 3 (struttura); \gene{conscience} 2; \gene{eta\_b} 0,05 al s; \gene{eta\_predict} 0,5 al s;
+  \gene{predict} 0,5; \gene{surprise\_boost} 2; \gene{tau\_b} 0,2 s; \gene{win\_window} 30 s. \\
+\end{struttura}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item \textbf{Distanza.} Ogni neurone misura quanto l'ingresso $a$ dista dal suo punto, e riceve un aiuto
+  se ha vinto meno della sua quota $1/16$ (la ``coscienza''):
+\[
+d_j=\lVert \text{proto}_j-a\rVert^2-2\,\bigl(\tfrac{1}{16}-\text{vittorie}_j\bigr).
+\]
+\item \textbf{Competizione.} Si ordinano le distanze. Vincono i 3 più vicini; la distanza del quarto,
+  $d_{(4)}$, fa da metro:
+\[
+y_j=\Bigl[1-\frac{d_j}{d_{(4)}}\Bigr]_0^1,\quad\text{poi}\ y\leftarrow y/\max y.
+\]
+  Il più vicino vale sempre 1. Tutti gli altri, dal quarto in poi, valgono 0.
+\item \textbf{Errore di previsione.} Si confronta l'ingresso con ciò che \texttt{pred} prevedeva a
+  partire da \texttt{prev\_b}, cioè dall'attività di due passi prima: $\text{err}=a-\text{pred}\cdot\text{prev\_b}$.
+\item \textbf{La previsione impara}, con la regola delta: $\Delta\text{pred}=0{,}5\,\Delta t\;\text{err}\otimes\text{prev\_b}$.
+\item \textbf{I vincitori imparano}: si spostano verso l'ingresso e un po' verso ciò che era imprevisto,
+  tanto più se il momento è sorprendente ($|\delta|$ viene tagliato a 1):
+\[
+\Delta\text{proto}_j=0{,}05\,\Delta t\,(1+2|\delta|)\;y_j\,\bigl[(a-\text{proto}_j)+0{,}5\,\text{err}\bigr].
+\]
+\item \textbf{Vittorie.} \texttt{win\_rate} segue, con $\tau=30$ s, $\frac13$ per chi ha vinto e 0 per gli altri.
+\item \textbf{Uscita.} L'attività non salta: segue $y$ con $\tau=0{,}2$ s, cioè
+  $\text{state}\leftarrow\text{state}+\frac{\Delta t}{0{,}2}(y-\text{state})$.
+\end{enumerate}
+Misurando durante una corsa: in media 4,4 neuroni hanno attività sopra 0,01, perché ai 3 vincitori
+si sommano quelli che si stanno spegnendo, e il massimo è in media 0,91.
+
+\voce{Perché serve}
+I 52 canali cambiano continuamente, ma le situazioni che contano sono poche. B
+riassume l'ingresso in un codice stabile e compatto, senza che nessuno gli dica che
+cosa rappresentare. Il codice è lo stesso per lungo tempo, e questo è ciò che permette
+alle parti che scelgono di imparare su qualcosa di fermo. La previsione lo spinge a
+preferire le distinzioni che servono a capire che cosa succederà; il fattore
+$1+2|\delta|$ gli fa dedicare più risorse ai momenti che contano.
+
+\voce{Se mancasse (lesione \lesione{B}: E, V e C leggono A)}
+E dovrebbe imparare su 52 canali grezzi invece che su 16 stati: più pesi, più lento, più
+sensibile al rumore. Inoltre ogni piccolo cambiamento dei sensi cambierebbe l'ingresso
+delle sezioni successive, e le generalizzazioni ``questa è la stessa situazione di
+prima'' sarebbero più difficili. Per un compito semplice il danno può essere piccolo:
+il colore è già scritto chiaramente nella fovea. Il vantaggio di B dovrebbe vedersi nei
+compiti in cui la situazione è una combinazione di molti sensi.
+
+\voce{Nel cervello}
+La neocorteccia sensoriale e associativa, che organizza da sola le sue rappresentazioni.
+Corrisponde all'idea di Doya (1999) che la corteccia impari senza maestro. La
+competizione ricorda l'inibizione laterale, la previsione la codifica predittiva (Rao e
+Ballard, 1999).
+
+\voce{Misure}
+Le lesioni di B, alle ultime misure disponibili, non hanno cambiato il comportamento in
+modo chiaro (54--57\% contro 56\%). In una misura precedente B portava poca informazione
+sul colore: i prototipi si specializzano su ciò che è frequente (muri, energia), non su
+ciò che conta. La scheda va letta con questo limite: oggi il vantaggio di B è più teorico
+che dimostrato.
+
+% --- D ---
+\subsection{D --- Memoria di lavoro}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 10 unità di memoria (\texttt{mem}), una per canale della fovea, e 1 neurone-cancello. \\
+Connessioni fisse & ogni canale della fovea va alla sua unità: una a una, peso 1. \\
+Pesi & \texttt{w\_gate}: 10, dai canali della fovea al cancello. Partono da zero, limite $\pm10$. \\
+Il cancello & è un neurone sigmoide con 12 connessioni: i 10 canali (pesi che imparano), ``nuovo'' una seconda
+  volta (peso fisso 8) e una corrente di fondo ($-6$). È uno solo: apre o chiude tutte le 10 unità insieme. \\
+Stato & \texttt{mem}: 10 valori. \texttt{e\_gate}: 10 tracce. \\
+Geni & \gene{tau\_d} 4 s; \gene{gate\_event} 8; \gene{gate\_bias} $-6$; \gene{eta\_gate} 0,003; \gene{tag} 0,5;
+  \gene{trace\_actor} 2 s. \\
+Uscite & tutti i 10 valori a E e V; i primi 6, l'identità, a C (peso 0,5) e a O. \\
+\end{struttura}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item Il cancello impara con la sorpresa del passo prima: $\Delta w_g=0{,}003\,\hat\delta\;e_g$.
+\item Calcola la sua apertura:
+\[
+z=8\,\text{nuovo}+\sum_i w_{g,i}\,\text{fovea}_i-6,\qquad g=\sigma(z).
+\]
+  A riposo $g=0{,}25\%$; con ``nuovo'' a 1, $g=88\%$. Il cancello supera il 50\% quando ``nuovo''
+  supera 0,75: dato che ``nuovo'' cala con $\tau=0{,}5$ s, resta aperto circa 0,15 s, cioè 3 passi.
+\item Aggiorna le tracce, solo dai canali della fovea sopra 0,5:
+  $e_g\leftarrow e^{-\Delta t/2\,\text{s}}\,e_g+g(1-g)\,[\text{fovea}]_{>0{,}5}$.
+\item Aggiorna la memoria, una miscela tra tenere e scrivere:
+\[
+m_{t+1}=(1-g)\,e^{-\Delta t/4\,\text{s}}\,m_t+g\,\text{fovea}_t.
+\]
+\end{enumerate}
+Il termine $g(1-g)$ è la derivata del cancello: la traccia è alta quando il cancello era indeciso, e
+lì un cambiamento dei pesi conta di più. Tenere non usa nessuna sinapsi: il ricordo è attività che cala
+del 63\% in 4 s, mentre imparano solo i 10 pesi che decidono \emph{quando} scrivere.
+
+\voce{Perché serve}
+Risolve il \textbf{ritardo tra l'azione e l'esito}. Quando si morde, la pila è davanti
+al muso un attimo prima, poi l'energia arriva dopo: il gusto o il dolore si sentono
+quando la pila può non essere più in vista. Per capire \emph{che cosa} ha fatto bene o
+male serve ricordare che cosa si aveva davanti. È esattamente il difetto trovato nel
+test di capacità. D risponde alla domanda ``che cosa ho appena preso?'', e da lì nasce
+il secondo neurone di O.
+
+La correzione trovata dai test spiega bene il suo funzionamento: con il cancello
+socchiuso (5\% a passo) il ricordo spariva in meno di un secondo, perché ogni passo
+scriveva sopra un pezzo di fovea vuota. Tenere una cosa significa \emph{non} scrivere.
+
+\voce{Se mancasse (lesione \lesione{D})}
+O vedrebbe solo ciò che è nella fovea durante gli ultimi $\sim$0,5 s (la sua traccia):
+gli esiti che arrivano più tardi resterebbero senza colpevole e finirebbero sullo
+sfondo. C perderebbe l'oggetto ricordato. E non saprebbe di avere appena preso qualcosa.
+In compiti con ritardi lunghi il danno sarebbe grave. Nell'arena delle pile lo è meno,
+perché la pila presa di solito è ancora in vista, e questo spiega perché la lesione
+misuri poco.
+
+\voce{Nel cervello}
+La corteccia prefrontale dorsolaterale, che tiene l'informazione con attività persistente
+(Goldman-Rakic, 1995). Il cancello imparato viene dal modello di O'Reilly e Frank (2006),
+dove i gangli della base decidono quando la prefrontale si aggiorna.
+
+\voce{Misure}
+Nessun effetto chiaro alle ultime lesioni (54--57\% contro 56\%).
+
+% --- C ---
+\subsection{C --- Memoria veloce}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 256 neuroni a soglia. Non hanno pesi propri che imparano in ingresso. \\
+Ingressi possibili & 28: i 6 di identità in fovea (peso 1), i 6 di identità in D (peso 0,5), i 16 di B (peso 0,1). \\
+Connessioni in ingresso & ogni neurone ne ha esattamente 6, scelte a caso alla nascita tra le 28, tutte di valore 1
+  prima del peso dell'ingresso: 1536 in tutto. Non cambiano in vita (\texttt{c\_in}). \\
+Inibizione & un'unica inibizione globale, che non è un neurone del codice ma un calcolo: lascia acceso il 5\% dei neuroni. \\
+Pesi in uscita & \texttt{u\_c}: $5\times256=1280$, verso le 5 uscite di E. Partono da zero, limite $\pm0{,}3$. \\
+Stato & \texttt{code}: 256 valori 0 o 1. \texttt{e\_c}: 1280 tracce. \\
+Geni & \gene{c\_sparse} 0,05; \gene{c\_threshold} 0,4; \gene{context} 0,1; \gene{memory} 0,5; \gene{eta\_c} 0,1;
+  \gene{c\_max} 0,3; \gene{forget} 180 s; \gene{surprise\_rate} 1; \gene{stick} 1,5. \\
+\end{struttura}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item \textbf{Ingresso.} Si prepara $h=(\text{identità fovea},\ 0{,}5\,\text{identità D},\ 0{,}1\,\text{B})$.
+\item \textbf{Somma.} Ogni neurone somma i suoi 6 ingressi: $z_c=\sum_{j} c_{cj}\,h_j$.
+\item \textbf{Competizione.} Con $k=\text{round}(0{,}05\times256)=13$, si trova il valore del tredicesimo
+  neurone più eccitato: questa è la soglia. Si accendono quelli sopra la soglia. I pari merito alla
+  soglia si accendono solo se, in totale, gli accesi non supererebbero 26. Chi sta sotto 0,4 non si accende mai.
+\item \textbf{Apprendimento e oblio}, a ogni passo:
+\[
+\Delta u=\frac{0{,}1\,(1+U)\,\hat\delta}{1+\#\text{accesi}}\;e-u\,\frac{\Delta t}{180\ \text{s}},
+\qquad |u|\le0{,}3 .
+\]
+\item La traccia cala con $\tau=2$ s.
+\item \textbf{Voto.} Il voto di C per ognuna delle 5 uscite è $\sum_c u_{c}\,\text{code}_c$.
+\item \textbf{Inerzia.} Finché la traccia dura, i neuroni accesi votano anche con le tracce stesse:
+  $1{,}5\,(e\cdot\text{code})/\#\text{accesi}$. Tornando sullo stesso oggetto, riaffiora la scelta.
+\item \textbf{Marcatura.} Quando E sceglie, la traccia dei neuroni accesi riceve la deviazione della scelta:
+  $e\leftarrow e+(\text{scelta}-\text{attesa})\otimes\text{code}$.
+\end{enumerate}
+
+\voce{Il codice, misurato}
+Una pila ha due caratteristiche accese (colore e grandezza). I neuroni che le leggono entrambe hanno
+$z=2$, quelli che ne leggono una $z=1$, gli altri meno. Misurando su 400 cervelli nati a caso, senza B e con
+D vuota, ``rossa e grande'' accende in media 9,9 neuroni, da 2 a 21 secondo il caso. Le sovrapposizioni dicono
+che il codice è la combinazione, non la somma delle parti:
+
+\begin{center}
+\small
+\begin{tabular}{lr}
+\toprule
+\textbf{Rossa grande confrontata con} & \textbf{Neuroni in comune} \\
+\midrule
+Rossa piccola (stesso colore) & 14,9\% \\
+Gialla grande (stessa grandezza) & 16,1\% \\
+Gialla piccola (niente in comune) & 1,9\% \\
+Un compagno in movimento & 1,9\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Con la stessa pila anche in D si sale a 12,8 neuroni, il 77,5\% dei quali è lo stesso gruppo. Durante
+una corsa, con B attivo, i neuroni accesi mentre si guarda sono in media 13,5: i piccoli contributi di B
+rompono i pari merito. Lo stesso calcolo mostra il prezzo del contesto: a parità di oggetto il codice
+non è identico.
+
+\voce{Perché serve}
+Due cose. La prima è \textbf{riconoscere le combinazioni}. Molti neuroni più degli
+ingressi e un'attivazione rada trasformano ``rossa e grande'' in un codice proprio,
+diverso da ``rossa e piccola'' e da ``gialla e grande''. Con un solo ingresso per
+accendersi, i codici si sovrapponevano seguendo le singole caratteristiche; con la
+soglia si accendono solo i neuroni che ricevono più caratteristiche insieme.
+
+La seconda è \textbf{imparare in un colpo}. E è lenta perché deve mediare su molte
+esperienze; C impara quasi subito e satura presto, così conta l'ultima esperienza, non
+la media di una vita. Il dimenticare in 3 minuti non è un difetto: in un mondo che si
+inverte ogni 5 minuti, un ricordo che non sbiadisce diventa un errore. Inoltre C tiene
+la marcatura delle scelte per qualche secondo, e finché dura vota per quella scelta
+(``inerzia legata all'oggetto''): tornando su un oggetto guardato poco fa riaffiora ciò
+che si era deciso per lui. È la memoria di lavoro nelle sinapsi di Mongillo, Barak e
+Tsodyks (2008).
+
+\voce{Se mancasse (lesione \lesione{C})}
+Sparirebbe la decisione rapida: dopo un'inversione resterebbe solo E, che è lenta, e O
+attraverso l'attenzione. Il riadattamento dovrebbe peggiorare. Sparirebbe anche
+l'arbitraggio, perché non ci sarebbe più niente a cui spostare il peso. \textbf{Nel codice
+la lesione spegne anche L}: L legge lo stesso codice di C, quindi senza C il suo voto è
+zero. E nemmeno l'inerzia sull'oggetto resta. Una lesione di C misura quindi più di C.
+
+\voce{Nel cervello}
+L'analogia più stretta non è con i mammiferi: è il \textbf{corpo a fungo degli insetti}.
+Le cellule di Kenyon ricevono proiezioni casuali e fisse dall'olfatto (Caron e colleghi,
+2013), sono molte più degli ingressi, sono tenute rade da un neurone inibitore gigante
+(APL) e imparano solo in uscita, con la dopamina. Nei mammiferi il concetto corrisponde
+alla separazione dei pattern del giro dentato e, per il ricordo rapido, all'ippocampo
+(Marr, 1971).
+
+\voce{Misure}
+Una lesione precedente: senza C, 61\% di buone prima dell'inversione contro 65\%. Il C
+attuale, con la regola delle cellule di Kenyon, ha portato il massimo di energia: 40,5
+al minuto (\texttt{TRAGUARDI\_PILE.md}), ma con un riadattamento peggiore: una memoria
+più nitida è più dura da cambiare.
+
+% --- O ---
+\subsection{O --- Valore degli oggetti}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 2 neuroni di uscita (\texttt{o\_out}): ``quanto vale ciò che guardo'' e ``quanto vale ciò che ho preso''. \\
+Pesi & 7 ingressi: le 6 caratteristiche più uno \emph{sfondo}, sempre acceso. Per ogni ingresso un peso per il piacere
+  ($w^+$, \texttt{o\_pl}) e uno per il dolore ($w^-$, \texttt{o\_pa}). In tutto 14 pesi per cassetto, 4 cassetti (K),
+  quindi 56. Limite $\pm5$. Partono dal genoma (zero nella fase A). \\
+Incertezza & per ogni ingresso due numeri (\texttt{o\_assoc}): la sorpresa di adesso e quella solita. Partono da 0,5. \\
+Traccia & \texttt{o\_e}: 6 valori, il massimo tra identità in fovea e in D, con coda di 0,5 s. \\
+Episodio & \texttt{ep\_on}: se è in corso. \texttt{ep\_e}: la traccia fotografata all'inizio. \texttt{ep\_pl}, \texttt{ep\_pa}: somme
+  di piacere e dolore. \\
+Geni & \gene{eta\_o} 1,5; \gene{need} 0,8; \gene{pain\_weight} 2; \gene{trace\_o} 0,5 s; \gene{assoc\_rate} 0,3;
+  \gene{assoc\_slow} 0,03; \gene{observe} 1. \\
+Connessioni & riceve identità da fovea e D, esiti dal corpo, energia dai sensi, il cassetto da K. Manda i 3 numeri
+  a S, per ogni oggetto; i 2 neuroni a E e V. \\
+\end{struttura}
+
+\voce{Come funziona: a ogni passo legge}
+Per un oggetto con caratteristiche $f$ (0 o 1), dal cassetto attivo:
+\begin{gather*}
+\text{fame}=1+0{,}8\,\bigl(2(1-\text{energia})-1\bigr),\\
+v=\sum_f f\,(w^+_f\,\text{fame}-2\,w^-_f),
+\qquad
+i=\sum_f f\,\bigl([w^+_f]_++[2w^-_f]_+\bigr),
+\qquad
+u=\sum_f f\,\text{sorpresa}_f .
+\end{gather*}
+La fame va da 0,2 (carichi) a 1,8 (scarichi). Lo sfondo non entra: è ciò che capita senza oggetto.
+
+\voce{Come funziona: a ogni episodio impara}
+\begin{enumerate}
+\item Un episodio comincia al primo passo con piacere o dolore. Si fotografa la traccia $e$: sei
+  caratteristiche più lo sfondo a 1. È ciò che si aveva in mente \emph{prima} dell'esito.
+\item Durante l'episodio si sommano piacere e dolore. Una pila buona dà in tutto 1 in 2 s; una
+  cattiva dà $8/25=0{,}32$ di dolore in un passo.
+\item Quando il corpo smette di sentire, l'episodio finisce. K sceglie il cassetto.
+\item Si calcolano gli errori, uno per piacere e uno per dolore: $\text{err}^+=\text{piacere}-\sum_f w^+_f e_f$.
+\item Si calcola la velocità. La volatilità è il rapporto tra sorpresa di adesso e solita, limitata tra 0,5 e 4:
+\[
+\alpha_f=\min\bigl(1{,}5\cdot\text{volatilità}_f,\ 1{,}9\bigr).
+\]
+\item Si aggiornano i pesi, dividendo per quanta traccia c'è perché la correzione totale non superi l'errore:
+\[
+\Delta w^{\pm}_f=\alpha_f\,\frac{e_f}{1+\lVert e\rVert^2}\;\text{err}^{\pm}.
+\]
+\item Si aggiorna l'incertezza con la grandezza $s=\min(|\text{err}^+|+|\text{err}^-|,2)$: la sorpresa di adesso
+  con peso 0,3 e quella solita con peso 0,03, in proporzione alla traccia.
+\end{enumerate}
+Se il maestro è attivo, ogni allievo ripete i passi 4--7 con la traccia e l'esito del maestro.
+
+\voce{Perché serve}
+È la sezione che ha reso possibile l'apprendimento del colore. Rispetto a E e C ha tre
+vantaggi.
+
+\textbf{Le caratteristiche competono.} L'errore è unico per tutte: se ``rosso'' prevede
+già l'esito, ``grande'' non guadagna niente. È il \emph{blocking}, e significa che il
+merito va a ciò che prevede davvero. Lo stesso meccanismo trova da solo se nel mondo
+conta il colore o la grandezza.
+
+\textbf{Il valore non dipende dal comportamento.} Un critico classico impara quanto vale
+una situazione \emph{con il comportamento di adesso}. O impara che cosa fa una cosa
+quando la si prende, e questo non cambia con il modo di muoversi.
+
+\textbf{La fame si applica leggendo.} Da sazi il cibo vale meno senza dover imparare
+niente: la conoscenza e il bisogno sono separati. Il dolore pesa il doppio del piacere:
+perdere conta più che guadagnare.
+
+\voce{Se mancasse (lesione \lesione{O})}
+S tornerebbe alla sola salienza innata, quindi non ci sarebbe più preferenza dello
+sguardo, e il sapere sui colori sarebbe solo nei voti di C ed E, imparati da una
+sorpresa grezza e meno mirata. Ci si aspetta un crollo della scelta verso il caso. Si
+perderebbero anche la ricerca di ciò che non si conosce e la differenza tra sazi e
+affamati nel giudicare le cose.
+
+\voce{Nel cervello}
+La corteccia orbitofrontale e l'amigdala, che tengono il valore atteso degli oggetti e
+lo aggiornano con gli esiti (Schoenbaum e colleghi, 2009). Il fatto che sazietà cambi
+il valore senza apprendimento è la \emph{svalutazione} studiata in orbitofrontale.
+Separare piacere e dolore rispecchia i circuiti distinti di ricompensa e punizione.
+La regola è Rescorla e Wagner (1972); l'incertezza Pearce e Hall (1980); l'accelerazione
+quando il mondo è volatile Behrens e colleghi (2007). Il maggior peso del dolore è
+l'avversione alla perdita (Kahneman e Tversky, 1979).
+
+\voce{Misure}
+È l'effetto di lesione più chiaro: 58,2\% con O, 52,5\% senza. O preferisce la pila buona
+nell'84\% degli esseri dopo 2 minuti e nel 90\% dopo 5; 30 secondi dopo un'inversione
+solo nel 13\%; dopo 5 minuti torna all'89\%.
+
+% --- K ---
+\subsection{K --- Contesti}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 4 neuroni-contesto, di cui uno solo attivo (\texttt{k\_on}). \\
+Pesi & nessuno suo. Ogni contesto possiede un cassetto completo di O: è il contesto che seleziona quale gruppo di 14 pesi
+  si legge e si scrive. \\
+Stato & \texttt{k\_ev}: la prova di ogni contesto, cioè il suo errore recente. \texttt{k\_used}: quali sono in uso (all'inizio
+  solo il primo). \texttt{k\_usual}: l'errore solito. \texttt{k\_since}: episodi dall'ultimo cambio.
+  \texttt{k\_stale}: da quanti episodi ogni contesto non è attivo. \texttt{o\_prior}: i valori innati. \\
+Geni & \gene{k\_rate} 0,3; \gene{k\_stick} 0,15; \gene{k\_new} 1,5; \gene{k\_wait} 4 episodi. \\
+\end{struttura}
+
+\voce{Come funziona, a ogni episodio finito}
+\begin{enumerate}
+\item Ogni contesto in uso dice quale errore avrebbe fatto: $E_k=|\text{piacere}-\sum w^+_k e|+|\text{dolore}-\sum w^-_k e|$.
+\item Aggiorna la sua prova, media con peso 0,3: $\text{prova}_k\leftarrow\text{prova}_k+0{,}3\,(\min(E_k,2)-\text{prova}_k)$.
+\item \textbf{Cambio.} Se il contesto con la prova migliore batte quello attivo di almeno 0,15, diventa lui l'attivo.
+\item \textbf{Reclutamento.} Sia $\text{limite}=1{,}5\cdot\max(\text{errore solito},0{,}05)$. Si recluta un contesto nuovo solo se
+  tutte e tre sono vere: la prova dell'attivo supera il limite; nessun contesto spiega l'ultimo esito, cioè tutti gli $E_k$
+  superano il limite; sono passati almeno 4 episodi dall'ultimo cambio.
+\item Il posto è il primo libero o, se sono tutti usati, quello fermo da più tempo. Il suo cassetto riparte dai valori innati.
+\item \textbf{Solo ora} impara O, e soltanto nel cassetto scelto.
+\item L'errore solito si aggiorna con peso 0,03.
+\end{enumerate}
+
+\voce{Perché serve}
+Il mondo ha uno \textbf{stato nascosto}: quale colore è buono adesso. Non si vede, si
+deduce dagli esiti. Senza K, O riscrive gli stessi pesi a ogni inversione: il sapere
+vecchio viene distrutto per fare posto al nuovo, e quando il mondo torna com'era va
+reimparato da capo. Con K il cassetto vecchio resta intatto e ci si torna in pochi
+episodi. È una risposta alla \emph{interferenza catastrofica}: i ricordi vengono
+separati per contesto invece che sommati.
+
+\voce{Se mancasse (lesione \lesione{K}: un contesto solo)}
+Al primo incontro con un regime nuovo non cambierebbe nulla, perché nessun cassetto può
+già saperlo. La differenza si vedrebbe solo \emph{al ritorno} di un regime già vissuto:
+ci si impiegherebbe ogni volta quanto la prima. Si perderebbe anche il modo di rispondere
+alla domanda ``il mondo è cambiato o ho sbagliato io?''.
+
+\voce{Nel cervello}
+L'orbitofrontale come mappa di stati nascosti del compito (Wilson e colleghi, 2014) e
+l'ippocampo che lega i ricordi al contesto. Il reclutamento di una causa nuova è la teoria
+delle cause latenti (Gershman, Blei, Niv, 2010): spiega perché una paura estinta ritorna
+se si torna nel contesto originale. Il fatto che prima si decida il contesto e poi si
+impari è anche l'idea del modello COIN (Heald, Lengyel, Wolpert, 2021).
+
+\voce{Misure}
+Sul banco di prova non si vede, perché pochi vivono abbastanza da rivedere un regime. Tra
+chi sopravvive: nel primo minuto dopo il ritorno di un regime, 54--57\% con K contro
+49--51\% senza; il crollo quasi sparisce. Al primo cambio, 41\% in entrambi i casi, come
+previsto. Un limite: il 27\% degli esseri riempie i 4 cassetti per rumore.
+
+% --- L ---
+\subsection{L --- Memoria lunga}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & nessuna. L è un secondo fascio di sinapsi dagli stessi 256 neuroni di C alle stesse 5 uscite di E. \\
+Pesi & \texttt{u\_l}: 1280. Partono da zero; non hanno limite proprio, perché inseguono \texttt{u\_c}. \\
+Geni & \gene{eta\_l} 0,01 al s; \gene{rest\_energy} 0,6. \\
+\end{struttura}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item Controlla se è a riposo: energia sopra 0,6 \emph{e} gusto sopra 0,1, cioè sta consumando una pila.
+\item Se sì, ogni peso si avvicina al corrispondente peso di C. Se no, non cambia niente:
+\[
+\Delta u_L=0{,}01\,\Delta t\,\mathbb{1}_{\text{riposo}}\,(u_C-u_L).
+\]
+\item Il voto $\sum u_L\,\text{code}$ si somma a quello di E nell'abitudine.
+\end{enumerate}
+Non usa tracce e non usa la sorpresa: copia. Servono 100 secondi di riposo perché un peso percorra il 63\% della
+distanza da C, e il riposo è raro: per questo in una vita breve L cambia pochissimo.
+
+\voce{Perché serve}
+Tiene ciò che vale \emph{sempre}. Poiché è lenta, ciò che si inverte di continuo si
+annulla e ciò che resta vero si accumula: un filtro che separa le regolarità stabili
+dalle circostanze. Così C può essere velocissima e dimenticare, senza che tutto vada
+perso. È l'idea dei sistemi di apprendimento complementari. In questo mondo il colore
+si inverte di continuo; ciò che resta vero è per esempio che i compagni non si mangiano.
+
+\voce{Se mancasse (lesione \lesione{L})}
+Dopo 3 minuti ciò che non è stato rinforzato sparirebbe del tutto: ogni regolarità
+andrebbe reimparata. Nel mondo attuale il danno teorico è piccolo, perché c'è poco di
+stabile tra gli esiti e il tempo di riposo è poco, e con $\eta_l$ così basso L accumula
+pochissimo in una vita di qualche minuto. La lesione dovrebbe pesare di più in vite
+lunghe.
+
+\voce{Nel cervello}
+La neocorteccia, che secondo McClelland e colleghi (1995) assorbe lentamente i ricordi
+dall'ippocampo, soprattutto a riposo e nel sonno. \textbf{La differenza è grande}: il
+cervello vero riproduce i ricordi alternati ai vecchi, L invece copia soltanto; la
+riproduzione vera non è ancora stata fatta.
+
+\voce{Misure}
+Nessun effetto chiaro.
+
+% --- E ---
+\subsection{E --- Selezione dell'azione}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 5 uscite: 4 per i programmi (avvicinati, allontanati, lascialo, esplora) e 1 per il morso. \\
+Ingressi diretti & 29: 16 di B, 10 di D, 2 di O, 1 costante. Non legge la fovea, né C direttamente in questo fascio. \\
+Pesi & \texttt{w\_e}: $5\times29=145$. Partono dal genoma (zero nella fase A), limite $\pm5$. \\
+Altri ingressi & i voti di C (\texttt{u\_c}), di L (\texttt{u\_l}) e l'inerzia, tutti da 256 neuroni. \\
+Stato & \texttt{e\_e}: 145 tracce. \texttt{program}, \texttt{bite}: la scelta in corso. \texttt{pi}, \texttt{p\_bite}: le probabilità.
+  \texttt{clock}: il tempo dall'ultima decisione. \\
+Geni & \gene{eta\_e} 0,01; \gene{temperature} 0,5; \gene{stick} 1,5; \gene{tag} 0,5; \gene{trace\_actor} 2 s;
+  \gene{decide\_every} 0,5 s; \gene{arb\_fast} 2; \gene{arb\_slow} 0,5. \\
+\end{struttura}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item \textbf{Somma i voti.} Per ognuna delle 5 uscite, con $f$ i 29 ingressi e $k$ da U:
+\[
+z=(1-0{,}5\,k)\,\underbrace{(w\cdot f+u_L\cdot\text{code})}_{\text{abitudine: E + L}}
++(1+2\,k)\,\underbrace{u_C\cdot\text{code}}_{\text{memoria veloce}}
++\text{inerzia di C}.
+\]
+\item \textbf{Impara}, anche se non decide: $\Delta w=0{,}01\,\hat\delta\,e/(1+\lVert f\rVert^2)$, e la traccia cala con $\tau=2$ s.
+\item Se non è il momento di decidere, il programma resta quello di prima: fine.
+\item \textbf{Sceglie il programma.} Se non sta guardando niente, il programma in corso riceve +1,5. Poi softmax con $T=0{,}5$:
+  $\pi_i\propto e^{z_i/0{,}5}$, e si estrae a caso.
+\item \textbf{Sceglie il morso}, a parte: $P=\sigma(z_{\text{morso}}/0{,}5)$. All'inizio tutti i pesi sono zero, quindi morde al 50\%.
+\item \textbf{Marca.} Per ogni uscita la deviazione è scelta meno attesa, e va sulle tracce:
+  $e\leftarrow e+(\text{scelta}-\pi)\,f_{\text{marcati}}$. Di B e D marcano solo i neuroni sopra 0,5; O e la costante sempre.
+\item Se il programma è ``lascialo'', S abbandona l'oggetto.
+\end{enumerate}
+Il programma non nomina un colore: ``avvicinati'' vuol dire ``verso l'oggetto attento''. Per questo
+lo stesso programma vale per qualsiasi cosa S abbia scelto. ``Lascialo'' ed ``esplora'' producono lo stesso movimento: si
+distinguono perché il primo agisce su S.
+
+\voce{Perché serve}
+Qualcuno deve fare una scelta sola. I voti di C, L, D e O possono essere in disaccordo, e
+l'azione del corpo deve essere una. E è il punto dove tutto converge. La sua lentezza è
+una proprietà: costruisce abitudini sicure, non si fa spostare da un singolo episodio.
+La traccia usa \emph{la scelta rispetto all'attesa} perché questo è ciò che rende la
+regola un gradiente della ricompensa attesa (Williams, 1992): scegliere una cosa già
+quasi certa insegna poco, sorprendersi di una scelta rara insegna molto. Per questo
+l'esplorazione non è un dettaglio: senza il caso nella scelta, la regola non ha niente
+da cui imparare. Il morso è separato perché è un'altra decisione: guardare una cosa e
+mangiarla non sono lo stesso atto.
+
+Le \emph{tracce strette} evitano il rumore che bloccava le reti di prima: una sinapsi si
+marca solo se il neurone da cui parte è acceso sopra 0,5.
+
+\voce{Se mancasse}
+Non c'è una lesione nel codice, perché senza E non esiste comportamento: F riceverebbe
+sempre lo stesso programma. Togliendo solo le sinapsi che imparano resterebbero i voti di
+C, ma non più un modo lento e stabile di scegliere: ci si riadatterebbe in fretta ma
+senza mai consolidare niente. Togliendo solo il caso ($T\to0$) si sceglierebbe sempre la
+stessa cosa e l'apprendimento si fermerebbe.
+
+\voce{Nel cervello}
+I gangli della base, e in particolare lo striato: ricevono da tutta la corteccia, le
+popolazioni di uscita competono e ne passa una. L'apprendimento è modulato dalla
+dopamina, come in Doya (1999). La regola a tre fattori (attività prima, attività dopo,
+dopamina) è quella delle sinapsi cortico-striatali. La temperatura è l'esplorazione che
+Doya (2002) lega alla noradrenalina.
+
+\voce{Misure}
+L'attore-critico classico, che ha E e V ma non le altre sezioni, sceglie al 50,4\%, cioè
+a caso, contro il 57,8\% attuale. I pesi da O a E restano però quasi a zero: il sapere di
+O arriva alle azioni soprattutto attraverso S, non attraverso E.
+
+% --- V ---
+\subsection{V --- Valore, il critico}\label{sec:V}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 3 neuroni lineari, uno per orizzonte: 2, 8 e 30 s. Tutti e tre leggono gli stessi ingressi. \\
+Ingressi & 296: fovea (10), D (10), C (256), energia (1), B con peso 0,2 (16), O (2), costante (1). \\
+Pesi & \texttt{w\_v}: $3\times296=888$. Partono dal genoma (zero nella fase A). \\
+Stato & \texttt{e\_v}: 888 tracce. \texttt{v\_prev}: le 3 previsioni del passo prima. \texttt{fresh}: appena nato. \\
+Geni & \gene{h\_short} 2, \gene{h\_mid} 8, \gene{h\_long} 30 s; \gene{eta\_v} 0,5; \gene{eta\_vc} 5 per gli ingressi da C;
+  \gene{trace\_critic} 1 s; \gene{critic\_mix} 0; \gene{critic\_b} 0,2. \\
+Uscite & verso il cervello, nessuna con i valori attuali (vedi sotto). La previsione media si vede solo sullo schermo. \\
+\end{struttura}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item Per ogni critico, con $\gamma=e^{-\Delta t/h}$ calcola la previsione $V=w\cdot f$ e l'errore TD:
+\[
+\delta_V=r+\gamma\,V-V_{\text{prima}},\qquad |\delta_V|\le3 .
+\]
+\item Aggiorna i pesi, normalizzando per non divergere. Gli ingressi da C imparano 10 volte più in fretta:
+\[
+\Delta w=\frac{\eta\,\delta_V}{1+\lVert f\rVert^2+e\cdot f}\;e .
+\]
+\item Aggiorna la traccia: $e\leftarrow\gamma\,e^{-\Delta t/1\,\text{s}}\,e+f$.
+\item Salva la nuova previsione e fa la media dei tre errori, $\bar\delta_V$.
+\end{enumerate}
+
+\voce{Il punto importante: oggi V non insegna}
+La sorpresa usata dal resto del cervello è
+\[
+\delta=r+\text{\gene{critic\_mix}}\cdot(\bar\delta_V-r),
+\]
+e \textbf{il valore di partenza di \gene{critic\_mix} è 0}: quindi $\delta=r$, il valore
+grezzo del momento. V impara, ma il suo errore non arriva a nessuno. È stato verificato:
+con e senza la lesione \lesione{V}, a parità di seme, posizioni e pesi di E restano
+identici per tutti i 1500 passi provati. Il gene c'è perché la scelta sia dell'evoluzione.
+
+Il motivo è misurato: dando peso al critico si peggiora (a peso 1, 2,30 pile al minuto
+contro 3,54). Quando un oggetto entra nella fovea la previsione scende invece di salire,
+perché quei momenti arrivano spesso subito dopo aver finito di mangiare: il critico
+prevede il valore della situazione \emph{con questo comportamento}, non dell'oggetto.
+
+\voce{Perché servirebbe}
+L'idea è trasformare il premio in una \emph{previsione}. Senza critico si impara solo
+quando il premio arriva. Con il critico l'indizio che lo precede diventa un premio a sua
+volta: si può imparare da lontano, e un premio già previsto smette di insegnare. Tre
+orizzonti servono perché ``quanto vale'' dipende da quanto lontano si guarda: mordere una
+cattiva è male subito, restare in una zona buona conviene a lungo.
+
+\voce{Se mancasse (lesione \lesione{V})}
+\emph{Oggi}: niente, per quanto visto sopra. \emph{In teoria}, se V insegnasse: si
+tornerebbe a un cervello che impara solo sull'istante del premio e che continua a
+``sorprendersi'' di premi ovvi. Anche i compiti con lunghe attese diventerebbero
+difficili.
+
+\voce{Nel cervello}
+Lo striato ventrale e i neuroni a dopamina dell'area tegmentale ventrale e della
+sostanza nera, che codificano l'errore di previsione (Schultz, Dayan, Montague, 1997).
+Orizzonti diversi corrispondono a zone diverse dello striato (Tanaka e colleghi, 2004).
+
+% --- U ---
+\subsection{U --- Incertezza e arbitraggio}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 1 sola: $U$, un numero tra 0 e 3. Da lei $k=U/3$, tra 0 e 1. \\
+Pesi & nessuno. Non impara. \\
+Stato & \texttt{d\_fast}: $|\hat\delta|$ medio su 20 s. \texttt{t\_slow}: $|\hat\delta|$ medio su 200 s. Dalla soglia, \texttt{d\_slow}: $|\delta|$ medio su 200 s. \\
+Geni & \gene{u\_fast} 20 s; \gene{u\_slow} 200 s; \gene{surprise\_rate} 1; \gene{arb\_fast} 2; \gene{arb\_slow} 0,5; \gene{att\_shift} 0,7. \\
+Uscite & $k$ verso E (pesi dei voti) e S; $U$ verso C (velocità). \\
+\end{struttura}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item Aggiorna le due medie della sorpresa che insegna.
+\item Ne fa il rapporto:
+\[
+U=\Bigl[\frac{\overline{|\hat\delta|}_{20\,\text{s}}}{\overline{|\hat\delta|}_{200\,\text{s}}}-1\Bigr]_0^3 .
+\]
+\item Il passo dopo, $k=U/3$ cambia i pesi delle decisioni. Con $k=1$, cioè il massimo:
+\end{enumerate}
+\begin{center}
+\small
+\begin{tabular}{lcc}
+\toprule
+& \textbf{Con $k=0$} & \textbf{Con $k=1$} \\
+\midrule
+Voto di C & $\times1$ & $\times3$ \\
+Voti di E e L & $\times1$ & $\times0{,}5$ \\
+Valore e importanza da O in S & $\times1$ & $\times0{,}3$ \\
+Velocità di apprendimento di C ($U=3$) & $\times1$ & $\times4$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+In una corsa di 2 minuti la media è $U\approx1{,}2$, non zero: le sorprese sopra la soglia sono frequenti
+anche quando il mondo non cambia.
+
+\voce{Perché serve}
+Risponde a ``quanto posso fidarmi di ciò che so?''. Se le sorprese sono le solite, il
+mondo è come sempre e conviene l'abitudine; se improvvisamente aumentano, le abitudini
+sono scadute. Allora il peso passa a chi impara in fretta. È un cambio di \emph{chi
+decide}, non un aumento del caso: nelle versioni precedenti U aggiungeva esplorazione ed
+era solo rumore.
+
+U conta solo le sorprese sopra la soglia: con tutto $\delta$ il rumore copriva il segnale,
+e U non si accorgeva delle inversioni.
+
+\voce{Se mancasse (lesione \lesione{U}; la lesione \lesione{R} toglie solo l'arbitraggio)}
+La decisione avrebbe sempre lo stesso equilibrio tra veloce e lento. Dopo un'inversione
+l'abitudine continuerebbe a pesare come prima, e il recupero sarebbe più lento. In un
+mondo stabile non si noterebbe niente: U serve solo quando il mondo cambia.
+
+\voce{Nel cervello}
+Il locus coeruleus e la noradrenalina, che segnalano l'incertezza inattesa (Yu e Dayan,
+2005), con la corteccia cingolata anteriore che segue la volatilità (Behrens e colleghi,
+2007). L'arbitraggio è il passaggio tra sistema orientato allo scopo e abitudini (Daw, Niv,
+Dayan, 2005).
+
+\voce{Misure}
+Arbitraggio: circa +3 punti nel recupero (50,0\% contro 47,1\% a 60--90 s). L'effetto è
+piccolo perché le sorprese sono frequenti anche prima di un'inversione, quindi
+un'inversione non produce un'ondata riconoscibile.
+
+% --- soglia ---
+\subsection{La soglia sulla sorpresa}
+
+\voce{Struttura}
+Non ha neuroni: è un calcolo tra il corpo e chi impara. Ha 2 ingressi ($\delta$ e la sua media), 1 uscita $\hat\delta$ e
+due geni: \gene{floor} = 1 e \gene{u\_slow} = 200 s. Limite fisso: $|\hat\delta|\le3$.
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item Il corpo dà il valore del momento:
+\[
+r=\text{piacere}\,\bigl(1+0{,}8\,(2\,\text{fame}-1)\bigr)-\text{dolore}-\text{energia spesa},\quad\text{fame}=1-\text{energia},
+\]
+  tutto misurato in pile buone (una pila buona = 1 in 2 s, cioè 0,025 a passo). A questo si
+  sommerebbero i valori innati sui sensi, che nella fase A sono zero.
+\item Con \gene{critic\_mix} = 0 la sorpresa è $\delta=r$.
+\item Aggiorna la sorpresa solita, $\overline{|\delta|}$, con $\tau=200$ s.
+\item Calcola la parte che insegna:
+\[
+\hat\delta=\operatorname{sign}(\delta)\;\frac{\max\bigl(|\delta|-\overline{|\delta|},0\bigr)}{\overline{|\delta|}},
+\qquad |\hat\delta|\le3.
+\]
+\end{enumerate}
+Misurando in una corsa, $|\delta|$ ha mediana 0,0007 e la sorpresa solita è 0,0013. Muoversi quindi resta sotto la
+soglia e non insegna niente. Mangiare ($\approx0{,}025$) o il dolore ($0{,}32$) stanno decine di volte sopra, e arrivano tutti
+al tetto 3: il dolore pesa quanto il cibo. È il compromesso descritto sotto.
+
+\voce{Perché serve}
+Nel mondo c'è sempre un po' di $\delta$: spendere energia è un piccolo dispiacere continuo.
+Senza soglia questo rumore cambierebbe tutti i pesi a ogni passo. La scala relativa fa
+sì che E, C e il cancello imparino allo stesso modo con premi grandi o piccoli.
+
+\voce{Se mancasse}
+Si tornerebbe al rumore che copriva il segnale nelle reti di prima. Attenzione però: anche
+qui c'è un compromesso misurato. Il tetto schiaccia le sorprese grandi e rare, come il
+dolore di una cattiva. Senza la scala adattata si sceglie meglio (66\%) ma si mangia meno
+(2,46 pile al minuto contro 3,54) e alla fine si ottiene meno energia (33,9 contro 40,5).
+
+\voce{Nel cervello}
+I neuroni a dopamina hanno un livello di base e adattano la scala alla distribuzione dei
+premi attesi (Tobler, Fiorillo, Schultz, 2005).
+
+% --- F ---
+\subsection{F --- Motore}
+
+\voce{Struttura}
+\begin{struttura}
+Unità & 4 neuroni motori: gira a sinistra, gira a destra, avanti, indietro. Attività $a=[\sum_i W_i x_i]_0^1$. \\
+Ingressi & 14, calcolati dal programma e dall'oggetto (tabella sotto). \\
+Pesi & $4\times14=56$, fissi in vita, geni. Di partenza solo 13 non sono zero. Il neurone ``indietro'' ha tutti i pesi a zero. \\
+Stato & \texttt{wander}: la deriva del vagare. \texttt{escape}: da che parte si sta girando per fuggire da un muro. \\
+Uscite & $\text{spinta}=a_{\text{avanti}}-a_{\text{indietro}}$; $\text{sterzo}=a_{\text{destra}}-a_{\text{sinistra}}$. \\
+\end{struttura}
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}rYlr@{}}
+\toprule
+\textbf{N.} & \textbf{Ingresso} & \textbf{Va a} & \textbf{Peso} \\
+\midrule
+1, 2 & avvicinati: oggetto a sinistra, a destra & gira da quella parte & 3,1 \\
+3 & avvicinati: $1-$vicino & avanti & 1,35 \\
+4 & avvicinati: vicino & avanti & 0,15 \\
+5, 6 & allontanati: oggetto a sinistra, a destra & gira dalla parte opposta & 2,0 \\
+7 & allontanati & avanti & 0,7 \\
+8 & vaga & avanti & 0,8 \\
+9, 10 & vaga: deriva a sinistra, a destra & gira da quella parte & 1,0 \\
+11, 12 & riflesso: muro, gira a sinistra, a destra & gira da quella parte & 4,0 \\
+13 & muro davanti: $\text{raggio centrale}-0{,}3$ & avanti & $-0{,}7$ \\
+14 & costante & nessuno & 0 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\voce{Come funziona, a ogni passo}
+\begin{enumerate}
+\item La deriva fa un passo a caso: $\text{wander}\leftarrow0{,}9\,\text{wander}+0{,}3\,\mathcal N(0,1)$.
+\item Riflesso: se un raggio supera 0,5 c'è un muro; si sceglie la parte più libera e ci si resta finché davanti non è libero.
+  Senza questa memoria, negli angoli si oscillava per sempre.
+\item Si calcolano i tre interruttori: \emph{avvicinati} se il programma è 0 e c'è un oggetto; \emph{allontanati} se è 1 e c'è un
+  oggetto; \emph{vaga} in tutti gli altri casi. ``Avvicinati'' senza oggetto, ``lascialo'' ed ``esplora'' sono quindi lo stesso movimento.
+\item Si riempiono i 14 ingressi moltiplicando gli interruttori per la posizione dell'oggetto.
+\item Si calcolano i 4 neuroni e, da loro, spinta e sterzo. Il mondo li usa: fino a 120 unità al secondo e 3 radianti al secondo.
+\end{enumerate}
+\textbf{Il morso non passa da F}: è una decisione di E che va direttamente al corpo. Riesce solo se una pila è a meno di
+$10+8+6=24$ unità, entro $25^\circ$ dal muso, e l'essere va a meno del 30\% della velocità massima. Costa 0,1 di energia
+al secondo. Mentre consuma una pila la spinta è forzata a zero.
+
+\voce{Perché serve}
+Separa \emph{che cosa fare} da \emph{come farlo}. Sapere muoversi non deve essere
+reimparato, né può essere rovinato da ciò che si impara. Così anche i programmi di E hanno
+un significato stabile: ``avvicinati'' fa sempre avvicinare. Il riflesso dei muri non passa
+da E: reagisce più in fretta di una decisione ed evita di restare incastrati.
+
+\voce{Se mancasse}
+Il cervello saprebbe scegliere ma il corpo non si muoverebbe. Se invece F imparasse, ogni
+inversione rischierebbe di rovinare i movimenti, e nei primi minuti di vita gli esseri non
+saprebbero nemmeno girarsi verso una pila, quindi non ci sarebbe nessun premio da cui
+imparare.
+
+\voce{Nel cervello}
+Il tronco encefalico e il midollo spinale, con i generatori di ritmo e i riflessi (come il
+ritiro davanti a un ostacolo). \textbf{Manca il cervelletto}: il cervello non ha nessuna
+sezione che impari con maestro a correggere i movimenti.
+
+% ---------------------------------------------------------------------------
+\section{Il flusso dell'informazione: dai sensi ai motori}\label{sec:flusso}
+
+Questa sezione segue l'informazione invece delle parti: da dove entra, quante strade fa
+per arrivare ai motori e dove torna su sé stessa.
+
+\subsection{Che forma ha l'informazione, tappa per tappa}
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}lrY@{}}
+\toprule
+\textbf{Tappa} & \textbf{Numeri} & \textbf{Che cosa contiene} \\
+\midrule
+Sensi & 31 & occhi, raggi, urti, energia, gusto, dolore \\
+Oggetti in vista & fino a 13 & per ognuno: caratteristiche, vicinanza, angolo \\
+Mappa di S & 9 posizioni & punteggio dell'oggetto più vicino in ogni direzione \\
+Fovea & 10 & un oggetto solo \\
+A & 52 & sensi, ciò che è appena salito, fovea \\
+B & 16 & la situazione: 3 prototipi accesi \\
+D & 10 & l'ultimo oggetto guardato \\
+C & 256 & il codice dell'oggetto: in media 13,5 neuroni accesi \\
+O & 2 & quanto vale ciò che guardo, e ciò che ho preso \\
+Ingressi di E & 29 & B, D, O e una costante \\
+Voti di E & 5 & 4 programmi e il morso \\
+Scelta & 2 & un programma, e sì o no al morso \\
+Ingressi di F & 14 & il programma combinato con dove sta l'oggetto \\
+Motori & 4 & gira a sinistra, a destra, avanti, indietro \\
+Comandi & 3 & sterzo, spinta, morso \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+L'informazione si restringe molto: da decine di numeri a una scelta tra pochi programmi.
+Solo dopo la scelta si riallarga, quando F le ricombina la posizione dell'oggetto.
+L'imbuto stretto è voluto: E sceglie \emph{che cosa} fare, F \emph{come} farlo.
+
+\subsection{Le cinque strade verso i motori}
+
+Non esiste una sola catena dai sensi ai motori. Ci sono cinque strade, dalla più rapida e
+rigida alla più lenta e flessibile (figura~\ref{fig:strade}).
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+\tikzset{r1/.style={-{Stealth[length=2mm]},line width=.9pt,black!70},
+         r2/.style={-{Stealth[length=2mm]},line width=.9pt,orange!85!black},
+         r3/.style={-{Stealth[length=2mm]},line width=.9pt,red!70!black},
+         r4/.style={-{Stealth[length=2mm]},line width=.9pt,green!45!black},
+         r5/.style={-{Stealth[length=2mm]},line width=.9pt,blue!70!black}}
+\node[sec,fill=fix,minimum width=15mm] (OB) at (0.8,6.4) {Oggetti\\in vista};
+\node[sec,fill=fix,minimum width=15mm] (SE) at (0.8,3.0) {Sensi};
+\node[sec,fill=sens,minimum width=17mm] (S) at (3.6,6.4) {\textbf{S}};
+\node[sec,fill=sens,minimum width=17mm] (A) at (3.6,3.0) {\textbf{A}};
+\node[sec,fill=val,minimum width=17mm] (O) at (7.0,8.3) {\textbf{O}};
+\node[sec,fill=sens,minimum width=17mm] (FO) at (7.0,6.4) {Fovea};
+\node[sec,fill=mem,minimum width=17mm] (D) at (7.0,4.6) {\textbf{D}};
+\node[sec,fill=sens,minimum width=17mm] (B) at (7.0,3.0) {\textbf{B}};
+\node[sec,fill=mem,minimum width=17mm] (C) at (10.0,5.3) {\textbf{C}};
+\node[sec,fill=dec,minimum width=20mm] (E) at (12.2,3.0) {\textbf{E}};
+\node[sec,fill=fix,minimum width=16mm] (F) at (13.6,6.4) {\textbf{F}};
+\node[sec,fill=fix,minimum width=15mm] (M) at (15.6,3.0) {Corpo\\e mondo};
+
+\draw[flow] (OB) -- (S);
+\draw[flow] (SE) -- (A);
+\draw[flow] (S) -- (FO);
+\draw[flow] (S) -- (A);
+\draw[r1] (SE.south) -- (0.8,0.9) -- node[lab,above] {1. riflesso: i raggi fanno girare via dal muro} (13.9,0.9) -- (13.9,5.85);
+\draw[r2] (3.9,6.95) -- (3.9,7.4) -- node[lab,above] {2. guida: dove sta l'oggetto, a ogni passo} (13.6,7.4) -- (F.north);
+\draw[r3] (O.west) -| node[lab,pos=.25,above] {3. valore} (3.3,6.95);
+\draw[r4] (FO.east) -- (9.7,6.4) -- (9.7,5.85);
+\draw[r4] (D.east) -- (8.5,4.6) -- (8.5,5.1) -- (9.15,5.1);
+\draw[r4] (FO) -- (D);
+\node[lab,text=green!45!black] at (8.95,6.65) {4. memoria veloce};
+\draw[r4] (C.east) -| (12.2,3.55);
+\draw[r5] (A) -- (B);
+\draw[r5] (B) -- node[lab,above] {5. abitudine} (E);
+\draw[r5] (7.6,4.05) -- (7.6,3.8) -- (11.5,3.8) -- (11.5,3.55);
+\draw[flow] (13.3,3.0) -- (13.3,5.85);
+\draw[flow] (F.east) -| (M.north);
+\draw[flow] (E.east) ++(0,-.3) -- ([yshift=-3mm]M.west);
+\node[lab] at (14.38,2.5) {morso};
+\end{tikzpicture}
+\caption{Le cinque strade dai sensi ai motori. Le strade 1 e 2 non passano da E: agiscono a
+ogni passo, cioè ogni 0,05 s. La strada 3 agisce su che cosa si guarda. Le strade 4 e 5 votano
+in E, che sceglie ogni 0,5 s. Il morso è l'unico comando che esce da E senza passare da F.}
+\label{fig:strade}
+\end{figure}
+
+\begin{enumerate}
+\item \textbf{Il riflesso.} I raggi di distanza vanno direttamente in F: un muro vicino fa
+  girare dalla parte più libera. Non passa per nessuna sezione che impara e non si può
+  disimparare. Agisce allo stesso passo in cui il muro viene percepito.
+\item \textbf{La guida.} S dice a F dove sta l'oggetto attento, a ogni passo. E decide
+  ``avvicinati'' una volta ogni 0,5 s, ma lo sterzo si corregge di continuo senza che E
+  debba intervenire. Così una decisione lenta produce un movimento preciso.
+\item \textbf{Il valore.} O alza il punteggio degli oggetti buoni in S. Questa strada non
+  arriva ai motori con un comando: cambia il bersaglio delle strade 2, 4 e 5. È la via
+  principale con cui il sapere diventa comportamento. Senza S che legge O la scelta
+  torna al 52,5\%, quanto senza O.
+\item \textbf{La memoria veloce.} L'identità nella fovea e in D accende un codice in C,
+  che vota in E. È la strada che impara in un colpo, e pesa di più quando U è alta.
+\item \textbf{L'abitudine.} Tutti i sensi passano da A a B e arrivano in E, insieme a D e O.
+  È l'unica strada in cui entrano muri, urti e ``mi guardano'' per decidere, ed è lenta.
+  Anche il voto di L si somma qui.
+\end{enumerate}
+
+Il critico V non compare: legge da tutte le sezioni, ma la sua uscita finisce solo sullo
+schermo. Oggi, nel flusso dell'informazione, è un vicolo cieco.
+
+\subsection{Quanto ci mette}
+
+Dentro un passo il calcolo è una sequenza, senza attese. Perciò anche l'ordine dei calcoli
+della sezione~\ref{sec:schema} fissa i ritardi.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}Yl@{}}
+\toprule
+\textbf{Da che cosa a che cosa} & \textbf{Ritardo} \\
+\midrule
+Muro vicino $\to$ sterzata di riflesso & 1 passo (0,05 s) \\
+Oggetto che si sposta $\to$ correzione dello sterzo & 1 passo \\
+Oggetto nuovo guardato $\to$ nuova decisione di E & 1 passo: E decide subito \\
+Altri cambiamenti del mondo $\to$ nuova decisione di E & fino a 0,5 s \\
+Azione $\to$ piacere o dolore in ingresso & 1 passo \\
+Piacere o dolore $\to$ apprendimento di C ed E & quasi subito, se la sorpresa supera la soglia \\
+Esito di una pila $\to$ apprendimento di O e K & a fine episodio: circa 2 s per una pila buona \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{I cicli}
+
+Sì, ci sono cicli, e molti. \textbf{Ma non ci sono cicli istantanei.} Dentro un passo
+l'informazione scorre in una sola direzione: ogni sezione viene calcolata una volta, in
+ordine. Un ciclo si chiude sempre perché una sezione legge lo stato che un'altra ha lasciato
+al passo precedente, quindi con almeno 0,05 s di ritardo. Non c'è una rete ricorrente che si
+assesta, come nel cervello: qualcosa di simile esiste solo nel fatto che lo stato di B e di D
+porta con sé il passato.
+
+La figura~\ref{fig:cicli} mostra i cicli principali. I numeri sono quelli delle tabelle.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+\tikzset{num/.style={circle,draw=black!70,fill=white,inner sep=.6pt,font=\scriptsize\bfseries,minimum size=4.2mm},
+         cy/.style={-{Stealth[length=2mm]},line width=.8pt,red!70!black},
+         wo/.style={-{Stealth[length=2mm]},line width=.8pt,blue!70!black}}
+\node[sec,fill=sens,minimum width=16mm] (S) at (1.8,4.2) {\textbf{S}};
+\node[sec,fill=sens,minimum width=16mm] (FO) at (5.0,4.2) {Fovea};
+\node[sec,fill=mem,minimum width=16mm] (C) at (8.2,4.2) {\textbf{C}};
+\node[sec,fill=dec,minimum width=16mm] (E) at (11.4,4.2) {\textbf{E}};
+\node[sec,fill=fix,minimum width=16mm] (F) at (14.4,4.2) {\textbf{F}};
+\node[sec,fill=val,minimum width=16mm] (O) at (5.0,7.0) {\textbf{O}};
+\node[sec,fill=val,minimum width=16mm] (K) at (8.2,7.0) {\textbf{K}};
+\node[sec,fill=fix,minimum width=142mm] (M) at (8.2,0.7) {Corpo e mondo};
+
+\draw[flow] (S) -- (FO);
+\draw[flow] (FO) -- (C);
+\draw[flow] (C) -- (E);
+\draw[flow] (E) -- (F);
+% 1: O S fovea O
+\draw[cy] (O.west) -| (1.8,4.75);
+\draw[cy] (FO) -- (O);
+\node[num] at (3.0,7.0) {1};
+% 2: E S
+\draw[cy] ([xshift=4mm]E.north) -- (11.8,8.2) -- (1.0,8.2) -- (1.0,4.75);
+\node[num] at (6.4,8.2) {2};
+\draw[cy] ([xshift=-4mm]S.south) -- (1.4,3.1) -- (11.0,3.1) -- ([xshift=-4mm]E.south);
+\node[num] at (6.4,3.1) {2};
+% 3: E C E
+\draw[cy] (E.north) ++(-3mm,0) -- (11.1,5.4) -- (8.2,5.4) -- (C.north);
+\node[num] at (9.7,5.4) {3};
+% 4: K O
+\draw[cy] ([yshift=2mm]K.west) -- ([yshift=2mm]O.east);
+\draw[cy] ([yshift=-2mm]O.east) -- ([yshift=-2mm]K.west);
+\node[num] at (6.6,7.5) {4};
+% mondo
+\draw[wo] (F.south) -- (14.4,1.25);
+\draw[wo] (1.8,1.25) -- (S.south);
+\node[num] at (1.8,2.4) {5};
+\draw[wo] ([xshift=4mm]E.south) -- (11.8,1.25);
+\draw[wo] (M.west) -- (0.3,0.7) -- (0.3,7.75) -- (4.7,7.75) -- (4.7,7.55);
+\node[num] at (0.3,5.5) {6};
+\node[lab] at (12.5,2.2) {morso};
+\end{tikzpicture}
+\caption{I cicli principali. In rosso quelli interni al cervello, in blu quelli che passano dal
+mondo. \textbf{1}: ciò che vale viene guardato, e ciò che si guarda impara. \textbf{2}: ``lascialo''
+cambia l'oggetto; un oggetto cambiato fa decidere subito. \textbf{3}: E marca C, e C rivota per E.
+\textbf{4}: K sceglie il cassetto di O, gli errori di O decidono K. \textbf{5}: il movimento
+cambia ciò che si vede. \textbf{6}: il morso produce un esito, che insegna.}
+\label{fig:cicli}
+\end{figure}
+
+\subsubsection*{Cicli interni al cervello}
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}cL{4.1cm}Y@{}}
+\toprule
+& \textbf{Percorso} & \textbf{Che cosa produce} \\
+\midrule
+1 & O $\to$ S $\to$ fovea $\to$ O & \textbf{Si impara su ciò che si guarda, e si guarda ciò che ha valore.} Accelera
+  l'apprendimento ma può chiudersi su sé stesso: ciò che non si guarda non si aggiorna. Il termine
+  di incertezza serve a riaprirlo. È anche una causa della perseverazione dopo un'inversione. \\
+2 & E $\to$ S $\to$ fovea, D, C $\to$ E & Il programma ``lascialo'' fa ignorare l'oggetto per 3 s. L'oggetto
+  cambia, e questo fa decidere E subito invece che al prossimo turno. \\
+3 & E $\to$ C $\to$ E & L'inerzia: la scelta marca i neuroni accesi di C, e finché dura la marcatura
+  quei neuroni votano per la stessa scelta. Tornando su un oggetto riaffiora la decisione presa. \\
+4 & K $\to$ O $\to$ K & K sceglie quale cassetto usare; gli errori dei cassetti decidono K. Avviene una
+  volta per episodio. \\
+\midrule
+--- & Anelli su una sola sezione & Lo stato di B segue l'ingresso con $\tau=0{,}2$ s; D tiene il ricordo per 4 s;
+  il canale lento di A tiene la media; E parte avvantaggiata sul programma in corso quando non guarda niente. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsubsection*{Cicli che passano dal mondo}
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}cL{4.1cm}Y@{}}
+\toprule
+& \textbf{Percorso} & \textbf{Che cosa produce} \\
+\midrule
+5 & Motori $\to$ posizione $\to$ sensi e oggetti & Il ciclo sensomotorio, chiuso a ogni passo. Avvicinarsi
+  cambia ciò che si vede; è per questo che la strada della guida funziona senza calcolare traiettorie. \\
+6 & Morso $\to$ piacere, dolore $\to$ O, C, E $\to$ scelte & Il ciclo dell'apprendimento: ogni azione produce
+  gli esiti da cui si impara la prossima. \\
+--- & Sorpresa $\to$ U $\to$ E, C, S $\to$ azioni $\to$ sorpresa & Il ciclo di controllo: tante sorprese spostano
+  il peso sulla memoria veloce; se questa funziona le sorprese calano e tutto torna come prima. \\
+--- & Movimento $\to$ energia $\to$ fame e riposo & Muoversi consuma energia. L'energia cambia il valore che O
+  dà alle cose e dice quando si è a riposo, quindi quando L impara. \\
+--- & Io $\to$ compagni $\to$ io & Gli altri esseri mangiano le pile e sono oggetti che si possono guardare. Con il
+  maestro O impara anche dai suoi episodi. \\
+--- & Vita $\to$ accoppiamento $\to$ geni & Solo nella fase B, il ciclo più lento: chi vive e si accoppia passa i geni, e
+  i geni definiscono tutte le costanti e le connessioni. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{I cicli che mancano}
+
+Sapere dove il flusso \emph{non} torna indietro è utile quanto il resto, perché il cervello
+vero è pieno di connessioni di ritorno.
+\begin{itemize}
+\item \textbf{Niente verso B.} B riceve solo da A. La sua descrizione non può essere guidata da
+  ciò che si sta cercando. Solo la velocità di apprendimento dipende da $|\delta|$. L'anello da D ed E
+  verso B è nel progetto ma non è stato fatto.
+\item \textbf{Niente copia del movimento.} Il cervello non riceve ciò che F comanda e non può
+  prevedere le conseguenze dei propri movimenti: se ne accorge solo dai sensi, un passo dopo.
+\item \textbf{L non torna in C.} Il sapere va da C a L e non viceversa: L non può rinfrescare
+  ciò che C ha dimenticato.
+\item \textbf{V non torna a nessuno}, con i valori attuali.
+\item \textbf{E usa poco O.} La connessione c'è, ma i pesi restano quasi a zero.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Riassunto: se togliessimo ogni sezione}
+
+Le ultime due colonne tengono separate la teoria e la verifica. ``Non provata'' significa
+che nel codice non esiste questa lesione. Le misure vengono da versioni diverse e non sono
+state ripetute sul codice di oggi.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}lL{3.0cm}L{2.5cm}YL{2.8cm}@{}}
+\toprule
+& \textbf{Domanda a cui risponde} & \textbf{Nel cervello} & \textbf{Senza, in teoria} & \textbf{Misurato} \\
+\midrule
+A & Che cosa arriva? & retina, talamo & niente ingressi & non provata \\
+S & Che cosa guardo? & collicolo superiore & si guarda ciò che è vicino: il sapere non guida più lo sguardo & scelta da 58\% a 52,5\% \\
+B & In che situazione sono? & neocorteccia & si impara sui canali grezzi, più lentamente & nessun effetto chiaro \\
+D & Che cosa ho appena preso? & prefrontale & gli esiti tardivi restano senza colpevole & nessun effetto chiaro \\
+C & L'ho già visto di recente? & corpo a fungo, ippocampo & riadattamento lento; spegne anche L & 61\% contro 65\% \\
+O & Quanto vale questa cosa? & orbitofrontale, amigdala & nessuna preferenza imparata nello sguardo & 58,2\% contro 52,5\% \\
+K & In che regime è il mondo? & orbitofrontale, ippocampo & ogni ritorno si reimpara da capo & 5--7 punti al ritorno \\
+L & Che cosa vale sempre? & neocorteccia & si perde ciò che resta vero da una vita lunga & nessun effetto chiaro \\
+E & Che cosa faccio? & gangli della base & nessun comportamento & non provata \\
+V & Che cosa succederà? & striato ventrale, dopamina & oggi nulla; se insegnasse, si imparerebbe solo sul premio & identico, verificato \\
+U & Mi fido di ciò che so? & locus coeruleus & recupero più lento dopo un cambio & +3 punti (arbitraggio) \\
+F & Come mi muovo? & tronco, midollo & il corpo non si muove & non provata \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ---------------------------------------------------------------------------
+\section{Un esempio dall'inizio alla fine}
+
+Un essere nasce mentre le rosse sono buone. Niente di ciò che segue è scritto nel codice.
+
+\begin{enumerate}
+\item \textbf{Vede una pila rossa.} S la sceglie perché è nuova e vicina. La fovea si
+  riempie; un oggetto nuovo apre il cancello e D ne tiene una copia. In C si accende il
+  gruppo di circa 13 neuroni di ``rossa e grande''.
+\item \textbf{E decide.} Non sa ancora niente: sceglie quasi a caso e prova ad avvicinarsi
+  e a mordere. Le sinapsi dei neuroni accesi si marcano.
+\item \textbf{Mangia.} Il gusto sale: comincia un episodio, e viene fotografato ciò che
+  aveva in mente. Il piacere è alto perché ha fame: $r$ è grande e supera la soglia.
+  C ed E rinforzano le scelte marcate.
+\item \textbf{L'episodio finisce.} O alza $w^+$ di rosso e grande. Dalla volta dopo
+  una pila rossa ha più valore e S la guarda prima, anche da lontano.
+\item \textbf{Dopo qualche minuto} O preferisce la rossa, C vota per morderla, E comincia
+  a farne un'abitudine. Da carico e fermo a ricaricarsi, L copia un po' di C.
+\item \textbf{Il mondo si inverte.} Morde una rossa: dolore. Il cassetto di K sbaglia
+  la previsione e $\delta$ diventa negativo. U sale: C pesa di più, E e L di meno. O sta dicendo ancora
+  ``rossa buona'', quindi si sbaglia ancora qualche volta. È la \emph{perseverazione}
+  misurata dopo ogni inversione.
+\item \textbf{K si accorge.} Nessun cassetto spiega gli esiti: ne viene reclutato uno
+  nuovo, e il vecchio resta intatto. O impara la gialla da zero.
+\item \textbf{Il mondo torna com'era.} Il cassetto vecchio prevede bene gli esiti, vince
+  la prova e l'essere ritrova in pochi episodi ciò che sapeva.
+\end{enumerate}
+
+% ---------------------------------------------------------------------------
+\section{Il confronto con il cervello}
+
+\subsection{La divisione del lavoro}
+
+La struttura segue Doya (1999): ogni regione usa un tipo diverso di apprendimento. Il
+cervello a sezioni aggiunge le memorie veloci e i valori sugli oggetti.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lYY}
+\toprule
+\textbf{Tipo di apprendimento} & \textbf{Nel cervello} & \textbf{Qui} \\
+\midrule
+Senza maestro & corteccia & B, L \\
+Per rinforzo & gangli della base, dopamina & E, C, cancello di D \\
+Con maestro & cervelletto & manca \\
+Per associazione con gli esiti & amigdala, orbitofrontale & O, K \\
+Memoria rapida & ippocampo & C \\
+Memoria per attività & prefrontale & D \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{I modulatori}
+
+Doya (2002) propone che i modulatori regolino i parametri dell'apprendimento. Qui la
+corrispondenza è parziale.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lYY}
+\toprule
+\textbf{Modulatore} & \textbf{Ruolo in teoria} & \textbf{Qui} \\
+\midrule
+Dopamina & errore di previsione & $\hat\delta$, ma oggi è il valore del momento, non un errore \\
+Noradrenalina & incertezza, esplorazione & U, che però sposta il peso delle decisioni \\
+Serotonina & quanto lontano si guarda & orizzonti dei critici, fissi nella vita \\
+Acetilcolina & velocità di apprendimento & in parte l'accelerazione di U su C \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Dove l'analogia non regge}
+
+\begin{itemize}
+\item \textbf{Quasi nessun anello all'indietro.} Il cervello è pieno di connessioni dall'alto
+  al basso. Qui ci sono solo O verso S ed E verso S; non esiste l'anello da D ed E verso B.
+\item \textbf{Regioni e sezioni non sono una a una.} L'orbitofrontale appare sia in O sia in
+  K, e C è più insetto che mammifero.
+\item \textbf{Il maestro non è biologico.} Gli allievi ``guardano dentro'' il maestro: ne
+  leggono ciò che aveva in mente e il suo esito. È un'idea di che cosa si trasferisce, non
+  un modello dell'osservazione vera.
+\item \textbf{La memoria è copiata, non riprodotta.} Il consolidamento è una media, non il
+  ripasso notturno dei ricordi.
+\item \textbf{Gli oggetti sono regalati.} Il mondo consegna già separati e descritti gli
+  oggetti in vista (sezione~\ref{sec:fovea}): la parte più costosa della visione non esiste.
+\item \textbf{Niente spazio.} Non c'è niente come l'ippocampo delle cellule di luogo: gli
+  esseri non sanno dove sono, e questo pesa molto sul trovare le pile.
+\item \textbf{Neuroni continui.} Nessun impulso; molte ``sezioni'' sono poche formule.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{A che punto siamo}\label{sec:stato}
+
+\subsection{I numeri}
+
+Misure del banco di prova: fase A, 200 recinti da 6 esseri, 15 minuti, semi 0 e 1.
+La fonte è \texttt{docs/TRAGUARDI\_PILE.md}.
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+& \textbf{Pile buone} & \textbf{Energia/min} & \textbf{Morti di fame/min} \\
+\midrule
+Guidato a mano (sa qual è la buona) & 94,7\% & 54,7 & 0,000 \\
+Cervello a sezioni, versione attuale & 57,8\% & 42,1 & 0,142 \\
+Attore-critico classico & 50,4\% & 30,6 & 0,102 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Il cervello a sezioni impara davvero: è l'unico dei due che sceglie sopra il caso. Ma è
+lontano dal guidato, e muore di fame più dell'attore-critico.
+
+\subsection{I limiti misurati}
+
+\begin{itemize}
+\item \textbf{Il sapere arriva poco alle azioni.} O impara bene, ma E lo legge poco: passa
+  quasi tutto dall'attenzione.
+\item \textbf{L'esperienza non si accumula.} Chi ha vissuto 4 inversioni sceglie il 57\%,
+  chi è appena nato il 61\%: C ed E si portano dietro i regimi passati.
+\item \textbf{O si riadatta in minuti, non in secondi.}
+\item \textbf{Il morso a vuoto.} Senza niente davanti si morde il 60\% delle volte, e
+  mordere costa. Spiega parte delle morti di fame.
+\item \textbf{B non sa ciò che conta.} I prototipi seguono ciò che è frequente.
+\item \textbf{Molte lesioni non si vedono.} B, D ed L non hanno mai mostrato un effetto
+  chiaro. Può voler dire che servono compiti più difficili, oppure che non servono: un
+  esito negativo qui è un'informazione, e la specifica dice di cambiare la struttura, non
+  il contenuto.
+\item \textbf{V è spento di fatto} e, con i valori attuali, $\delta$ non è un errore di
+  previsione ma il valore grezzo del momento. L'unica vera previsione del sistema è in O.
+\end{itemize}
+
+\subsection{Dove questo documento segue il codice e non la specifica}
+
+\texttt{SPEC\_CERVELLO\_SEZIONI.md} descrive in parte la prima versione. Qui vale il codice:
+C ha 256 neuroni con 6 ingressi (non 64 con 4); i programmi sono 4 e valgono per l'oggetto
+attento (non 5 legati ai colori); V ha tre critici con orizzonti 2, 8, 30 s (non uno
+da 4 s); B legge anche la previsione del prossimo ingresso.
+
+% ---------------------------------------------------------------------------
+\section*{Riferimenti}
+\addcontentsline{toc}{section}{Riferimenti}
+\small
+\begin{itemize}[leftmargin=1em,itemsep=1pt]
+\item Behrens, Woolrich, Walton, Rushworth (2007). Learning the value of information in an uncertain world. \emph{Nature Neuroscience}.
+\item Bisley, Goldberg (2010). Attention, intention, and priority in the parietal lobe. \emph{Annual Review of Neuroscience}.
+\item Caron, Ruta, Abbott, Axel (2013). Random convergence of olfactory inputs in the \emph{Drosophila} mushroom body. \emph{Nature}.
+\item Daw, Niv, Dayan (2005). Uncertainty-based competition between prefrontal and dorsolateral striatal systems. \emph{Nature Neuroscience}.
+\item Doya (1999). What are the computations of the cerebellum, the basal ganglia and the cerebral cortex? \emph{Neural Networks}.
+\item Doya (2000). Reinforcement learning in continuous time and space. \emph{Neural Computation}.
+\item Doya (2002). Metalearning and neuromodulation. \emph{Neural Networks}.
+\item Elfwing, Uchibe, Doya, Christensen (2011). Darwinian embodied evolution of the learning ability for survival. \emph{Adaptive Behavior}.
+\item Fecteau, Munoz (2006). Salience, relevance, and firing: a priority map for target selection. \emph{Trends in Cognitive Sciences}.
+\item Gershman, Blei, Niv (2010). Context, learning, and extinction. \emph{Psychological Review}.
+\item Goldman-Rakic (1995). Cellular basis of working memory. \emph{Neuron}.
+\item Heald, Lengyel, Wolpert (2021). Contextual inference underlies the learning of sensorimotor repertoires. \emph{Nature}.
+\item Kahneman, Tversky (1979). Prospect theory. \emph{Econometrica}.
+\item Kahneman, Treisman, Gibbs (1992). The reviewing of object files. \emph{Cognitive Psychology}.
+\item Marr (1971). Simple memory: a theory for archicortex. \emph{Philosophical Transactions of the Royal Society B}.
+\item McClelland, McNaughton, O'Reilly (1995). Why there are complementary learning systems in the hippocampus and neocortex. \emph{Psychological Review}.
+\item Mongillo, Barak, Tsodyks (2008). Synaptic theory of working memory. \emph{Science}.
+\item O'Reilly, Frank (2006). Making working memory work. \emph{Neural Computation}.
+\item Pearce, Hall (1980). A model for Pavlovian learning. \emph{Psychological Review}.
+\item Posner (1980). Orienting of attention. \emph{Quarterly Journal of Experimental Psychology}.
+\item Rao, Ballard (1999). Predictive coding in the visual cortex. \emph{Nature Neuroscience}.
+\item Rescorla, Wagner (1972). A theory of Pavlovian conditioning. In \emph{Classical Conditioning II}.
+\item Schoenbaum, Roesch, Stalnaker, Takahashi (2009). A new perspective on the role of the orbitofrontal cortex in adaptive behaviour. \emph{Nature Reviews Neuroscience}.
+\item Schultz, Dayan, Montague (1997). A neural substrate of prediction and reward. \emph{Science}.
+\item Tanaka e colleghi (2004). Prediction of immediate and future rewards differentially recruits cortico-basal ganglia loops. \emph{Nature Neuroscience}.
+\item Tobler, Fiorillo, Schultz (2005). Adaptive coding of reward value by dopamine neurons. \emph{Science}.
+\item Williams (1992). Simple statistical gradient-following algorithms for connectionist reinforcement learning. \emph{Machine Learning}.
+\item Wilson, Takahashi, Schoenbaum, Niv (2014). Orbitofrontal cortex as a cognitive map of task space. \emph{Neuron}.
+\item Yu, Dayan (2005). Uncertainty, neuromodulation, and attention. \emph{Neuron}.
+\end{itemize}
+
+\end{document}

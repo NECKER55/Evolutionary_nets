@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pygame
 
-from ..net.anatomy import KIND_NAMES, Anatomy, sizes
+from ..brains.freeform.anatomy import KIND_NAMES, Anatomy, sizes
 from .render import (
     BG,
     BORDER,
@@ -132,7 +132,7 @@ class NetView:
 
     def layout(self) -> None:
         """Ogni neurone dove sta davvero nel cervello (un quadrato di lato 1,
-        vedi net/geometry.py): sensi sul bordo sinistro, motori sul destro,
+        vedi brains/freeform/geometry.py): sensi sul bordo sinistro, motori sul destro,
         interni nella loro posizione. Un collegamento lungo sul disegno è
         lungo anche nel cervello, e costa in proporzione."""
         self.pos = {}

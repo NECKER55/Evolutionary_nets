@@ -1,8 +1,8 @@
 # Specifica: l'arena continua
 
-Stato: **prima versione implementata** (2026-10-23): `sim/arena.py` (il
-mondo), `evo/ecology.py` (nascite, morti, misure, salvataggi),
-`viz/arena_view.py` (la schermata), `gpu/arena.py` (la GPU), `uv run main.py
+Stato: **prima versione implementata** (2026-10-23): `arenas/continuous/world.py` (il
+mondo), `arenas/continuous/ecology.py` (nascite, morti, misure, salvataggi),
+`viz/continuous/view.py` (la schermata), `arenas/continuous/gpu.py` (la GPU), `uv run main.py
 --task arena`. Con il motore "gpu" (quello di partenza) sensi, cervello,
 plasticità, movimento, urti, pasti e fame girano sulla scheda video, un
 secondo di mondo per volta; il motore "numpy" resta come riferimento (i test
@@ -186,7 +186,7 @@ senza plasticità, e una prova in cui la macchia di cibo si sposta a metà vita.
 
 ## 11. Motore
 
-**Come è fatto (2026-10-23).** Sulla GPU (`gpu/arena.py`, JAX) gira un
+**Come è fatto (2026-10-23).** Sulla GPU (`arenas/continuous/gpu.py`, JAX) gira un
 secondo di mondo intero (60 passi) per chiamata: griglia dei vicini rifatta
 a ogni passo (al più 16 oggetti per cella e per tipo), sensi, cervello e
 plasticità (le stesse funzioni del motore a generazioni), movimento sul

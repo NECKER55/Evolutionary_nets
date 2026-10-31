@@ -284,7 +284,7 @@ all'apprendimento.
    modulatore (|M|, tagging and capture); saturazione graduale dei
    rafforzamenti (1 − |w|/synapse_max); omeostasi dell'eccitabilità (la
    corrente di fondo, stessa forza h). Formato 11. Una sola funzione
-   (`brain.plasticity`) per NumPy e GPU. Misura (maturi; 76,8% senza
+   (`plasticity.plasticity`) per NumPy e GPU. Misura (maturi; 76,8% senza
    plasticità): hebbiano 1e-4 77,3% (partenza ora 1e-4), 1e-3 71%, ma 5,6% se
    la traccia è resa permanente: è la traccia provvisoria che impedisce la
    sovrascrittura. Resta: l'omeostasi forte (≥ 1e-3) danneggia le popolazioni
@@ -325,7 +325,7 @@ confronto con più semi.
   con la selezione i tassi scendono (barriera della deriva, Lynch).
 
 *Fase 0 fatta il 2026-10-21.* (10) frequenza = (1 + x)/2 nelle reti
-continue, `brain.frequencies`. (11) gene "intrinsic", formato 12. (7) taratura
+continue, `plasticity.frequencies`. (11) gene "intrinsic", formato 12. (7) taratura
 alla conversione (`saves.calibrate`, 10 s, circa 30 s di calcolo una volta);
 inoltre ā su 120 s invece di 5 (punto 12: con 5 s l'omeostasi combatteva ogni
 singolo comportamento). Misura sulla popolazione di corsa-20261020-200723
@@ -349,7 +349,7 @@ marcatori, incrocio tra omologhi dei marcatori, `genome = "diretto" |
 fenotipo. Scelta aperta: marcatori legati alla posizione (gradienti come
 Eph/efrine, che in natura fanno le mappe).
 
-*Fase 1 fatta il 2026-10-21* (net/development.py, formato 13, 198 test).
+*Fase 1 fatta il 2026-10-21* (brains/freeform/development.py, formato 13, 198 test).
 Scelte "come in natura": marcatori a gradiente inclusi (due geni per
 marcatore, lungo x e y; i recettori stanno al bordo sinistro all'altezza del
 nervo, quindi i gradienti in y danno mappe topografiche, salvo in modalità
@@ -372,7 +372,7 @@ nascita (rumore nei sensi, scelta: indipendente o a onde correlate tra sensi
 vicini), con Hebb, omeostasi e soglia; la traccia si consolida da sola (lo
 sviluppo fissa ciò che si forma); ā nasce dall'attività vera. Sulla GPU.
 
-*Fase 2 fatta il 2026-10-21* (net/womb.py e gpu/womb.py, formato 14, 202
+*Fase 2 fatta il 2026-10-21* (brains/freeform/womb.py e brains/freeform/womb_gpu.py, formato 14, 202
 test). Onde che scorrono lungo `r_y` (velocità 0,5 lati/s, larghezza 0,1, una
 ogni 1,5 s in media, da un capo o dall'altro) più rumore 0,05; 5 s; Hebb,
 omeostasi e soglia accese, plasticità modulata spenta (niente ricompensa:

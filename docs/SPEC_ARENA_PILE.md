@@ -116,10 +116,10 @@ all'attore-critico, e quanto supera il cervello di oggi.
 
 ## Fasi di lavoro
 
-1. **Il mondo in NumPy** (`evonets/sim/pile.py`), con un essere guidato da
+1. **Il mondo in NumPy** (`evonets/arenas/pile/world.py`), con un essere guidato da
    una regola scritta a mano ("vai verso le pile del colore buono") per
    controllare che il mondo sia giusto e tarare i numeri.
-2. **Il mondo sulla GPU** (`evonets/gpu/pile.py`): centinaia di recinti in
+2. **Il mondo sulla GPU** (`evonets/arenas/pile/gpu.py`): centinaia di recinti in
    parallelo; prova che dà gli stessi risultati della versione NumPy.
 3. **I sensi fissi** dell'arena e i **cervelli di oggi** che ci girano.
 4. **L'attore-critico di riferimento**, e la prima tabella delle misure
@@ -140,17 +140,17 @@ cervello) e una nota dei risultati in questo documento.
 
 ## Stato (2026-10-28)
 
-Fatto: il mondo in NumPy (`evonets/sim/pile.py`), il guidato,
-l'attore-critico, il cervello a sezioni (`evonets/net/sections.py`), le
-prove e le misure (`evonets/evo/pile_test.py`), la fase B (accoppiamento,
+Fatto: il mondo in NumPy (`evonets/arenas/pile/world.py`), il guidato,
+l'attore-critico, il cervello a sezioni (`evonets/brains/pile/sections.py`), le
+prove e le misure (`evonets/arenas/pile/run.py`), la fase B (accoppiamento,
 rinascita da incrocio, valori innati che evolvono), i test
-(`tests/test_pile.py`), la versione **GPU** (`evonets/gpu/pile.py`: stesso
+(`tests/test_pile.py`), la versione **GPU** (`evonets/arenas/pile/gpu.py`: stesso
 algoritmo in JAX, molti passi per chiamata; numeri casuali diversi, medie
 uguali: 200 recinti × 25 minuti in circa 45 s, contro circa 10 minuti per
 100 recinti in NumPy; è il motore predefinito, `--motore numpy` per il
 riferimento), la voce nel **menu** (Mondo = "arena delle pile": cervello,
 fase, lesione, recinti, esseri per recinto) e la **schermata**
-(`evonets/viz/pile_view.py`, docs/INTERFACCIA.md). Non ancora: i cervelli
+(`evonets/viz/pile/view.py`, docs/INTERFACCIA.md). Non ancora: i cervelli
 di oggi nell'arena, la diagnosi con il gradiente, i salvataggi delle corse
 delle pile.
 
@@ -363,7 +363,7 @@ altre; dopo un'inversione si riadatta (in qualche minuto). I compagni
 
 Tutte le costanti del cervello che avevo scelto a mano (circa 50: tempi,
 velocità, soglie, pesi della salienza innata, forza dell'arbitraggio, ogni
-quanto si decide...) sono geni (`sections.Genes`), una per essere. Nella fase
+quanto si decide...) sono geni (`genes.Genes`), una per essere. Nella fase
 A valgono i valori di partenza per tutti; nella fase B le tara l'evoluzione.
 Restano fissi solo la struttura (quanti neuroni e connessioni) e i limiti di
 sicurezza. Ogni essere decide al suo ritmo (`decide_every` è un gene).
@@ -401,7 +401,7 @@ genitori (incrocio e mutazione), non ciò che hanno imparato. C, L, D e le
 altre memorie non si ereditano. Fase A: ognuno ha i suoi valori di partenza
 (a caso dove serve) e rinasce sempre da quelli.
 
-**Salvataggi** (`evonets/evo/pile_saves.py`): mondo, cervelli (genoma e
+**Salvataggi** (`evonets/arenas/pile/saves.py`): mondo, cervelli (genoma e
 tutto ciò che si è imparato), serie e contatori per essere; la stessa forma
 per GPU e processore. Ctrl+S nella schermata, e all'uscita se ci sono
 novità; nel menu "Riprendi da" li riconosce (righe dell'arena delle pile

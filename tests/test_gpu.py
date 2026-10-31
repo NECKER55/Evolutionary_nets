@@ -10,11 +10,12 @@ import pytest
 from nets import rich
 
 from evonets import Config, World
-from evonets.gpu import engine
-from evonets.gpu.sim import GpuWorlds, pack_params, pack_state
-from evonets.net import NeuralController
-from evonets.sim import signals
-from evonets.sim.tasks import Foraging, MovingTarget
+from evonets.arenas.generational import gpu_engine as engine
+from evonets.brains.freeform.gpu import phys_of
+from evonets.arenas.generational.gpu_worlds import GpuWorlds, pack_params, pack_state
+from evonets.brains.freeform import NeuralController
+from evonets.arenas import signals
+from evonets.arenas.generational.tasks import Foraging, MovingTarget
 
 ALL_ON = dict(target_vibration=0.7, hazard_vibration=0.4, hazard_smell=0.3, target_smell=0.5, target_heat=0.4,
               hazard_heat=0.2, magnetic_field=0.8)
@@ -34,7 +35,7 @@ def setup(net="rate", n=12, seed=0, task=None, **kw):
 
 
 def device(cfg, w, ctrl):
-    ph = {k: jnp.asarray(v) for k, v in engine.phys_of(cfg).items()}
+    ph = {k: jnp.asarray(v) for k, v in phys_of(cfg).items()}
     P = {k: jnp.asarray(v) for k, v in pack_params(w, ctrl).items()}
     s = pack_state(w, ctrl, jax.random.PRNGKey(0))
     s = {k: jnp.asarray(v) if k != "key" else v for k, v in s.items()}

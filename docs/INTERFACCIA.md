@@ -108,7 +108,7 @@ mano), la fase (A popolazione fissa, B con accoppiamento), una lesione (una
 sezione tolta), quanti recinti e quanti esseri per recinto, il seme, i
 minuti. Gira sulla GPU se c'è.
 
-La schermata (`evonets/viz/pile_view.py`):
+La schermata (`evonets/viz/pile/view.py`):
 
 - **a sinistra il recinto**: pile rosse e gialle (il cerchio bianco segna il
   colore buono adesso), la zona attiva, gli esseri (azzurro pieno quello

@@ -287,8 +287,8 @@ vecchi, altrimenti li cancellano (McClelland 1995).
 
 ## Prima versione nel codice (2026-10-28)
 
-`evonets/net/sections.py` (tipo `sezioni`), provata nell'arena delle pile
-(docs/SPEC_ARENA_PILE.md, `evonets/evo/pile_test.py`). Tutto continuo, in
+`evonets/brains/pile/sections.py` (tipo `sezioni`), provata nell'arena delle pile
+(docs/SPEC_ARENA_PILE.md, `evonets/arenas/pile/run.py`). Tutto continuo, in
 NumPy; la versione JAX verrà dopo.
 
 | sezione | come è fatta | cosa impara |
@@ -334,7 +334,7 @@ neuroni sopra 0,5); soglia adattiva su δ per tutto ciò che impara tranne
 il critico. Dettagli e risultati: docs/SPEC_ARENA_PILE.md.
 
 **Costanti come geni (2026-10-28):** ogni costante del cervello è un gene
-(`sections.Genes`): nella fase A uguale per tutti, nella fase B la tara
+(`genes.Genes`): nella fase A uguale per tutti, nella fase B la tara
 l'evoluzione. Nel genoma ci sono anche i pesi di partenza e le connessioni
 di C; il figlio eredita il genoma intero di uno dei genitori.
 

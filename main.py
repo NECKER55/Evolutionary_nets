@@ -23,10 +23,9 @@ from pathlib import Path
 import numpy as np
 
 from evonets import Config, World
-from evonets.evo import Evolution
-from evonets.evo.evolution import describe_change
-from evonets.evo.exam import LESIONS, battery
-from evonets.net import NeuralController
+from evonets.arenas.generational.evolution import Evolution, describe_change
+from evonets.arenas.generational.exam import LESIONS, battery
+from evonets.brains.freeform import NeuralController
 
 SAVE_EVERY = 25  # generazioni tra un salvataggio e l'altro, con --evolve
 
@@ -98,7 +97,7 @@ def evolve_many(cfg: Config, generations: int, seed: int, k: int, save: str, exa
     basico, sempre complesso), con lo stesso seme di partenza."""
     import dataclasses
 
-    from evonets.evo.evolution import run_together
+    from evonets.arenas.generational.evolution import run_together
 
     modes = ("scala", "basico", "complesso") if controls else (cfg.ladder,)
     evos = [Evolution(dataclasses.replace(cfg, ladder=m), seed + i) for i in range(k) for m in modes]
@@ -143,7 +142,7 @@ def evolve_many(cfg: Config, generations: int, seed: int, k: int, save: str, exa
 def live(cfg: Config, minutes: int, seed: int, initial: int | None, load: str | None, save: str) -> None:
     """L'arena continua senza grafica (docs/SPEC_ARENA.md): `minutes` minuti
     di mondo, una riga al minuto, poi salva (anche a ogni minuto, e a Ctrl+C)."""
-    from evonets.evo.ecology import Ecology
+    from evonets.arenas.continuous.ecology import Ecology
 
     e = Ecology.load(cfg, load) if load else Ecology(cfg, seed, initial)
     print(f"arena continua {cfg.arena_size_w:.0f} x {cfg.arena_size_h:.0f}, {cfg.arena_cap} posti, "
@@ -247,13 +246,13 @@ def main() -> None:
                     help="compito: bersaglio = toccarlo una volta (il mondo di prima), "
                          "cibo = nutrirsi (docs/SPEC_MONDO.md; senza veleno)")
     ap.add_argument("--mode", choices=("evoluzione", "cervello"), default="evoluzione",
-                    help="evoluzione = evolvono sensi e cervello; cervello = sensi fissi (net/senses.py), "
+                    help="evoluzione = evolvono sensi e cervello; cervello = sensi fissi (brains/freeform/senses.py), "
                          "evolve solo il cervello")
     ap.add_argument("--genome", choices=("diretto", "sviluppo"), default="diretto",
                     help="diretto = il genoma scrive ogni sinapsi; sviluppo = il cervello nasce da marcatori e "
-                         "gradienti (net/development.py)")
+                         "gradienti (brains/freeform/development.py)")
     ap.add_argument("--ladder", action="store_true",
-                    help="con --task cibo: la scala di difficoltà adattiva (evo/ladder.py)")
+                    help="con --task cibo: la scala di difficoltà adattiva (arenas/generational/ladder.py)")
     ap.add_argument("--controls", action="store_true",
                     help="con --ladder e --evolve: per ogni seme anche le popolazioni di controllo "
                          "(sempre basico, sempre complesso) nello stesso lotto")

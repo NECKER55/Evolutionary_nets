@@ -3,7 +3,7 @@ import json
 import numpy as np
 
 from evonets import Config
-from evonets.evo import Evolution
+from evonets.arenas.generational.evolution import Evolution
 
 
 def small(**kw):

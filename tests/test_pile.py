@@ -1,21 +1,13 @@
-"""L'arena delle pile (evonets/sim/pile.py, docs/SPEC_ARENA_PILE.md) e il
-cervello a sezioni (evonets/net/sections.py, docs/SPEC_CERVELLO_SEZIONI.md)."""
+"""L'arena delle pile (evonets/arenas/pile/world.py, docs/SPEC_ARENA_PILE.md) e il
+cervello a sezioni (evonets/brains/pile/sections.py, docs/SPEC_CERVELLO_SEZIONI.md)."""
 
 import numpy as np
 
-from evonets.evo.pile_test import run
-from evonets.net.sections import (
-    INNATE_CAP,
-    N_BASE,
-    ActorCritic,
-    Sections,
-    Sizes,
-    decode,
-    default_genome,
-    inherit,
-    mutate,
+from evonets.arenas.pile.run import run
+from evonets.brains.pile import (
+    ActorCritic, INNATE_CAP, N_BASE, Sections, Sizes, decode, default_genome, inherit, mutate,
 )
-from evonets.sim.pile import N_SENSES, SENSES, PileConfig, PileWorld
+from evonets.arenas.pile.world import N_SENSES, PileConfig, PileWorld, SENSES
 
 
 def world(n=2, **kw):
@@ -92,7 +84,7 @@ def test_the_walls_have_colours_and_bumps_have_a_side():
 
 
 def test_the_innate_motor_circuit_turns_towards_the_object_and_slows_near_it():
-    from evonets.sim.pile import default_motor, motor_inputs, motor_net
+    from evonets.arenas.pile.world import default_motor, motor_inputs, motor_net
 
     W = default_motor()[None]
     rays = np.zeros((1, 3))
@@ -159,7 +151,7 @@ def test_the_guided_being_chooses_and_survives():
 
 
 def test_working_memory_holds_the_last_object_after_it_is_gone_and_fades():
-    from evonets.net.sections import FOVEA
+    from evonets.brains.pile import FOVEA
 
     b = Sections(1, 0.05, seed=0)
     seen = np.zeros((1, len(FOVEA)))
@@ -176,7 +168,7 @@ def test_working_memory_holds_the_last_object_after_it_is_gone_and_fades():
 def test_fast_memory_codes_follow_the_object_more_than_the_context():
     """C: lo stesso oggetto con contesti diversi accende quasi gli stessi
     neuroni; oggetti diversi nello stesso contesto, neuroni diversi."""
-    from evonets.net.sections import FOVEA
+    from evonets.brains.pile import FOVEA
 
     b = Sections(1, 0.05, seed=0)
     rng = np.random.default_rng(0)
@@ -279,8 +271,8 @@ def test_arbitration_gives_the_fast_memory_more_say_after_surprises():
 
 
 def test_a_run_saves_and_reopens_on_either_engine(tmp_path):
-    from evonets.evo import pile_saves
-    from evonets.evo.pile_test import make_run
+    from evonets.arenas.pile import saves as pile_saves
+    from evonets.arenas.pile.run import make_run
 
     for engine in ("gpu", "numpy"):
         r = make_run("sezioni", "B", 3, 0, (), engine=engine)
@@ -295,8 +287,8 @@ def test_a_run_saves_and_reopens_on_either_engine(tmp_path):
 
 
 def test_each_network_can_be_tried_alone(tmp_path):
-    from evonets.evo import pile_saves
-    from evonets.evo.pile_test import make_run
+    from evonets.arenas.pile import saves as pile_saves
+    from evonets.arenas.pile.run import make_run
 
     r = make_run("sezioni", "A", 2, 0, (), engine="numpy")
     r.advance(100)
@@ -319,7 +311,7 @@ def test_phase_b_mates_and_children_carry_the_parents_genes():
 
 
 def test_gpu_senses_are_the_numpy_senses():
-    from evonets.gpu.pile import init_world, senses
+    from evonets.arenas.pile.gpu import init_world, senses
 
     cfg = PileConfig()
     w = PileWorld(cfg, 5, seed=3)
@@ -357,7 +349,7 @@ def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkey
     import pygame
 
     from evonets.viz.app import App
-    from evonets.viz.pile_view import PileScreen
+    from evonets.viz.pile.view import PileScreen
 
     app = App({})
     menu = app.launcher
@@ -374,7 +366,7 @@ def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkey
         for _ in range(3):
             screen.update()
             screen.draw(app.screen)
-        from evonets.net.sections import N_A
+        from evonets.brains.pile import N_A
 
         for hover in (("section", "V"), ("section", "S"), ("A", 0), ("A", N_A - 1), ("arena",)) + (
                 (("B", 0), ("D", 0), ("C", 0), ("E", 0)) if agent == "sezioni" else ()):
@@ -404,7 +396,7 @@ def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkey
 def test_every_brain_constant_is_a_gene_that_changes_behaviour():
     """Le costanti sono geni, una per essere: cambiando il gene cambia il
     comportamento (qui: ogni quanto si decide)."""
-    from evonets.net.sections import GENE_NAMES, Genes
+    from evonets.brains.pile import GENE_NAMES, Genes
 
     assert {"decide_every", "sal_near", "c_max", "u_fast", "gate_bias", "arb_fast"} <= set(GENE_NAMES)
     b = ActorCritic(2, 0.05, seed=0)
@@ -425,8 +417,8 @@ def test_o_learns_whatever_feature_matters_and_attention_follows():
     """Se le pile buone si riconoscono dalla grandezza (il colore non conta), O
     impara la grandezza buona e ignora il colore; e quando nella mappa ci sono
     pile buone e cattive, lo sguardo va più spesso alle buone."""
-    from evonets.evo.pile_test import make_run
-    from evonets.net.sections import MAP, N_FEATURES, o_active, o_read, priority_map
+    from evonets.arenas.pile.run import make_run
+    from evonets.brains.pile import MAP, N_FEATURES, o_active, o_read, priority_map
 
     r = make_run("sezioni", "A", 20, 0, (), PileConfig(good_by="grandezza"), "numpy")
     b, K = r.brain, r.cfg.batteries
@@ -461,7 +453,7 @@ def test_o_learns_whatever_feature_matters_and_attention_follows():
 def test_the_priority_map_is_made_of_positions_not_objects():
     """S: un neurone per direzione, ognuno con l'oggetto più vicino in quella
     direzione; un oggetto nuovo non aggiunge neuroni."""
-    from evonets.net.sections import MAP, priority_map
+    from evonets.brains.pile import MAP, priority_map
 
     vis = np.array([[True, True, True]])
     ang = np.radians(np.array([[-50.0, -50.0, 40.0]]))  # due a sinistra (allo stesso angolo), uno a destra
@@ -477,7 +469,7 @@ def test_the_priority_map_is_made_of_positions_not_objects():
 def test_the_teacher_acts_like_the_guided_one_and_is_not_counted():
     """Il maestro (il primo di ogni recinto) mangia quasi solo pile buone; le
     misure contano solo gli allievi; toglierlo lo fa rinascere come un giovane."""
-    from evonets.evo.pile_test import make_run
+    from evonets.arenas.pile.run import make_run
 
     r = make_run("sezioni", "A", 8, 0, (), PileConfig(), "numpy", teacher=True)
     r.advance(int(120 / r.cfg.dt))
@@ -497,8 +489,8 @@ def test_the_teacher_acts_like_the_guided_one_and_is_not_counted():
 def test_watching_the_teacher_teaches_o_what_happens_to_him():
     """O di chi osserva il maestro prevede meglio i suoi episodi (piacere e
     dolore) di quello di chi non lo osserva, senza esplodere."""
-    from evonets.evo.pile_test import make_run
-    from evonets.net.sections import GENE_NAMES, decode
+    from evonets.arenas.pile.run import make_run
+    from evonets.brains.pile import GENE_NAMES, decode
 
     errs = []
     for observe in (1e-9, 1.0):
@@ -512,8 +504,8 @@ def test_watching_the_teacher_teaches_o_what_happens_to_him():
 
 
 def test_the_teacher_survives_a_save():
-    from evonets.evo.pile_saves import export_state, import_state
-    from evonets.evo.pile_test import make_run
+    from evonets.arenas.pile.saves import export_state, import_state
+    from evonets.arenas.pile.run import make_run
 
     r = make_run("sezioni", "A", 2, 0, (), PileConfig(), "numpy", teacher=True)
     r.advance(10)
@@ -525,7 +517,7 @@ def test_the_teacher_survives_a_save():
 
 def test_the_ghost_teacher_is_unseen_and_eats_its_own_copy():
     """Il maestro fantasma: nessuno lo vede, e la pila che mangia sparisce solo per lui."""
-    from evonets.sim.pile import PileWorld
+    from evonets.arenas.pile.world import PileWorld
 
     cfg = PileConfig(beings=2, batteries=1)
     w = PileWorld(cfg, 1, 0)
@@ -550,7 +542,7 @@ def test_c_codes_are_combinations_not_unions():
     (stessa grandezza, colore diverso) hanno codici quasi disgiunti; lo stesso
     oggetto dà sempre lo stesso codice; con niente da vedere né ricordare non
     si accende niente."""
-    from evonets.net.sections import FOVEA, IDENTITY, c_code
+    from evonets.brains.pile import FOVEA, IDENTITY, c_code
 
     b = Sections(1, 0.05, seed=0)
     nf = len(FOVEA)
@@ -592,7 +584,7 @@ def test_k_keeps_the_old_drawer_and_returns_to_it():
     altro li spiega, si recluta un contesto nuovo (dai valori innati) e il
     vecchio cassetto resta intatto; quando il mondo torna com'era, si torna al
     vecchio cassetto senza reimparare."""
-    from evonets.net.sections import N_FEATURES, o_step
+    from evonets.brains.pile import N_FEATURES, o_step
 
     b = Sections(1, 0.05, seed=0)
     red, yellow = np.zeros(N_FEATURES), np.zeros(N_FEATURES)

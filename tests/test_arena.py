@@ -1,13 +1,13 @@
-"""L'arena continua (evonets/sim/arena.py, evonets/evo/ecology.py,
+"""L'arena continua (evonets/arenas/continuous/world.py, evonets/arenas/continuous/ecology.py,
 docs/SPEC_ARENA.md): mondo senza bordi, sensi attraverso il bordo, pasti,
 vecchiaia, nascite, colonizzatori, salvataggi."""
 
 import numpy as np
 
 from evonets import Config
-from evonets.evo.ecology import Ecology
-from evonets.net import Brains
-from evonets.sim.arena import ArenaWorld
+from evonets.arenas.continuous.ecology import Ecology
+from evonets.brains.freeform import Brains
+from evonets.arenas.continuous.world import ArenaWorld
 
 
 def small(**kw) -> Config:
@@ -146,8 +146,8 @@ def test_an_arena_run_saves_and_resumes_exactly(tmp_path):
 def _gpu_pair(net_type: str):
     import jax.numpy as jnp
 
-    from evonets.gpu import arena as ga
-    from evonets.net.controllers import NeuralController
+    from evonets.arenas.continuous import gpu as ga
+    from evonets.brains.freeform.controllers import NeuralController
 
     cfg = small(net_type=net_type, arena_food_rate=0.0, arena_aging_h0=0.0)
     w = ArenaWorld(cfg, 20, 20, seed=5)
@@ -221,8 +221,8 @@ def _scene(**dials):
     stato sulla GPU da cui provare un passo di fisica."""
     import jax.numpy as jnp
 
-    from evonets.gpu import arena as ga
-    from evonets.net.controllers import NeuralController
+    from evonets.arenas.continuous import gpu as ga
+    from evonets.brains.freeform.controllers import NeuralController
 
     cfg = small(net_type="rate", arena_food_rate=0.0, arena_aging_h0=0.0, **dials)
     w = ArenaWorld(cfg, 3, 3, seed=5)
@@ -301,7 +301,7 @@ def test_a_parent_feeds_only_its_own_young_child():
 
 
 def test_night_dims_the_world_but_not_the_signals():
-    from evonets.gpu import arena as ga
+    from evonets.arenas.continuous import gpu as ga
     import jax.numpy as jnp
 
     cfg = small(arena_night=1.0)
@@ -347,7 +347,7 @@ def test_eating_wears_out_the_patch():
 
 
 def test_the_climate_is_warm_in_the_middle_and_cold_at_the_edges():
-    from evonets.sim.arena import temperature
+    from evonets.arenas.continuous.world import temperature
 
     cfg = small(arena_temperature=0.4, arena_temp_season=0.0)
     t = temperature(cfg, np.array([[10.0, 160.0], [10.0, 0.0], [10.0, 320.0]]), 0.0)
@@ -362,7 +362,7 @@ def test_heat_burns_more_energy_and_makes_patches_richer():
     out = _physics(gpu, ga, jnp, np.zeros((3, 4)))
     spent = 100.0 - np.asarray(out["energy"])
     assert abs(spent[0] / spent[1] - cfg.arena_temp_q ** 0.8) < 0.05  # T 0,9 contro 0,1
-    from evonets.sim.arena import Patches
+    from evonets.arenas.continuous.world import Patches
 
     patches = Patches(cfg, 400.0, 320.0, np.random.default_rng(0))
     patches.centre = np.array([[100.0, 160.0], [100.0, 1.0]] + [[50.0, 80.0]] * (len(patches.centre) - 2))
@@ -401,7 +401,7 @@ def test_without_water_rules_nobody_gets_thirsty():
 
 
 def test_the_thirst_sense_and_the_pool_are_felt():
-    from evonets.net.receptors import Prepared
+    from evonets.brains.freeform.receptors import Prepared
 
     cfg, w, gpu, ga, jnp = _pool_scene()
     p = Prepared(cfg, gpu.ctrl.brains.receptors)
@@ -416,7 +416,7 @@ def test_the_thirst_sense_and_the_pool_are_felt():
 
 
 def test_pools_are_born_near_food_but_apart_and_come_back_when_few():
-    from evonets.sim.arena import Pools
+    from evonets.arenas.continuous.world import Pools
 
     cfg = small(arena_pools=3, arena_pools_min=2, arena_pool_wait=1.0, arena_pool_gap_min=60.0,
                 arena_pool_gap_max=150.0, arena_pool_radius=10.0)
@@ -435,7 +435,7 @@ def test_pools_are_born_near_food_but_apart_and_come_back_when_few():
 
 def test_a_child_needs_water_and_is_born_with_a_full_reserve():
     cfg = small(arena_water=True, engine="numpy")
-    from evonets.evo.ecology import Ecology
+    from evonets.arenas.continuous.ecology import Ecology
 
     e = Ecology(cfg, seed=2, initial=1)
     cfg.arena_water = True  # (con NumPy si spegne: qui si prova solo la regola delle nascite)
@@ -452,7 +452,7 @@ def test_a_child_needs_water_and_is_born_with_a_full_reserve():
 
 
 def test_food_comes_in_waves():
-    from evonets.evo.ecology import Ecology
+    from evonets.arenas.continuous.ecology import Ecology
 
     cfg = small(engine="gpu", arena_food_every=10.0, arena_food_rate=3.0, arena_food_max=200, arena_water=False)
     e = Ecology(cfg, seed=4, initial=0)
@@ -469,7 +469,7 @@ def test_food_comes_in_waves():
 
 
 def test_the_pool_dial_moves_new_pools_farther_from_food():
-    from evonets.sim.arena import Pools
+    from evonets.arenas.continuous.world import Pools
 
     for far, lo, hi in ((0.0, "arena_pool_gap_min", "arena_pool_gap_max"),
                         (1.0, "arena_pool_far_min", "arena_pool_far_max")):
@@ -481,7 +481,7 @@ def test_the_pool_dial_moves_new_pools_farther_from_food():
 
 
 def test_a_new_neuron_grows_its_own_connections():
-    from evonets.evo.ecology import Ecology
+    from evonets.arenas.continuous.ecology import Ecology
 
     cfg = small(arena_wire_new=True, mut_neuron_toggle=1.0, mut_dup=0.0, mut_conn_add=0.0, mut_conn_del=0.0)
     e = Ecology(cfg, seed=3, initial=4)
@@ -516,7 +516,7 @@ def test_thirst_grows_with_its_dial():
 
 
 def test_primordial_beings_start_with_wired_hidden_neurons():
-    from evonets.evo.ecology import Ecology
+    from evonets.arenas.continuous.ecology import Ecology
 
     e = Ecology(small(arena_hidden_initial=2), seed=1, initial=10)
     g = e.ctrl.brains.genome
@@ -529,8 +529,8 @@ def test_primordial_beings_start_with_wired_hidden_neurons():
 
 
 def test_primordial_hidden_neurons_also_with_the_development_genome():
-    from evonets.evo.ecology import Ecology
-    from evonets.net.brain import live_links
+    from evonets.arenas.continuous.ecology import Ecology
+    from evonets.brains.freeform.genome import live_links
 
     e = Ecology(small(genome="sviluppo", net_type="spike-ei", arena_hidden_initial=2), seed=1, initial=10)
     g = e.ctrl.brains.genome
@@ -553,7 +553,7 @@ def test_drinking_when_thirsty_is_rewarding_and_is_felt():
 
 
 def test_the_drink_measure_counts_returns_to_water():
-    from evonets.evo.ecology import Ecology
+    from evonets.arenas.continuous.ecology import Ecology
 
     e = Ecology(small(arena_water=True), seed=1, initial=2)
     e.cfg.arena_water = True

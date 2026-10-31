@@ -2,7 +2,7 @@
 
 Stato: **approvata** (2026-10-14), in corso di implementazione.
 - Passo 1 (fisica dei segnali e risposta dei recettori): fatto, in
-  `sim/signals.py` e `net/receptors.py`, con i test. I cicli pesanti sono
+  `arenas/signals.py` e `brains/freeform/receptors.py`, con i test. I cicli pesanti sono
   compilati con Numba.
 - Passo 2 (nuovo genoma: recettori nel genoma, posti che crescono,
   duplicazione neutra, tassi di mutazione come geni, partenza primordiale,

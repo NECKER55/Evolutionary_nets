@@ -4,7 +4,7 @@ raggruppamento per giorno e filtro, senza aprire finestre."""
 from datetime import date, datetime
 
 from evonets import Config
-from evonets.evo import Evolution
+from evonets.arenas.generational.evolution import Evolution
 from evonets.viz.launcher import SaveSummary, day_label, grouped, summarize
 
 

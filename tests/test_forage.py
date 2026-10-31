@@ -3,8 +3,8 @@
 import numpy as np
 
 from evonets import Config, World
-from evonets.sim import signals
-from evonets.sim.tasks import Foraging
+from evonets.arenas import signals
+from evonets.arenas.generational.tasks import Foraging
 
 
 def forage(n=4, seed=0, **kw):
@@ -248,7 +248,7 @@ def test_food_never_comes_back_inside_a_rock():
 
 
 def test_the_ladder_has_a_fourth_stage_and_old_runs_open_without_rocks():
-    from evonets.evo import ladder
+    from evonets.arenas.generational import ladder
 
     assert ladder.TOP == 5.0 and ladder.STAGE_NAMES[3] == "rocce"
     assert ladder.at(3.5)["forage_obstacles"] == 0.5 and ladder.at(3.5)["forage_predators"] == 1.0
@@ -299,7 +299,7 @@ def test_the_yellow_fruit_is_seen_yellow_and_smells_of_its_own_molecule():
 
 
 def test_brain_mode_sees_yellow():
-    from evonets.net.senses import senses
+    from evonets.brains.freeform.senses import senses
 
     names = {s.name for s in senses(Config(sim_mode="cervello"))}
     assert {"occhio giallo sinistro", "occhio giallo destro"} <= names

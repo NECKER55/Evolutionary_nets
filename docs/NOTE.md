@@ -150,7 +150,7 @@ sensi, calcolo della rete e selezione restano identici. Cambia solo una cosa:
 soglie). Basta quindi una funzione di sviluppo che le produca a partire dal nuovo
 genoma, e nuovi operatori di incrocio e mutazione che agiscano sulle regole.
 Per questo conviene tenere separati, come ora, il genoma e i suoi operatori
-(`evonets/evo/`) dal calcolo della rete (`evonets/net/`).
+(`evonets/brains/freeform/genetics.py`) dal calcolo della rete (`evonets/brains/freeform/`).
 
 Servirà inoltre dare una **posizione** a ogni neurone d'ingresso e d'uscita
 (angolo del raggio, tipo di canale, lato del motore): oggi è implicita

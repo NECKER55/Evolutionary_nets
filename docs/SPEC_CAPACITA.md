@@ -2,14 +2,14 @@
 
 Domanda: il cervello di oggi, con la sua plasticità, è in grado di imparare
 durante la vita? Se no, nessun mondo può far emergere l'apprendimento.
-Codice: `evonets/evo/capacity.py`
-(`uv run python -m evonets.evo.capacity --part meccanismo|evoluzione|tutto`).
+Codice: `evonets/arenas/generational/capacity.py`
+(`uv run python -m evonets.arenas.generational.capacity --part meccanismo|evoluzione|tutto`).
 
 ## 1. Il meccanismo, sinapsi per sinapsi
 
 Una sinapsi da un senso a un motore; i due neuroni attivi insieme per 1 s;
 dopo un ritardo arriva piacere (gusto) o dolore. Si misura la sinapsi
-rispetto a chi non riceve niente, con la regola vera (`brain.plasticity`).
+rispetto a chi non riceve niente, con la regola vera (`plasticity.plasticity`).
 "Distingue" = quota di cervelli in cui il piacere la rafforza più del dolore
 (50% = a caso).
 

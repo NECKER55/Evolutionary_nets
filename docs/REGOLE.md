@@ -14,7 +14,7 @@ Si sceglie con `sim_mode` (riga "Simulazione" del menu, `--mode` nel terminale);
 - **evoluzione** (predefinita): evolvono sensi e cervello, come descritto in
   tutto il resto di questo documento.
 - **cervello**: i **sensi sono fissi e decisi da noi**, uguali per tutti
-  (`net/senses.py`, set `sensor_set`): non mutano, non si duplicano, non si
+  (`brains/freeform/senses.py`, set `sensor_set`): non mutano, non si duplicano, non si
   rompono, e il nervo entra nel cervello sempre nello stesso punto. **Evolve
   solo il cervello**, con tutte le altre regole (neuroni, collegamenti, pesi,
   plasticità, duplicazioni, incrocio, sesso, fecondità, riserve). Lo scopo è
@@ -670,7 +670,7 @@ cervello, come in natura (chemoaffinità di Sperry):
   lato lo dice solo la posizione). I due sensi di una coppia (sinistro e
   destro) sono lo stesso organo: hanno gli stessi marcatori propri e
   differiscono solo per la posizione del nervo.
-- **Il grembo** (net/womb.py): ogni neonato, prima di entrare nell'arena,
+- **Il grembo** (brains/freeform/womb.py): ogni neonato, prima di entrare nell'arena,
   vive `prenatal_time` (5 s) di **attività spontanea**. I sensi ricevono onde
   che scorrono lungo l'ordine dei nervi, come le onde della retina: sensi
   vicini sono attivi insieme, lontani no (più un rumore di fondo). La rete
@@ -922,7 +922,7 @@ cioè quelli che hanno superato più prove di fila. È composto da 7 prove:
   punteggio dell'esame è la media delle 7 prove; "migliore" è la rete con la
   media più alta.
 - **Non segue l'ambiente della corsa.** Le costanti dell'ambiente d'esame
-  (fisica, energia, veleno, vista...) sono scritte in `evo/exam.py` e non
+  (fisica, energia, veleno, vista...) sono scritte in `arenas/generational/exam.py` e non
   cambiano se cambi quelle della corsa. Dalla corsa vengono solo il tipo e la
   forma della rete. Anche le arene hanno semi fissi, diversi da quelli
   dell'evoluzione e del banco di prova.
@@ -955,7 +955,7 @@ indicativi.
 
 ## 21. I salvataggi
 
-I salvataggi (`evo/saves.py`) si scrivono in modo sicuro: prima un file
+I salvataggi (`arenas/generational/saves.py`) si scrivono in modo sicuro: prima un file
 temporaneo, poi lo si mette al posto del vecchio in un colpo solo. Se il
 programma si interrompe a metà, il salvataggio precedente resta intatto.
 
@@ -970,7 +970,7 @@ con la generazione in cui è cambiata (anche i ritocchi fatti con `C`).
 salvataggio vengono la popolazione con i suoi genomi e lo **stato della
 corsa**: tipo di rete, popolazione, posti per neuroni e recettori, mondo
 scelto (compito e veleno), modo e posizione della scala, frequenza
-dell'esame (`RUN_STATE` in `evo/evolution.py`). Tutte le altre costanti sono
+dell'esame (`RUN_STATE` in `arenas/generational/evolution.py`). Tutte le altre costanti sono
 regole (fisica, energia, sensi, costi, cibo, odori, mutazioni, soglie della
 scala, durata della vita...) e vengono dal codice attuale. Ogni regola diversa
 da quella con cui la corsa era stata salvata finisce nel registro alla

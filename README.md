@@ -23,6 +23,7 @@ mutazione sono geni.
 | [docs/SPEC_MONDO.md](docs/SPEC_MONDO.md) | il mondo del cibo (prede, predatori, scala di difficoltà) e lo stato dei lavori |
 | [docs/SPEC_FASE_C.md](docs/SPEC_FASE_C.md), [SPEC_FASE_E.md](docs/SPEC_FASE_E.md), [SPEC_SVILUPPO.md](docs/SPEC_SVILUPPO.md) | specifiche di recettori, plasticità e sviluppo |
 | [docs/SPEC_ARENA.md](docs/SPEC_ARENA.md) | l'arena continua: tutti insieme, nascite e morti, senza generazioni |
+| [docs/cervello_sezioni/](docs/cervello_sezioni/cervello_sezioni.pdf) | il cervello a sezioni spiegato parte per parte, con schema e confronto con il cervello vero (LaTeX e PDF) |
 | [docs/NOTE.md](docs/NOTE.md) | idee future ed esperimenti fatti |
 
 ## Avvio
@@ -76,37 +77,49 @@ Tutto il resto è in [docs/INTERFACCIA.md](docs/INTERFACCIA.md).
 
 ```
 evonets/
-  config.py          tutte le costanti, ciascuna commentata
-  sim/               simulatore: non sa nulla di reti
-    world.py           arena, fisica, energia
-    hazards.py         veleno
-    tasks.py           compiti: bersaglio (e varianti d'esame), cibo
-    signals.py         fisica dei segnali: cosa arriva in un punto per ogni fenomeno
-  net/               rete
-    receptors.py       recettore universale
-    brain.py           genoma e calcolo delle reti
-    geometry.py        dove stanno i neuroni e con che probabilità si collegano
-    controllers.py     recettori -> rete -> comandi
-    anatomy.py         struttura di una singola rete, genoma in testo
-  evo/               evoluzione
-    genetics.py        incrocio tra omologhi, mutazione, duplicazione, crescita
-    evolution.py       ciclo delle generazioni, campioni, selezione finale
-    saves.py           salvataggi: formato, scrittura sicura, ripresa con le regole recenti
-    ladder.py          scala di difficoltà del mondo del cibo
-    trial.py           valutazione di una rete su arene fisse
-    exam.py            esame fisso e lesioni, in parallelo su più processi
-  gpu/               motore compilato con JAX
-  viz/               interfaccia (l'unica parte che usa la grafica)
-    app.py             finestra e corsa (pagina principale, arena)
-    launcher.py        menu
-    overview.py        panoramica della corsa, scritta a parole
-    render.py          arena e rete dal vivo
-    inspector.py       reti e genomi; testbench.py banco di prova; widgets.py controlli
+  config.py            tutte le costanti, ciascuna commentata
+  gpu.py               c'è JAX? (cache delle compilazioni)
+  arenas/              una cartella per arena: mondo, motore GPU, corsa, salvataggi
+    signals.py           fisica dei segnali: cosa arriva in un punto per ogni fenomeno
+    generational/        a generazioni: bersaglio e mondo del cibo
+      world.py hazards.py tasks.py   arena, fisica, energia; veleno; compiti
+      evolution.py       ciclo delle generazioni, campioni, selezione finale
+      saves.py           salvataggi: formato, scrittura sicura, ripresa con le regole recenti
+      ladder.py          scala di difficoltà del mondo del cibo
+      trial.py exam.py   valutazione su arene fisse; esame fisso e lesioni
+      capacity.py        test di capacità del cervello
+      gpu_engine.py gpu_worlds.py    il passo compilato; più mondi insieme
+    continuous/          arena continua: mondo unico, senza generazioni
+      world.py ecology.py gpu.py     il mondo; nascite, morti, salvataggi; la GPU
+    pile/                arena delle pile: tanti recinti, apprendimento dentro la vita
+      world.py run.py gpu.py         il mondo; prove e misure; la GPU
+      saves.py bench.py              salvataggi; banco di prova fisso
+  brains/              una cartella per famiglia di cervelli
+    freeform/            reti a forma libera, evolvono (arene generational e continuous)
+      rate.py spiking.py   i due tipi di rete: continua e a impulsi
+      genome.py genetics.py   il genoma; incrocio, mutazione, duplicazione, crescita
+      plasticity.py      la regola di apprendimento
+      receptors.py senses.py  recettore universale; sensi fissi
+      geometry.py development.py womb.py   dove stanno i neuroni; sviluppo; grembo
+      controllers.py     recettori -> rete -> comandi
+      anatomy.py         struttura di una singola rete, genoma in testo
+      gpu.py womb_gpu.py le stesse reti e lo stesso grembo con JAX
+    pile/                agenti dell'arena delle pile
+      sections.py        il cervello a sezioni
+      actor_critic.py guided.py   i due agenti di confronto
+      agent.py attention.py value.py genes.py   base comune, attenzione, O e K, geni
+      gpu.py             gli stessi agenti con JAX
+  viz/                 interfaccia (l'unica parte che usa la grafica)
+    app.py launcher.py   finestra; menu
+    render.py inspector.py widgets.py   arena e rete dal vivo; reti e genomi; controlli
+    generational/        corsa, panoramica, banco di prova
+    continuous/          vista del mondo e schede
+    pile/                recinto e cervello a sezioni
 main.py              avvio: interfaccia, terminale, benchmark
 tests/               un file di test per ciascun gruppo
 ```
 
-Per un **nuovo compito** basta un oggetto in `sim/tasks.py` con `name`,
+Per un **nuovo compito** basta un oggetto in `arenas/generational/tasks.py` con `name`,
 `reset(world)` e `completed(world)` (dettagli nella docstring di
 `ReachTarget`).
 

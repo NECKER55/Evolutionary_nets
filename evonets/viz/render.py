@@ -1,8 +1,8 @@
 import numpy as np
 import pygame
 
-from ..net import development, receptors, senses
-from ..sim.world import World
+from ..arenas.generational.world import World
+from ..brains.freeform import development, receptors, senses
 
 BG = (14, 16, 22)
 ARENA = (24, 27, 36)
@@ -276,7 +276,7 @@ class Renderer:
 
     def _net_layout(self, brains, i: int) -> dict[int, tuple[int, int]]:
         """Posizione nel pannello di ogni neurone esistente, come nel cervello
-        (net/geometry.py): recettori sul bordo sinistro all'altezza del loro
+        (brains/freeform/geometry.py): recettori sul bordo sinistro all'altezza del loro
         nervo, interni nella loro posizione, motori sul bordo destro."""
         h_px = self.net_h
         left, right, top, bottom = 78, PANEL_W - 70, 44, h_px - 26

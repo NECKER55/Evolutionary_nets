@@ -1,7 +1,7 @@
 import numpy as np
 
 from evonets import Config, World
-from evonets.net import RandomWalkController
+from evonets.brains.freeform import RandomWalkController
 
 
 def no_hazards(**kw) -> Config:

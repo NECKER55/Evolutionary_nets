@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 import pygame
 
+from ..arenas.generational.evolution import Evolution
+from ..brains.freeform.anatomy import KIND_NAMES
 from ..config import Config
-from ..evo import Evolution
-from ..net.anatomy import KIND_NAMES
 from .render import BG, BORDER, DIM, IDLE, PLAYER, TARGET, TEXT
 from .widgets import ROW_H, Button, Choice, Number, Picker, Text
 
@@ -324,7 +324,7 @@ class Launcher(Screen):
                            help="Stesso seme e stesse impostazioni = stessa corsa.")
         self.sim = Choice("Simulazione", [("evoluzione", "completa: evolvono sensi e cervello"),
                                           ("cervello", "solo cervello: sensi fissi (set naturale)")],
-                          help="Solo cervello: tutti hanno gli stessi 10 sensi (net/senses.py), che non "
+                          help="Solo cervello: tutti hanno gli stessi 10 sensi (brains/freeform/senses.py), che non "
                                "cambiano; evolve solo il cervello. Ignorato se si riprende un salvataggio.")
         self.sim.select(defaults.get("sim") or "evoluzione")
         self.genome = Choice("Genoma", [("diretto", "scrive ogni sinapsi"),
@@ -517,7 +517,7 @@ class Launcher(Screen):
         return self.task.value == "arena"
 
     def _ecology(self):
-        from ..evo.ecology import Ecology
+        from ..arenas.continuous.ecology import Ecology
 
         cfg = self._config()
         try:
@@ -549,10 +549,10 @@ class Launcher(Screen):
             return None
 
     def _pile(self, explore: bool = False) -> None:
-        from ..evo import pile_saves
-        from ..evo.pile_test import make_run
-        from ..sim.pile import PileConfig
-        from .pile_view import PileScreen
+        from ..arenas.pile import saves as pile_saves
+        from ..arenas.pile.run import make_run
+        from ..arenas.pile.world import PileConfig
+        from .pile.view import PileScreen
 
         save = self.save.value.strip() or self._fresh_name()
         if self.load.value:  # riprendere un salvataggio, o provarne le reti una a una
@@ -587,7 +587,7 @@ class Launcher(Screen):
             self._pile()
             return
         if self._is_arena():
-            from .arena_view import ArenaScreen
+            from .continuous.view import ArenaScreen
 
             eco = self._ecology()
             if eco is not None:
@@ -597,9 +597,7 @@ class Launcher(Screen):
             return
         evo = self._evolution()
         if evo is not None:
-            from .app import (
-                RunScreen,  # la corsa importa il menu: qui si importa al momento
-            )
+            from .generational.run import RunScreen
 
             save = self.save.value.strip() or self._fresh_name()
             run = RunScreen(self.app, evo, save, self.gens.fixed(), watch=self.mode.value == "live",

@@ -6,7 +6,7 @@ import os
 # comportamento di JAX può impostare la variabile da fuori.
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
+from .arenas.generational.world import World  # noqa: E402
 from .config import Config  # noqa: E402
-from .sim import World  # noqa: E402
 
 __all__ = ["Config", "World"]
