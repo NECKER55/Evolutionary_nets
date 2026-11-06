@@ -174,6 +174,23 @@ class Painter:
         return done.result()
 
 
+_egl_kept = None  # il contesto che tiene aperto il display EGL: non va liberato
+
+
+def prepare_display() -> None:
+    """Da chiamare prima di aprire la finestra di SDL. Con la finestra già aperta, la prima
+    immagine 3D può fallire con "Failed to make the EGL context current": inizializzare EGL
+    prima evita il problema. Senza EGL non fa nulla."""
+    global _egl_kept
+    if os.environ.get("MUJOCO_GL") == "egl" and _egl_kept is None:
+        try:
+            import mujoco.egl
+
+            _egl_kept = mujoco.egl.GLContext(8, 8)
+        except Exception:
+            pass
+
+
 class Mondo3D(PileWorld):
     """`enclosures` recinti con `cfg.beings` esseri ciascuno: stessa interfaccia
     di `PileWorld`, più `view` (ciò che vede un essere) e `overview`."""
