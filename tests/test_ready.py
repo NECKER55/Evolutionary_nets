@@ -128,3 +128,16 @@ def test_two_things_in_the_same_image_are_never_the_same_object():
     assert m.know(a) == (0, True)
     assert m.know(a, taken=[0]) == (1, True)  # identica, ma la prima è già in questa immagine
     assert m.know(a, taken=[1]) == (0, False)
+
+
+def test_the_eyes_do_not_change_what_the_perfect_chooses():
+    from evonets.arenas.mondo3d.run import Run3D
+
+    runs = []
+    for agent in ("ragionante", "perfetto con occhi"):
+        r = Run3D(Mondo3DConfig(beings=2, map="labirinto"), agent, 1, 3)
+        r.advance(int(60.0 / r.cfg.dt))
+        runs.append(r)
+    assert runs[0].w.taken == runs[1].w.taken
+    assert (runs[0].w.pos == runs[1].w.pos).all()
+    assert runs[1].brain.boss.seen is not None  # gli occhi hanno davvero guardato
