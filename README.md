@@ -24,6 +24,8 @@ mutazione sono geni.
 | [docs/SPEC_FASE_C.md](docs/SPEC_FASE_C.md), [SPEC_FASE_E.md](docs/SPEC_FASE_E.md), [SPEC_SVILUPPO.md](docs/SPEC_SVILUPPO.md) | specifiche di recettori, plasticità e sviluppo |
 | [docs/SPEC_ARENA.md](docs/SPEC_ARENA.md) | l'arena continua: tutti insieme, nascite e morti, senza generazioni |
 | [docs/cervello_sezioni/](docs/cervello_sezioni/cervello_sezioni.pdf) | il cervello a sezioni spiegato parte per parte, con schema e confronto con il cervello vero (LaTeX e PDF) |
+| [docs/SPEC_CERVELLO_RAGIONANTE.md](docs/SPEC_CERVELLO_RAGIONANTE.md) | progetto: nuovo cervello con modello del mondo e ragionamento su due livelli, in un mondo 3D con MuJoCo, addestrato a imparare una sezione alla volta |
+| [docs/SPEC_PIANIFICAZIONE.md](docs/SPEC_PIANIFICAZIONE.md) | proposta precedente, superata; restano la prova di rivalutazione e l'arena delle casse |
 | [docs/NOTE.md](docs/NOTE.md) | idee future ed esperimenti fatti |
 
 ## Avvio
@@ -43,6 +45,7 @@ uv run main.py --task cibo --ladder --controls --seeds 4 --evolve 2000  # più i
 uv run main.py --exam runs/pop.npz      # esame fisso dei più anziani di un salvataggio
 uv run main.py --exam runs/pop.npz --lesion neuroni  # lo stesso, senza neuroni interni
 uv run main.py --engine numpy ...       # motore NumPy di riferimento (più lento)
+uv run python -m evonets.arenas.mondo3d.run --confronto --minuti 10  # mondo 3D: agente perfetto e base
 uv run pytest                           # test
 ```
 
@@ -94,6 +97,9 @@ evonets/
     pile/                arena delle pile: tanti recinti, apprendimento dentro la vita
       world.py run.py gpu.py         il mondo; prove e misure; la GPU
       saves.py bench.py              salvataggi; banco di prova fisso
+    mondo3d/             le stesse regole delle pile, con corpi e telecamere MuJoCo
+      maps.py            le mappe: stanze e porte generate da un seme
+      world.py bodies.py run.py   il mondo; i cablaggi dei corpi; prove e misure
   brains/              una cartella per famiglia di cervelli
     freeform/            reti a forma libera, evolvono (arene generational e continuous)
       rate.py spiking.py   i due tipi di rete: continua e a impulsi
@@ -109,12 +115,26 @@ evonets/
       actor_critic.py guided.py   i due agenti di confronto
       agent.py attention.py value.py genes.py   base comune, attenzione, O e K, geni
       gpu.py             gli stessi agenti con JAX
+    mondo3d/             agenti di controllo del mondo 3D, non cervelli
+      base.py perfect.py   vede solo la profondità; legge la verità dal simulatore
+    ragionante/          il cervello nuovo, staccato da quello a sezioni: per ora il motore
+      motor.py brain.py  sezione C, con neuroni nascosti e taratura; il cervello attorno a lei
+      vision.py          sezione P: l'interfaccia Percept, il detector finto e la geometria da maschera e profondità
+      ready.py           sezione P con FastSAM e DINOv2, ritaglio a scala fissa, memoria degli oggetti (exam_identity.py)
+      seeing.py          comandante finto che ha solo gli occhi
+      events.py          il mondo a eventi: vite di righe con una regola nascosta
+      memory.py          sezioni L e W, world model a eventi (train_memory.py, exam_memory.py)
+      watch.py           L e W accanto a un agente, senza guidarlo
+      bank.py            la banca di embedding veri, la lingua comune delle sezioni
   viz/                 interfaccia (l'unica parte che usa la grafica)
     app.py launcher.py   finestra; menu
     render.py inspector.py widgets.py   arena e rete dal vivo; reti e genomi; controlli
     generational/        corsa, panoramica, banco di prova
     continuous/          vista del mondo e schede
     pile/                recinto e cervello a sezioni
+    mondo3d/             vista da fuori, immagine, profondità e sezione C (motor_panel.py)
+      brain_page.py      il cervello a tutto schermo mentre la prova gira (tasto N)
+      eye_page.py        l'ultimo sguardo delle reti pronte, con ciò che vedono e non vedono (tasto O)
 main.py              avvio: interfaccia, terminale, benchmark
 tests/               un file di test per ciascun gruppo
 ```
