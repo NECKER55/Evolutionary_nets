@@ -50,7 +50,8 @@ class Mondo3DConfig(PileConfig):
 
     beings: int = 1
     body: str = "spinta, sterzo, morso"  # un nome di `BODIES`
-    image: int = 264  # lato dell'immagine della telecamera, in pixel
+    image: int = 264  # larghezza dell'immagine della telecamera, in pixel
+    image_height: int = 0  # e altezza: 0 per un'immagine quadrata. L'apertura orizzontale resta la stessa
     physics_dt: float = 0.005  # s: passo della fisica (in un passo del mondo ce ne stanno più d'uno)
     wheel_radius: float = 3.0
     track: float = 14.0  # distanza tra le ruote
@@ -63,6 +64,11 @@ class Mondo3DConfig(PileConfig):
     pile_fade: float = 0.6  # s per comparire e per sparire: una pila non scatta dal nulla
     gap: float = 300.0  # spazio tra un recinto e l'altro
     map: str = "aperta"  # un nome di `PLANS`
+
+    @property
+    def frame(self) -> tuple:
+        """(larghezza, altezza) dell'immagine della telecamera."""
+        return self.image, self.image_height or self.image
 
     def __post_init__(self):
         """Con le stanze il recinto è grande quanto la mappa, e le zone sono le quattro stanze d'angolo."""
@@ -82,6 +88,8 @@ def _xml(cfg: Mondo3DConfig, B: int, layouts: list) -> str:
     m = lambda x: x * SCALE
     size, r, wheel = m(cfg.size), m(cfg.radius), m(cfg.wheel_radius)
     wall_h, thick = m(cfg.wall_height), 0.05
+    wide, high = cfg.frame
+    fovy = np.degrees(2.0 * np.arctan(np.tan(SECTORS[-1]) * high / wide))  # MuJoCo vuole l'apertura verticale
     bodies = []
     for b in range(B):
         ox = b * m(cfg.size + cfg.gap)
@@ -111,7 +119,7 @@ def _xml(cfg: Mondo3DConfig, B: int, layouts: list) -> str:
   <geom class="solid" type="box" pos="{r * 0.55} 0 {r}" size="{r * 0.2} {r * 0.5} {r * 0.15}" mass="0.01" rgba="{_rgba(MUZZLE_RGB)}"/>
   <geom class="slip" type="sphere" pos="{r * 0.75} 0 {-wheel + 0.01}" size="0.01"/>
   <geom class="slip" type="sphere" pos="{-r * 0.75} 0 {-wheel + 0.01}" size="0.01"/>
-  <camera name="eye{n}" pos="{m(cfg.camera_ahead)} 0 {m(cfg.camera_height) - wheel}" xyaxes="0 -1 0 0 0 1" fovy="{np.degrees(SECTORS[-1]) * 2.0}"/>
+  <camera name="eye{n}" pos="{m(cfg.camera_ahead)} 0 {m(cfg.camera_height) - wheel}" xyaxes="0 -1 0 0 0 1" fovy="{fovy}"/>
   <body name="left{n}" pos="0 {track} 0"><joint name="left{n}" type="hinge" axis="0 1 0" damping="0.001" armature="0.002"/><geom class="tyre" type="sphere" size="{wheel}" mass="0.1"/></body>
   <body name="right{n}" pos="0 {-track} 0"><joint name="right{n}" type="hinge" axis="0 1 0" damping="0.001" armature="0.002"/><geom class="tyre" type="sphere" size="{wheel}" mass="0.1"/></body>
 </body>''')
@@ -122,7 +130,7 @@ def _xml(cfg: Mondo3DConfig, B: int, layouts: list) -> str:
 <option timestep="{cfg.physics_dt}" integrator="implicitfast"/>
 <size memory="-1"/>
 <statistic extent="{size * 2}" center="{size / 2} {size / 2} 0"/>
-<visual><global offwidth="1024" offheight="768"/><quality shadowsize="0" offsamples="0"/>
+<visual><global offwidth="{max(1024, wide)}" offheight="{max(768, high)}"/><quality shadowsize="0" offsamples="0"/>
   <map znear="0.0005" zfar="2"/>
   <headlight ambient="0.45 0.45 0.45" diffuse="0.25 0.25 0.25" specular="0 0 0"/></visual>
 <asset>
@@ -381,7 +389,7 @@ class Mondo3D(PileWorld):
         return self._gl.call(self._segments, b, i)
 
     def _segments(self, b, i) -> np.ndarray:
-        r = self._renderer(self.cfg.image, self.cfg.image)
+        r = self._renderer(*self.cfg.frame[::-1])
         r.update_scene(self.data, camera=int(self.cam[b, i]))
         r.enable_segmentation_rendering()
         seg = r.render()[..., 0].copy()
@@ -397,7 +405,7 @@ class Mondo3D(PileWorld):
         return names[seg]
 
     def _view(self, b, i, rgb, depth) -> dict:
-        r = self._renderer(self.cfg.image, self.cfg.image)
+        r = self._renderer(*self.cfg.frame[::-1])
         out = {}
         r.update_scene(self.data, camera=int(self.cam[b, i]))
         if rgb:
