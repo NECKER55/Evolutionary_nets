@@ -1,4 +1,4 @@
-"""L'esame delle sezioni 3 e 4: vite mai viste, comprese le famiglie di regole escluse
+"""L'esame delle sezioni L e W: vite mai viste, comprese le famiglie di regole escluse
 dall'addestramento, contro due riferimenti e una lesione.
 
 Uso: `uv run python -m evonets.brains.ragionante.exam_memory --variante a --livello 2`.
@@ -71,7 +71,7 @@ def delay(p, names: tuple, gaps=(0, 5, 15, 30)) -> dict:
 
 
 def trust(p, names: tuple) -> dict:
-    """La sezione 4 sa quando sbaglia? Confronta il dubbio nei morsi giusti e sbagliati."""
+    """La sezione W sa quando sbaglia? Confronta il dubbio nei morsi giusti e sbagliati."""
     data = lives(jax.random.PRNGKey(SEED + 70), LIVES, names)
     r = jax.vmap(lambda d: memory.live(p, d))(data)
     doubt, wrong = np.asarray(r["doubt"]), np.asarray(memory.pleasure(r["log"]))

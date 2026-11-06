@@ -1,4 +1,4 @@
-"""Addestra le sezioni 3 e 4 sul mondo a eventi: ogni passo sono vite nuove, ognuna con
+"""Addestra le sezioni L e W sul mondo a eventi: ogni passo sono vite nuove, ognuna con
 la sua regola nascosta, e una vita non si rivede mai.
 
 Uso: `uv run python -m evonets.brains.ragionante.train_memory --variante a --passi 4000`.

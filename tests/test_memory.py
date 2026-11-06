@@ -1,4 +1,4 @@
-"""Le sezioni 3 e 4 e il mondo a eventi."""
+"""Le sezioni L e W e il mondo a eventi."""
 
 import os
 from pathlib import Path

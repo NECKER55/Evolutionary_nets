@@ -1,11 +1,11 @@
-"""Le sezioni 3 e 4 insieme, un world model a eventi.
+"""Le sezioni L e W insieme, un world model a eventi.
 
-La sezione 3 legge gli eventi di una vita e li riassume; la sezione 4, data quella
+La sezione L legge gli eventi di una vita e li riassume; la sezione W, data quella
 memoria, dice che cosa succederebbe con un oggetto e un'azione, e quanto se ne fida.
 Mentre si vive i pesi fissi non cambiano: cambia la memoria. Ciò che si addestra è
 il modo di imparare in una vita, su tante vite con regole diverse (`train_memory.py`).
 
-Due varianti della sezione 3, sullo stesso esame:
+Due varianti della sezione L, sullo stesso esame:
 
 - "a": una GRU, il ricordo sta nell'attività;
 - "b": una rete ricorrente con sinapsi veloci in stile Hopfield, che si rafforzano con
@@ -18,8 +18,8 @@ import numpy as np
 
 from .events import ACTIONS, EMBED, OUTCOMES, PAIN, PLEASURE
 
-MEMORY = 64  # neuroni della sezione 3
-MODEL = 128  # neuroni per strato della sezione 4
+MEMORY = 64  # neuroni della sezione L
+MODEL = 128  # neuroni per strato della sezione W
 INPUT = EMBED + len(ACTIONS) + len(OUTCOMES) + 2  # oggetto, azione, esito, bisogno, sorpresa
 QUERY = EMBED + len(ACTIONS) + 1  # oggetto, azione, bisogno
 # Ogni caratteristica alla stessa scala. Senza, il colore varia di 1 e la grandezza di 0,32: il
@@ -49,7 +49,7 @@ def blank(params: dict) -> dict:
 
 
 def write(p: dict, s: dict, x) -> dict:
-    """La sezione 3 legge un evento."""
+    """La sezione L legge un evento."""
     h = s["h"]
     if "rec" not in p:
         z = jax.nn.sigmoid(p["zx"] @ x + p["zh"] @ h + p["zb"])
@@ -63,7 +63,7 @@ def write(p: dict, s: dict, x) -> dict:
 
 
 def predict(p: dict, h, query) -> tuple:
-    """La sezione 4: -> (logit degli esiti, quanto si aspetta di sbagliare)."""
+    """La sezione W: -> (logit degli esiti, quanto si aspetta di sbagliare)."""
     x = jnp.concatenate([h, query])
     a = jnp.tanh(p["m1"] @ x + p["b1"])
     a = jnp.tanh(p["m2"] @ a + p["b2"])
@@ -77,7 +77,7 @@ def query_of(obj, act, need):
 
 def live(p: dict, data: dict, blind: bool = False) -> dict:
     """Una vita, evento per evento: prima prevede, poi vede l'esito e lo scrive.
-    `blind`: la sezione 4 non riceve la memoria (la lesione)."""
+    `blind`: la sezione W non riceve la memoria (la lesione)."""
 
     def event(s, e):
         q = query_of(e["obj"], e["act"], e["need"])
