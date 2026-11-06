@@ -8,16 +8,19 @@ from ...arenas.pile.world import BUMP
 
 AVOID = 50.0  # cm: da qui devia per non urtare una pila cattiva
 PATIENCE = 2.0  # s accanto a una pila senza riuscire a morderla
+OPINION = 6.0  # s per cui, con `mistakes`, resta convinto di una stessa cosa
 LEAVE = 3.0  # s in cui poi se ne va a cercare altro
 MEMORY = 0.5  # s per cui ricorda una pila che ha smesso di vedere
 ESCAPE = 1.5  # s di marcia indietro girando, dopo un urto mentre cerca
 
 
 class Seeing:
-    def __init__(self, world, eyes, seed: int = 0):
+    def __init__(self, world, eyes, seed: int = 0, mistakes: float = 0.0):
+        """`mistakes`: quota di tempo in cui crede buono il colore sbagliato. Serve a chi
+        deve registrare anche il dolore: senza errori non si morde mai una pila cattiva."""
         if world.cfg.good_by != "colore":
             raise ValueError("per ora il vedente sa solo quale colore è buono")
-        self.w, self.eyes = world, eyes
+        self.w, self.eyes, self.mistakes = world, eyes, mistakes
         self.rng = np.random.default_rng([seed, 11])
         s = (world.B, world.n)
         self.seen = None  # l'ultimo `Percept`, anche per lo schermo
@@ -25,11 +28,16 @@ class Seeing:
         self.ang, self.far, self.ago = np.zeros(s), np.zeros(s), np.full(s, np.inf)  # la pila di mira
         self.turn = self.rng.choice((-1.0, 1.0), s)  # da che parte cerca
         self.escape = np.zeros(s)  # s di fuga da un urto ancora da fare
+        self.wrong = np.zeros(s, dtype=bool)  # chi adesso crede buono il colore sbagliato
+
+    def _goal(self) -> np.ndarray:
+        """Il colore che ognuno crede buono."""
+        return np.where(self.wrong, 1 - self.w.good[:, None], self.w.good[:, None])
 
     def _aim(self, seen) -> tuple:
         """La pila buona più vicina: se non se ne vede una, quella di un attimo fa."""
         w = self.w
-        wanted = seen.on & (seen.kind == w.good[:, None, None]) & (self.away[..., None] <= 0.0)
+        wanted = seen.on & (seen.kind == self._goal()[..., None]) & (self.away[..., None] <= 0.0)
         dist = np.where(wanted, seen.dist, np.inf)
         k = dist.argmin(-1)[..., None]
         has = wanted.any(-1)
@@ -41,10 +49,12 @@ class Seeing:
     def act(self):
         w, cfg = self.w, self.w.cfg
         seen = self.seen = self.eyes.see()
+        change = self.rng.random(self.wrong.shape) < cfg.dt / OPINION
+        self.wrong = np.where(change, self.rng.random(self.wrong.shape) < self.mistakes, self.wrong)
         self.away = np.maximum(self.away - cfg.dt, 0.0)
         has, ang, far = self._aim(seen)
         reach = cfg.radius + cfg.battery_radius + cfg.bite_reach
-        bad = seen.on & (seen.kind < 2) & (seen.kind != w.good[:, None, None])
+        bad = seen.on & (seen.kind < 2) & (seen.kind != self._goal()[..., None])
         # Come il perfetto: le cattive vicine e davanti spostano di lato, accanto alla meta niente deviazioni.
         rel = seen.dist[..., None] * np.stack([np.cos(seen.ang), np.sin(seen.ang)], -1)
         way = np.stack([np.cos(ang), np.sin(ang)], -1)

@@ -106,6 +106,17 @@ def test_the_seeing_commander_reaches_a_pile_it_sees():
     assert measures(r)["tarature"] <= 3  # il corpo obbedisce: niente ritarature a vuoto
 
 
+def test_with_mistakes_it_also_bites_what_is_bad():
+    w = Mondo3D(Mondo3DConfig(beings=1), 3, 2)
+    from evonets.brains.ragionante.brain import Reasoning
+    from evonets.brains.ragionante.seeing import Seeing
+
+    brain = Reasoning(w, 2, Seeing(w, FakeDetector(w), 2, mistakes=0.6))
+    for _ in range(int(150.0 / w.cfg.dt)):
+        w.step(*brain.act())
+    assert sum(not ok for *_, ok in w.taken) >= 2
+
+
 def test_changing_who_commands_does_not_touch_the_motor():
     assert "vision" not in (folder / "motor.py").read_text()
     assert "wiring" not in (folder / "seeing.py").read_text()
