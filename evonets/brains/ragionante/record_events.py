@@ -1,6 +1,7 @@
-"""Registra eventi veri dal mondo 3D: un vedente con la telecamera morde pile, a
-volte quelle sbagliate, e ogni morso diventa una riga come quelle del mondo a eventi.
-L'oggetto è ciò che la percezione ha visto, non la verità del simulatore.
+"""Registra eventi veri dal mondo 3D: un vedente morde pile, a volte quelle sbagliate,
+e ogni morso diventa una riga come quelle del mondo a eventi. L'oggetto è ciò che ha
+visto il detector finto. Gli eventi di `events_3d.npz` furono registrati con la nostra
+piccola rete convoluzionale, poi tolta: stesso formato, oggetti visti con qualche errore.
 
 Uso: `uv run python -m evonets.brains.ragionante.record_events --minuti 15`.
 """
@@ -14,7 +15,7 @@ from ...arenas.mondo3d.world import Mondo3D, Mondo3DConfig
 from .brain import Reasoning
 from .events import BITE, PAIN, PLEASURE
 from .seeing import Seeing
-from .vision import FakeDetector as Detector
+from .vision import FakeDetector
 
 MISTAKES = 0.4
 RECORDS = Path(__file__).parent / "events_3d.npz"
@@ -31,7 +32,7 @@ def bitten(seen, cfg, b: int, i: int, colour: int):
 def record(minutes: float, enclosures: int, seed: int) -> dict:
     cfg = Mondo3DConfig(beings=1)
     w = Mondo3D(cfg, enclosures, seed)
-    brain = Reasoning(w, seed, Seeing(w, Detector(w), seed, mistakes=MISTAKES))
+    brain = Reasoning(w, seed, Seeing(w, FakeDetector(w), seed, mistakes=MISTAKES))
     rows = {"life": [], "obj": [], "act": [], "out": [], "need": [], "swaps": []}
     for _ in range(int(minutes * 60.0 / cfg.dt)):
         action = brain.act()
