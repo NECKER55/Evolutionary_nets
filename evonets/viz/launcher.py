@@ -363,6 +363,7 @@ class Launcher(Screen):
         # Il mondo 3D (docs/SPEC_CERVELLO_RAGIONANTE.md).
         self.m_agent = Choice("Agente", [("ragionante", "ragionante"), ("vedente pronto", "vedente, reti pronte"),
                                          ("vedente finto", "vedente finto"),
+                                         ("perfetto con occhi", "perfetto con occhi"),
                                          ("perfetto", "perfetto"), ("base", "base")])
         self.m_body = Choice("Corpo", [(k, k) for k in BODIES])
         self.m_map = Choice("Mappa", [(k, k) for k in PLANS])

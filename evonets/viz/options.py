@@ -94,6 +94,9 @@ DETAILS = {
                                   "circa 1 s per sguardo su CPU, uno ogni 0,5 s di mondo: il mondo lo aspetta. Il comandante "
                                   "è finto ma sa solo ciò che vede. Tasto O: l'occhio. Meglio con la telecamera 1280×720. "
                                   "Richiede: uv run --group percezione main.py",
+                "perfetto con occhi": "Come il vedente pronto (FastSAM, DINOv2, uno sguardo ogni 0,5 s di mondo), ma la scelta è "
+                                      "del perfetto: gli occhi vedono e basta, per provare la percezione con la scelta ferma. "
+                                      "Richiede: uv run --group percezione main.py",
                 "vedente finto": "Come il vedente, ma legge gli oggetti dal simulatore e vede attraverso i muri. "
                                  "Serve a provare il resto, non a misurare.",
                 "perfetto": "Regole a mano che leggono la verità, anche dietro le spalle. Il soffitto: nessun cervello, "
