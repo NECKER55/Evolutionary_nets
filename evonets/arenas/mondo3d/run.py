@@ -17,7 +17,7 @@ from .world import BODIES, Mondo3D, Mondo3DConfig
 
 
 
-def seeing(world, seed: int, eyes: str = "Detector") -> Reasoning:
+def seeing(world, seed: int, eyes: str = "FakeDetector") -> Reasoning:
     """Il motore col comandante che ha solo gli occhi. Qui dentro perché le reti si portano dietro JAX o torch."""
     from ...brains.ragionante import vision
     from ...brains.ragionante.seeing import Seeing
@@ -29,8 +29,7 @@ def seeing(world, seed: int, eyes: str = "Detector") -> Reasoning:
     return Reasoning(world, seed, Seeing(world, found(world), seed))
 
 
-AGENTS = {"ragionante": Reasoning, "vedente": seeing,
-          "vedente finto": lambda world, seed: seeing(world, seed, "FakeDetector"),
+AGENTS = {"ragionante": Reasoning, "vedente finto": seeing,
           "vedente pronto": lambda world, seed: seeing(world, seed, "ReadyDetector")} | CONTROLS
 
 
