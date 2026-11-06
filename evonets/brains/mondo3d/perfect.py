@@ -7,13 +7,14 @@ from ...arenas.pile.world import _wrap
 AVOID = 50.0  # cm: da qui devia per non urtare una pila cattiva
 PATIENCE = 2.0  # s accanto a una pila senza riuscire a morderla (una cattiva è in mezzo)
 LEAVE = 4.0  # s poi per quanto la si lascia stare
+ROUTE = 200.0  # cm da aggiungere a una tappa: non è la meta, non ci si ferma
 
 
 class Perfect:
     """Legge la verità dal simulatore: dove sono tutte le pile, quali sono
     buone adesso, dov'è la zona. Non usa la telecamera. Ognuno va alla pila buona
     più vicina che nessun compagno ha già preso di mira; se non ce ne sono
-    aspetta nella zona. Se una cattiva gli impedisce di mordere senza rischi,
+    aspetta nella zona. Con le stanze conosce anche la strada: passa dalle porte. Se una cattiva gli impedisce di mordere senza rischi,
     cambia pila. È un limite per i confronti: la sua scelta è sempre
     buona, ma la strada è avida, quindi non è il massimo teorico di pile al minuto."""
 
@@ -49,9 +50,13 @@ class Perfect:
         has = self.target >= 0
         b, i = np.indices((B, n))
         k = np.maximum(self.target, 0)
-        goal = np.where(has[..., None], w.bpos[b, k], w.zone_centres()[w.zone][:, None])
+        goal = np.where(has[..., None], w.bpos[b, k], w.zone_centres()[w.zone][:, None]).copy()
+        routed = np.zeros((B, n), dtype=bool)
+        for x, y in np.ndindex(B, n):
+            goal[x, y], arrived = w.layouts[x].way(w.pos[x, y], goal[x, y])
+            routed[x, y] = not arrived
         to = goal - w.pos
-        far = np.hypot(to[..., 0], to[..., 1])
+        far = np.hypot(to[..., 0], to[..., 1]) + routed * ROUTE
         way = to / np.maximum(far, 1e-6)[..., None]
         reach = cfg.radius + cfg.battery_radius + cfg.bite_reach
         # Le cattive vicine e davanti spostano di lato, mai indietro: la meta resta

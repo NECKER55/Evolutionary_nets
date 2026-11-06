@@ -31,13 +31,15 @@ os.environ.setdefault("MUJOCO_GL", "egl")  # disegna senza finestre; va deciso p
 import mujoco
 import numpy as np
 
-from ..pile.world import RED, SECTORS, PileConfig, PileWorld, _wrap
+from ..pile.world import BUMP, RED, SECTORS, PileConfig, PileWorld, _wrap
 from .bodies import BODIES
+from .maps import PLANS, WALL, Layout
 
 SCALE = 0.01  # metri per unità del mondo
 RED_RGB, YELLOW_RGB = (0.92, 0.31, 0.27), (0.94, 0.82, 0.24)
 PILE_RGB = (RED_RGB, YELLOW_RGB)
 WALL_RGB = ((0.35, 0.78, 0.43), (0.67, 0.43, 0.90), (0.94, 0.59, 0.24), (0.90, 0.90, 0.92))  # nord, est, sud, ovest
+ROOM_RGB = tuple(c for i, c in enumerate(WALL_RGB) if i != 2)  # niente arancio: da lontano, oltre una porta, sembra una pila
 BODY_RGB = (0.59, 0.78, 0.63)
 MUZZLE_RGB = (0.35, 0.51, 1.0)
 
@@ -60,13 +62,21 @@ class Mondo3DConfig(PileConfig):
     pile_clear: float = 60.0  # una pila nuova nasce almeno così lontana dagli esseri: altrimenti è morsa appena nata
     pile_fade: float = 0.6  # s per comparire e per sparire: una pila non scatta dal nulla
     gap: float = 300.0  # spazio tra un recinto e l'altro
+    map: str = "aperta"  # un nome di `PLANS`
+
+    def __post_init__(self):
+        """Con le stanze il recinto è grande quanto la mappa, e le zone sono le quattro stanze d'angolo."""
+        plan = PLANS[self.map]
+        if plan:
+            self.size = plan.cells * plan.cell
+            self.zone_margin, self.zone_half = plan.cell / 2.0, plan.cell / 2.0 - 30.0
 
 
 def _rgba(rgb, a=1.0) -> str:
     return f"{rgb[0]} {rgb[1]} {rgb[2]} {a}"
 
 
-def _xml(cfg: Mondo3DConfig, B: int) -> str:
+def _xml(cfg: Mondo3DConfig, B: int, layouts: list) -> str:
     """Il modello: tutti i recinti in fila nello stesso mondo. I muri li tengono
     separati, per i corpi e per le telecamere."""
     m = lambda x: x * SCALE
@@ -80,6 +90,9 @@ def _xml(cfg: Mondo3DConfig, B: int) -> str:
                                               (h, size + thick, h + 2 * thick, thick), (-thick, h, thick, h + 2 * thick))):
             bodies.append(f'<geom class="solid" type="box" pos="{ox + cx} {cy} {wall_h / 2}" '
                           f'size="{sx} {sy} {wall_h / 2}" rgba="{_rgba(WALL_RGB[w])}"/>')
+        for (x0, y0, x1, y1), tint in zip(layouts[b].rects, layouts[b].tints):
+            bodies.append(f'<geom class="solid" type="box" pos="{ox + m(x0 + x1) / 2} {m(y0 + y1) / 2} {wall_h / 2}" '
+                          f'size="{m(x1 - x0) / 2} {m(y1 - y0) / 2} {wall_h / 2}" rgba="{_rgba(ROOM_RGB[tint])}"/>')
         bodies.append(f'<geom name="floor{b}" type="box" class="ground" pos="{ox + h} {h} -0.05" '
                       f'size="{h} {h} 0.05" material="floor"/>')
         for k in range(cfg.batteries):
@@ -160,9 +173,10 @@ class Mondo3D(PileWorld):
     KINDS = ("pila rossa", "pila gialla", "essere")  # ciò che c'è nelle immagini, oltre allo sfondo
 
     def __init__(self, cfg: Mondo3DConfig, enclosures: int = 1, seed: int = 0):
+        self.layouts = [Layout(PLANS[cfg.map], seed + b, len(ROOM_RGB)) for b in range(enclosures)]
         super().__init__(cfg, enclosures, seed)
         self.substeps = max(1, round(cfg.dt / cfg.physics_dt))
-        self.model = mujoco.MjModel.from_xml_string(_xml(cfg, enclosures))
+        self.model = mujoco.MjModel.from_xml_string(_xml(cfg, enclosures, self.layouts))
         self.data = mujoco.MjData(self.model)
         B, n, K = self.B, self.n, cfg.batteries
         m, name = self.model, lambda kind, x: mujoco.mj_name2id(self.model, kind, x)
@@ -195,6 +209,41 @@ class Mondo3D(PileWorld):
         self.jaw = np.zeros((B, n))
         self.born = np.zeros((B, K))  # l'età di ogni pila quando è comparsa
         self.set_body(cfg.body)
+
+    # --- I muri delle stanze ---------------------------------------------------------
+
+    def _random_pos(self, shape):
+        pos = super()._random_pos(shape)
+        self._clear(pos, np.ones(shape, dtype=bool))
+        return pos
+
+    def _clear(self, pos, mask) -> None:
+        """Chi di `mask` (B, n) è nato dentro un muro si riposiziona."""
+        for b, i in zip(*np.nonzero(mask)):
+            while len(self.layouts[b].near_wall(pos[b, i], self.cfg.radius + WALL)):
+                pos[b, i] = self.rng.uniform(self.cfg.radius, self.cfg.size - self.cfg.radius, 2)
+
+    def senses(self) -> np.ndarray:
+        """Come nell'arena delle pile, più gli urti contro i muri delle stanze.
+        Occhi e raggi di quei sensi non li considerano: nel 3D si vede con la telecamera."""
+        out = super().senses()
+        touch = self.cfg.radius + 2.0
+        for b, i in np.ndindex(self.B, self.n):
+            to = self.layouts[b].near_wall(self.pos[b, i], touch)
+            if len(to):
+                ang = _wrap(np.arctan2(to[:, 1], to[:, 0]) - self.heading[b, i])
+                q = np.pi / 4.0
+                hits = (ang < -q).any(), (np.abs(ang) <= q).any(), (ang > q).any()
+                out[b, i, BUMP] = np.maximum(out[b, i, BUMP], hits)
+        return out
+
+    def objects(self) -> dict:
+        """Come nell'arena delle pile, ma un muro nasconde ciò che ha dietro."""
+        out = super().objects()
+        where = np.concatenate([self.bpos, self.pos], 1)
+        for b in range(self.B):
+            out["vis"][b] &= ~self.layouts[b].hides(self.pos[b][:, None], where[b][None])
+        return out
 
     # --- Dalle regole alla fisica e ritorno ----------------------------------------
 
@@ -292,6 +341,7 @@ class Mondo3D(PileWorld):
 
     def reborn(self, mask):
         super().reborn(mask)
+        self._clear(self.pos, mask)
         self._place(mask)
 
     # --- Il corpo --------------------------------------------------------------------
