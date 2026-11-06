@@ -314,3 +314,45 @@ def test_the_perfect_agent_crosses_the_house_when_the_zone_changes():
     good = sum(1 for x in r.w.taken if x[4])
     r.close()
     assert len(zones) >= 2 and good >= 12 and r.w.deaths["fame"] == 0
+
+
+# --- La pagina del cervello ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("agent", ("ragionante", "vedente finto"))
+def test_the_brain_page_draws_while_the_run_goes_on(agent):
+    import pygame
+
+    from evonets.brains.ragionante.watch import Watch
+    from evonets.viz.mondo3d.brain_page import BrainPage
+
+    pygame.font.init()
+
+    class App:
+        font = pygame.font.SysFont("monospace", 15)
+        small = pygame.font.SysFont("monospace", 12)
+
+    r = Run3D(Mondo3DConfig(beings=1, image=64), agent, 1, 0)
+    r.watch = Watch(r.w, r.brain)
+    r.advance(40)
+    s, page = pygame.Surface((1440, 860)), BrainPage()
+    page.draw(s, App, r, 0, 0, (700, 200), False)
+    assert len(page.spots) >= 9
+    r.close()
+
+
+def test_the_watcher_reads_a_bite_and_only_then_its_memory_moves():
+    from evonets.brains.ragionante.watch import Watch
+
+    r = Run3D(Mondo3DConfig(beings=1, image=64), "vedente finto", 1, 0)
+    r.brain.motor.left[:] = 0.0
+    r.watch = watch = Watch(r.w, r.brain)
+    watch.before()
+    assert not watch.h.any()
+    pile_seen = watch.seen
+    r.w.taken.append((0.0, 0, 0, 0, True))
+    pile_seen.on[0, 0, 0], pile_seen.kind[0, 0, 0], pile_seen.dist[0, 0, 0] = True, 0, 20.0
+    watch.taken = 0
+    watch.after()
+    r.close()
+    assert watch.h.any() and watch.reads[0, 0] == 1 and watch.rows[0, 0][-1][1] == "piacere"

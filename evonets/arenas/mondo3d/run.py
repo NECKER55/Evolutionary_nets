@@ -42,13 +42,19 @@ class Run3D:
         self.w = Mondo3D(cfg, enclosures, seed)
         self.B, self.n = self.w.B, self.w.n
         self.brain = AGENTS[agent](self.w, seed)
+        self.watch = None  # chi guarda da fuori (`ragionante.watch`): non guida niente
 
     @property
     def t(self) -> float:
         return self.w.t
 
     def step(self) -> None:
-        self.w.step(*self.brain.act())
+        action = self.brain.act()
+        if self.watch:
+            self.watch.before()
+        self.w.step(*action)
+        if self.watch:
+            self.watch.after()
 
     def advance(self, k: int) -> None:
         for _ in range(int(k)):
