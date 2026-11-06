@@ -182,7 +182,7 @@ Il morso resta una regola nostra: MuJoCo dice solo che due oggetti si toccano.
 oggetti. Non chiamano mai MuJoCo direttamente, così il motore si può sostituire.
 
 **Primo mondo.** L'arena delle pile in 3D (fatta): 5 m di lato, pile cilindriche che un urto
-sposta, che nascono lontane dagli esseri e compaiono e spariscono in 0,6 s. Corpo su due ruote con telecamera a 120°, immagine 264×264 più profondità in cm. La telecamera
+sposta, che nascono lontane dagli esseri e compaiono e spariscono in 0,6 s. Corpo su due ruote con telecamera a 120° in orizzontale, immagine 264×264 più profondità in cm; si può scegliere anche 640×480 o 1280×720, con la stessa apertura orizzontale (13,6 ms per immagine contro 3,2). La telecamera
 sta dentro il corpo, 8 cm davanti al centro: sul muso, a contatto, finirebbe dentro ciò che tocca. Il
 telaio si inclina al massimo di 6° perché ribaltandosi resterebbe bloccato. Poi l'arena
 delle casse, con casse e interruttori come forme colorate. Le zampe, se serviranno, arrivano dopo.
@@ -310,9 +310,9 @@ regole di colore: non provano la generalizzazione nel 3D.
 - **Rete nostra** (`Detector`): piccola rete convoluzionale, 18 KB, addestrata sulle etichette
   del simulatore. Dice che cosa c'è in ogni pixel; le macchie sono gli oggetti, la profondità
   dice dove sono. Conosce solo i tipi su cui è stata addestrata.
-- **Reti pronte** (`ReadyDetector`, opzionali, gruppo `percezione`): la profondità indica che
-  cosa sporge dal pavimento, **SlimSAM** ne fa la maschera, **DINOv2 small** più il colore
-  fanno il vettore, `ObjectMemory` lo conserva anche su disco e dice se l'oggetto è già noto. Il
+- **Reti pronte, oggi** (`ReadyDetector`, opzionali, gruppo `percezione`): una regola sulla
+  profondità indica che cosa sporge dal pavimento, **SlimSAM** ne fa la maschera, **DINOv2 small**
+  più il colore fanno il vettore, `ObjectMemory` lo conserva anche su disco e dice se l'oggetto è già noto. Il
   `Tracker` lo segue tra un'immagine e l'altra. Niente etichette: per i nomi bastano 5 esempi
   per tipo. Un oggetto mai visto si riconosce la volta dopo senza riaddestrare nulla.
 - **Da solo DINOv2 vede quasi solo la forma:** un cubo blu e uno arancione avevano somiglianza
@@ -336,6 +336,74 @@ punti di vista: 18 su 18 riconosciuti, nessuno scambiato, 18 su 18 oggetti nuovi
 con soglia 0,8. Un oggetto che cambia colore sotto gli occhi resta lo stesso grazie al
 tracker; fuori dalla vista diventa un oggetto nuovo. Due oggetti che si toccano si separano se
 sono diversi. **Due oggetti uguali, anche uno dietro l'altro, restano uno solo.**
+
+**Il limite di oggi:** il vettore resta dentro P. Serve solo a dare un nome tra tre (pila rossa,
+pila gialla, essere: il più simile di 15 esempi, senza soglia, quindi anche ciò che non somiglia a
+niente riceve un nome) e l'identità. Fuori da P escono solo nome, angolo e distanza: per il resto
+del cervello reti pronte e detector finto sono quasi uguali.
+
+#### Il flusso scelto (da costruire)
+
+Niente nomi: P dice com'è fatto ogni oggetto, e che due oggetti simili stanno insieme lo
+impareranno le sezioni dopo, dalle conseguenze.
+
+1. **Telecamera** 1280×720 a colori, più la profondità di ogni pixel.
+2. **FastSAM-s** (YOLOv8 da segmentazione, circa 11 milioni di pesi, licenza AGPL) trova in un
+   colpo solo tutte le cose dell'immagine, senza nomi: una maschera per cosa. Nessuna regola
+   sull'altezza, quindi anche oggetti alti, bassi o vicini al muro.
+3. **Filtro** delle maschere che sono sfondo: pezzi di muro, pavimento e cielo, circa 12 per
+   immagine. Da decidere e misurare: un filtro generale su area e profondità, oppure lasciarle
+   passare e far imparare all'attenzione a ignorarle.
+4. **Profondità sulla maschera:** la mediana dei suoi pixel è la distanza z. Da z e dalla posizione
+   nell'immagine vengono angolo, distanza dal centro dell'essere e larghezza vera in cm.
+5. **Ritaglio a scala fissa:** un quadrato di 40 cm veri attorno all'oggetto (a z cm sono
+   40 · 640 / tan 60° / z pixel), grigio fuori dalla maschera. L'oggetto occupa nel quadrato la
+   parte che corrisponde alla sua misura vera, a ogni distanza.
+6. **DINOv2 small** porta il quadrato a 224×224, lo divide in 16×16 pezzi da 14 pixel e restituisce
+   il riassunto: 384 numeri. Più 3 numeri di colore, pesati 1,5: 387.
+7. **Riduzione** a 64 numeri con la PCA della banca: un calcolo fisso, non una rete.
+8. **Esce, per ogni oggetto** (al massimo 12, dal più vicino): vettore 64, larghezza in cm, angolo
+   (seno e coseno), vicinanza, "c'è". Va all'attenzione A, che sceglie; L e M ricevono lo stesso
+   vettore, non una traduzione.
+
+**Segmentatori a confronto** (180 scene del 3D, 771 oggetti veri: pile, pile alte 30 cm, forme e
+colori mai visti, esseri; trovato = una maschera lo copre almeno a metà; CPU, 12 core):
+
+| | trovati 264 | trovati 1280 | a 2–3,5 m, 1280 | alti 30 cm, 1280 | maschere in più per immagine | s per immagine, 1280 |
+|---|---|---|---|---|---|---|
+| **FastSAM-s** | 93% | **96%** | **94%** | **100%** | 12 | **0,4** |
+| FastSAM-x | 92% | 96% | 95% | 99% | 12 | 3,0 |
+| CutLER, soglia 0,35 | 51% | 62% | 44% | 62% | 4,5 | 4,2 |
+| CutLER, soglia 0,05 | 75% | 86% | 77% | 88% | 16 | ~6 |
+| SlimSAM con la regola della profondità | 86% | 83% | 85% | 33% | 1 | ~2,7 |
+
+CutLER, addestrato senza etichette su foto di ImageNet, in un oggetto mancato su tre non lo vede
+affatto: oggetti piccoli, sintetici e a tinta unita sono lontani da ciò che conosce. È anche il
+più lento, e la licenza è solo non commerciale. La regola della profondità sbaglia proprio dove
+si temeva: gli oggetti alti li prende per muri. FastSAM-x costa 7 volte FastSAM-s senza trovare di più.
+
+**Ritagli a confronto** (31 tipi di oggetto, 100 viste ciascuno, le stesse a 264 e a 1280; il
+vicino più simile ha la stessa caratteristica?):
+
+| | colore | forma | grandezza | tipo esatto |
+|---|---|---|---|---|
+| 264, ritaglio stretto | 100% | 99,1% | 76,3% | 76,7% |
+| 264, ritaglio stretto + larghezza | 100% | 99,5% | 95,4% | 95,1% |
+| 264, scala fissa | 100% | 99,1% | 91,7% | 91,4% |
+| 264, scala fissa + larghezza | 100% | 99,1% | 97,5% | 97,0% |
+| 1280, ritaglio stretto | 100% | 100% | 82,1% | 82,6% |
+| 1280, ritaglio stretto + larghezza | 100% | 100% | 97,3% | 97,4% |
+| 1280, scala fissa | 100% | 100% | 93,9% | 94,1% |
+| **1280, scala fissa + larghezza** | 100% | 99,9% | **98,7%** | **98,7%** |
+
+Il ritaglio stretto viene ingrandito sempre alla stessa misura, quindi il vettore perde la
+grandezza; con la scala fissa la grandezza resta nell'immagine, anche a 3 m. La larghezza misurata
+con la profondità resta più precisa, e insieme danno il meglio. Nella prova "+ larghezza" il peso
+del numero accanto al vettore è scelto a mano (0,5): più avanti lo impara l'attenzione.
+
+**Oggetti visti in parte** (ritaglio stretto, 264, una parte tolta di lato): con metà oggetto il
+colore resta giusto nel 100% dei casi e la forma nel 92%; con un quarto la forma scende al 71%.
+Sotto metà oggetto lo si può confondere: lo risolvono memoria e movimento, cioè L e M.
 
 ### A. Attenzione
 
@@ -678,8 +746,11 @@ Da fare in quest'ordine. Prima di ogni addestramento si spiega la struttura esat
 
 `bank.py`, `embeddings.npz`: 6.200 righe, 31 tipi di oggetto, 200 viste per tipo, 14 minuti su CPU.
 La PCA tiene il 99,2% della varianza. Il vicino più simile ha lo stesso colore nel 100% dei casi, la
-stessa forma nel 99,4%, ma la stessa grandezza solo nel 68%: il ritaglio si ridimensiona, quindi il
-vettore non sa quanto è grande un oggetto. La grandezza viaggia a parte, da distanza e larghezza.
+stessa forma nel 99,4%, ma la stessa grandezza solo nel 68%. Due cause: il ritaglio si ridimensiona,
+e le sfere piccole e grandi erano identiche (errore, corretto in `bank.py`).
+
+**Da rifare** con il flusso scelto di P: ritaglio a scala fissa, telecamera 1280×720, sfere corrette,
+e la larghezza in cm salvata in ogni riga.
 
 1. Si registrano nel 3D gli oggetti, da molti punti di vista, distanze e luci: pile rosse e gialle,
    piccole e grandi, esseri, più forme e colori che le pile non hanno, come il blu.
