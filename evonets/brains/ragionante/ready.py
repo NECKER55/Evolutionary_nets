@@ -43,6 +43,8 @@ SAME = 0.8  # coseno da cui due vettori sono lo stesso oggetto
 VIEWS = 16  # viste ricordate per oggetto: si impara a riconoscerlo da più lati
 PERIOD = 0.5  # s tra uno sguardo e l'altro
 FOLLOW = 0.3  # sovrapposizione dei riquadri da cui, tra due immagini, è lo stesso oggetto
+WINDOW = 40.0  # cm: il lato del ritaglio a scala fissa, più largo dell'oggetto più largo (un essere, 20 cm)
+GREY = 128  # fuori dalla maschera: così lo sfondo non conta
 
 
 class ObjectMemory:
@@ -96,7 +98,7 @@ def proposals(depth: np.ndarray, cfg) -> np.ndarray:
     muri: gli oggetti sono piccoli e tutti sull'orizzonte. Qui è la profondità a dire che
     cosa sporge dal pavimento e non è un muro. -> (P, 2): riga e colonna, tra 0 e 1."""
     h, w = depth.shape
-    up = (h / 2.0 - np.arange(h)[:, None] - 0.5) / (h / 2.0) * SPREAD
+    up = (h / 2.0 - np.arange(h)[:, None] - 0.5) / (w / 2.0) * SPREAD  # pixel quadrati: si misura sulla larghezza
     height = cfg.camera_height + depth * up
     near = depth < cfg.eye_range
     tall = near & (height > TALL)
@@ -141,11 +143,12 @@ class Eyes:
             return []
         x = self.sam_in(images=rgb, return_tensors="pt")
         codes = self.sam.get_image_embeddings(x["pixel_values"])
-        points = torch.tensor(spots[:, ::-1].copy() * 1024.0, dtype=torch.float32)[None, :, None]
+        high, wide = (float(v) for v in x["reshaped_input_sizes"][0])  # il lato lungo diventa 1024
+        points = torch.tensor(spots[:, ::-1].copy() * (wide, high), dtype=torch.float32)[None, :, None]
         out = self.sam(image_embeddings=codes, input_points=points, multimask_output=False)
-        low = out.pred_masks[0, :, 0, None]
-        full = torch.nn.functional.interpolate(low, size=(h, w), mode="bilinear", align_corners=False)[:, 0]
-        keep, score = (full > 0.0).numpy(), out.iou_scores[0, :, 0].numpy()
+        # Le maschere coprono il quadrato da 1024 con i bordi aggiunti: si tolgono, poi si ingrandisce.
+        full = self.sam_in.post_process_masks(out.pred_masks, x["original_sizes"], x["reshaped_input_sizes"])[0][:, 0]
+        keep, score = full.numpy(), out.iou_scores[0, :, 0].numpy()
         kept: list = []
         for k in np.argsort(-score):
             m = keep[k]
@@ -157,16 +160,19 @@ class Eyes:
         return kept
 
     @torch.no_grad()
-    def describe(self, rgb: np.ndarray, masks: list) -> np.ndarray:
-        """Un vettore di lunghezza 1 per maschera; fuori dalla maschera è grigio, così lo sfondo non conta."""
+    def describe(self, rgb: np.ndarray, masks: list, depth: np.ndarray | None = None) -> np.ndarray:
+        """Un vettore di lunghezza 1 per maschera; fuori dalla maschera è grigio, così lo sfondo non conta.
+        Con `depth` il ritaglio è a scala fissa (`fixed`): la grandezza vera resta nell'immagine."""
         if not masks:
             return np.zeros((0, EMBED), dtype=np.float32)
-        crops = []
-        for m in masks:
-            rows, cols = np.flatnonzero(m.any(1)), np.flatnonzero(m.any(0))
-            top, down, left, right = rows[0], rows[-1] + 1, cols[0], cols[-1] + 1
-            crops.append(np.where(m[..., None], rgb, 128)[top:down, left:right].astype(np.uint8))
-        x = self.dino_in(images=crops, input_data_format="channels_last", return_tensors="pt")  # un ritaglio piccolo sembrerebbe avere i canali davanti
+        if depth is None:
+            crops = [np.where(m[..., None], rgb, GREY)[slice(*rows), slice(*cols)].astype(np.uint8)
+                     for m in masks for rows, cols in [span(m)]]
+            sizes = {}
+        else:
+            crops = [fixed(rgb, m, depth) for m in masks]
+            sizes = {"size": {"height": 224, "width": 224}, "do_center_crop": False}  # tutta la finestra, senza tagli
+        x = self.dino_in(images=crops, input_data_format="channels_last", return_tensors="pt", **sizes)  # un ritaglio piccolo sembrerebbe avere i canali davanti
         v = self.dino(**x).last_hidden_state[:, 0].numpy()
         v = v / np.linalg.norm(v, axis=-1, keepdims=True)
         v = np.concatenate([v, HUE * np.stack([hue(rgb[m]) for m in masks])], -1)
@@ -187,6 +193,27 @@ class Prototypes:
         score = vectors @ self.vectors.T
         best = score.argmax(-1)
         return self.kinds[best], score.max(-1)
+
+
+def span(mask: np.ndarray) -> tuple:
+    """((su, giù), (sx, dx)) in pixel, giù e dx esclusi."""
+    rows, cols = np.flatnonzero(mask.any(1)), np.flatnonzero(mask.any(0))
+    return (rows[0], rows[-1] + 1), (cols[0], cols[-1] + 1)
+
+
+def fixed(rgb: np.ndarray, mask: np.ndarray, depth: np.ndarray, window: float = WINDOW) -> np.ndarray:
+    """Un ritaglio quadrato di `window` cm veri attorno all'oggetto, qualunque sia la distanza:
+    una pila piccola resta piccola nel ritaglio. La profondità dice quanti pixel fanno `window` cm."""
+    z = float(np.median(depth[mask]))
+    side = max(4, round(window * mask.shape[1] / 2.0 / SPREAD / z))
+    (top, down), (left, right) = span(mask)
+    y0, x0 = (top + down - side) // 2, (left + right - side) // 2
+    out = np.full((side, side, 3), GREY, dtype=np.uint8)
+    seen = np.where(mask[..., None], rgb, GREY)
+    ya, xa = max(y0, 0), max(x0, 0)
+    yb, xb = min(y0 + side, rgb.shape[0]), min(x0 + side, rgb.shape[1])
+    out[ya - y0:yb - y0, xa - x0:xb - x0] = seen[ya:yb, xa:xb]
+    return out
 
 
 def box_of(mask: np.ndarray) -> tuple:
@@ -224,7 +251,7 @@ class Tracker:
 
 def locate(mask, depth, cfg) -> tuple:
     """Dalla maschera a (angolo, distanza, larghezza), come in `vision.blobs`."""
-    side = mask.shape[0] / 2.0
+    side = mask.shape[1] / 2.0
     left, _, right, _ = box_of(mask)
     z = float(np.median(depth[mask]))
     wide = (right - left) * z * SPREAD / side
@@ -273,7 +300,7 @@ class ReadyDetector:
             ang, dist, wide = locate(mask, depth, w.cfg)
             held.on[b, i, m], held.kind[b, i, m], held.ang[b, i, m] = True, kind, ang
             held.dist[b, i, m], held.size[b, i, m] = dist, wide
-            held.box[b, i, m] = np.array(box) / rgb.shape[0]
+            held.box[b, i, m] = np.array(box) / np.tile(rgb.shape[1::-1], 2)
             self.ids[b, i, m], self.fresh[b, i, m] = who, new
         self.tracks[b][i].last = tracked
 

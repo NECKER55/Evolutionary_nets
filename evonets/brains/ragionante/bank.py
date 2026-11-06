@@ -46,7 +46,7 @@ def _shape(w, kind) -> int:
     cfg, m, g = w.cfg, w.model, int(w.pgeom[0, 0])
     r, h = cfg.battery_radius * SIZES[size] * SCALE, cfg.pile_height / 2.0 * SCALE
     m.geom_type[g] = FORMS[form]
-    m.geom_size[g] = {"cilindro": (r, h, 0.0), "scatola": (r, r, h), "sfera": (h, 0.0, 0.0)}[form]
+    m.geom_size[g] = {"cilindro": (r, h, 0.0), "scatola": (r, r, h), "sfera": (r, 0.0, 0.0)}[form]  # la sfera cambia con la grandezza
     m.geom_rbound[g] = float(np.hypot(r, h))
     m.geom_rgba[g] = (*COLOURS[colour], 1.0)
     return g
