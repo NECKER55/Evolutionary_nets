@@ -17,12 +17,33 @@ from ..arenas.mondo3d.bodies import BODIES
 from ..brains.freeform.anatomy import KIND_NAMES
 from ..config import Config
 from .render import BG, BORDER, DIM, IDLE, PLAYER, TARGET, TEXT
-from .widgets import ROW_H, Button, Choice, Number, Picker, Text
+from .options import DETAILS, HELP
+from .widgets import ROW_H, Button, Choice, Number, Picker, Text, wrap
 
 RUNS = Path("runs")
 DAYS = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
 MONTHS = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre",
           "ottobre", "novembre", "dicembre")
+SIDE_X = 24  # il margine sinistro del menu
+TAB_W, TAB_H = 170, 40  # le pagine, a sinistra
+LABEL_W, BOX_W = 170, 300  # l'etichetta e il valore di una riga; a lato la spiegazione
+ROW_MIN = 48
+KEYS = (("Nel menu", TEXT),
+        ("Su/Giù o Tab   riga precedente o seguente, anche tra le pagine", DIM),
+        ("PagSu/PagGiù o clic a sinistra   cambia pagina", DIM),
+        ("Sinistra/Destra o clic   cambia il valore", DIM),
+        ("numeri e percorso si scrivono da tastiera", DIM),
+        ("Invio   avvia      Esc   esci      Invio su Riprendi da   elenco dei salvataggi", DIM),
+        ("", TEXT),
+        ("Durante la corsa", TEXT),
+        ("V   cambia scheda tra panoramica e reti dei vincitori", DIM),
+        ("F   apre o chiude l'arena: la corsa continua", DIM),
+        ("T   prova da sola la rete scelta      I   reti e genomi a tutto schermo", DIM),
+        ("E   esame      L   esame con una lesione", DIM),
+        ("S   salva      Spazio   pausa      Esc   torna qui, salva se ci sono novità", DIM),
+        ("", TEXT),
+        ("Le tracce delle reti finiscono nel salvataggio: si esplorano anche dopo.", DIM),
+        ("Premi un tasto per chiudere.", TEXT))
 
 
 class Screen:
@@ -307,122 +328,109 @@ class Launcher(Screen):
     def __init__(self, app, defaults: dict):
         self.app = app
         self.message, self.error = "", False
-        self.mode = Choice("Modalità", [("fast", "veloce: statistiche e reti, F per l'arena"),
-                                         ("max", "massima velocità: solo statistiche"),
-                                         ("live", "dal vivo: arena sempre a schermo")],
-                           help="Il risultato non cambia con la modalità: cambia solo quanto in fretta arriva.")
-        self.net = Choice("Rete", [("rate", "continua (tanh)"), ("spike-ei", "a impulsi, eccitatori/inibitori")],
-                          help="Tipo di neurone. Ignorato se si riprende un salvataggio.")
+        self.mode = Choice("Modalità", [("fast", "veloce"), ("max", "massima velocità"), ("live", "dal vivo")])
+        self.net = Choice("Tipo di neurone", [("rate", "continuo (tanh)"), ("spike-ei", "a impulsi (E/I)")])
         self.net.select(defaults.get("net", "rate"))
-        self.agents = Number("Individui", defaults.get("agents") or Config().population, step=50, low=2,
-                             help="Dimensione della popolazione. Ignorato se si riprende un salvataggio.")
+        self.agents = Number("Individui", defaults.get("agents") or Config().population, step=50, low=2)
         fixed = defaults.get("seed") is not None
-        self.chance = Choice("Casualità", [("random", "seme casuale, nuovo a ogni corsa"),
-                                            ("fixed", "seme fisso (riga sotto): corsa ripetibile")],
-                             index=1 if fixed else 0,
-                             help="Il seme usato viene comunque mostrato e salvato: ogni corsa si può rifare.")
-        self.seed = Number("Seme", defaults.get("seed") or 0,
-                           help="Stesso seme e stesse impostazioni = stessa corsa.")
-        self.sim = Choice("Simulazione", [("evoluzione", "completa: evolvono sensi e cervello"),
-                                          ("cervello", "solo cervello: sensi fissi (set naturale)")],
-                          help="Solo cervello: tutti hanno gli stessi 10 sensi (brains/freeform/senses.py), che non "
-                               "cambiano; evolve solo il cervello. Ignorato se si riprende un salvataggio.")
+        self.chance = Choice("Casualità", [("random", "seme casuale"), ("fixed", "seme fisso")], index=1 if fixed else 0)
+        self.seed = Number("Seme", defaults.get("seed") or 0)
+        self.sim = Choice("Che cosa evolve", [("evoluzione", "sensi e cervello"), ("cervello", "solo il cervello")])
         self.sim.select(defaults.get("sim") or "evoluzione")
-        self.genome = Choice("Genoma", [("diretto", "scrive ogni sinapsi"),
-                                        ("sviluppo", "sviluppo: marcatori e affinità")],
-                             help="Sviluppo: il cervello nasce dai marcatori delle cellule e da una tabella di "
-                                  "affinità (docs/SPEC_SVILUPPO.md). Ignorato se si riprende un salvataggio.")
+        self.genome = Choice("Genoma", [("diretto", "diretto"), ("sviluppo", "sviluppo")])
         self.genome.select(defaults.get("genome") or "diretto")
-        self.task = Choice("Mondo", [("bersaglio", "bersaglio e veleno (il mondo di prima)"),
-                                     ("cibo", "nutrirsi: cibo, prede e predatori"),
-                                     ("arena", "arena continua: tutti insieme, nascite e morti"),
-                                     ("pile", "arena delle pile: cervello a sezioni, sensi fissi"),
-                                     ("mondo3d", "mondo 3D: pile con MuJoCo, telecamera e profondità")],
-                           help="Il compito. Nel mondo del cibo si riproduce chi mangia almeno N cibi; il veleno "
-                                "è spento. Nell'arena continua si vive insieme, senza generazioni "
-                                "(docs/SPEC_ARENA.md). Pile: docs/SPEC_ARENA_PILE.md. "
-                                "Mondo 3D: docs/SPEC_CERVELLO_RAGIONANTE.md.")
+        self.task = Choice("Mondo", [("bersaglio", "bersaglio e veleno"), ("cibo", "nutrirsi"), ("arena", "arena continua"),
+                                     ("pile", "arena delle pile"), ("mondo3d", "mondo 3D")])
         self.task.select(defaults.get("task") or "bersaglio")
-        self.ladder = Choice("Scala", [("scala", "adattiva: sale se va bene, scende se va male"),
-                                       ("basico", "ferma al mondo basico (controllo)"),
-                                       ("complesso", "ferma al mondo complesso (controllo)")],
-                             help="Solo nel mondo del cibo: come si muovono le manopole della difficoltà "
-                                  "(docs/SPEC_MONDO.md).")
+        self.ladder = Choice("Difficoltà", [("scala", "adattiva"), ("basico", "ferma al basico"), ("complesso", "ferma al complesso")])
         self.ladder.select(defaults.get("ladder") or "scala")
-        self.cap = Number("Tetto", Config().arena_cap, step=500, low=10,
-                          help="Solo nell'arena continua: quanti esseri vivi al massimo (i posti). La popolazione "
-                               "la decide il cibo; il tetto evita l'esplosione. Individui = quanti all'inizio.")
-        self.gens = Number("Generazioni", 0, step=50,
-                           help="Dopo quante generazioni fermarsi e salvare. 0 = senza limite.")
-        self.exam_every = Number("Esame ogni", Config().exam_every, step=50,
-                                 help="Ogni quante generazioni mettere all'esame fisso (7 prove; 8 livelli nel "
-                                      "mondo del cibo) i 20 più anziani; non cambia la corsa. 0 = mai.")
-        self.select = Number("Selezione finale", 0, step=1,
-                             help="Finite le generazioni, i sopravvissuti rifanno la prova questo numero di "
-                                  "volte, senza figli: chi fallisce è eliminato. 0 = niente.")
+        self.cap = Number("Tetto", Config().arena_cap, step=500, low=10)
+        self.gens = Number("Generazioni", 0, step=50)
+        self.exam_every = Number("Esame ogni", Config().exam_every, step=50)
+        self.select = Number("Selezione finale", 0, step=1)
         # L'arena delle pile (docs/SPEC_ARENA_PILE.md): righe proprie.
-        self.p_agent = Choice("Cervello", [("sezioni", "a sezioni (A B C D E L U V F)"),
-                                           ("attore-critico", "attore-critico classico (riferimento)"),
-                                           ("guidato", "guidato a mano: sa colore e zona (controllo)")],
-                              help="Chi guida gli esseri: il progetto, il riferimento o il controllo del mondo.")
-        self.p_phase = Choice("Fase", [("A", "A: popolazione fissa, si misura l'apprendimento"),
-                                       ("B", "B: accoppiamento e rinascita da incrocio (evoluzione)")],
-                              help="A: si rinasce col cervello di partenza. B: coi geni di una coppia.")
-        self.p_lesion = Choice("Lesione", [("", "nessuna")] + [(k, f"senza {k}") for k in "BDCLUV"],
-                               help="Solo per il cervello a sezioni: toglierne una per vedere a cosa serve.")
-        self.p_good = Choice("Pile buone per", [("colore", "colore (rosse o gialle)"),
-                                                ("grandezza", "grandezza (grandi o piccole; il colore non conta)")],
-                             help="Che cosa distingue le pile buone: serve a provare che si impara qualunque cosa.")
-        self.p_teacher = Choice("Maestro", [("", "no"),
-                                            ("fantasma", "fantasma: nessuno lo vede, mangia la sua copia delle pile"),
-                                            ("visibile", "visibile: un compagno vero (si mangia le pile buone)")],
-                                help="Solo per il cervello a sezioni: il primo di ogni recinto, guidato a mano; gli "
-                                     "altri imparano il valore delle cose (O) anche da ciò che succede a lui. M lo "
-                                     "toglie o lo rimette.")
-        self.p_encl = Number("Recinti", 200, step=50, low=1,
-                             help="Recinti che girano insieme (GPU); se ne guarda uno alla volta.")
-        self.p_beings = Number("Esseri per recinto", 6, step=1, low=1, help="Quanti esseri in ogni recinto.")
-        # Il mondo 3D (docs/SPEC_CERVELLO_RAGIONANTE.md): per ora solo gli agenti di controllo.
-        self.m_agent = Choice("Agente", [("ragionante", "cervello ragionante: per ora solo il motore (sezione 7)"),
-                                         ("vedente", "vedente: motore più percezione vera dalla telecamera (sezione 1)"),
-                                         ("vedente finto", "vedente finto: come il vedente, ma gli oggetti li legge dal simulatore"),
-                                         ("vedente pronto", "vedente pronto: SlimSAM e DINOv2, richiede --group percezione (lento)"),
-                                         ("perfetto", "perfetto: legge la verità dal simulatore (soffitto)"),
-                                         ("base", "base: vaga guardando solo la profondità (pavimento)")],
-                              help="Il cervello nuovo, e i due controlli tra cui si misura. Non usa il cervello a sezioni.")
-        self.m_body = Choice("Corpo", [(k, k) for k in BODIES],
-                             help="Come le uscite del cervello muovono il corpo: il cervello non lo sa e deve tararsi.")
-        self.m_encl = Number("Recinti", 1, step=1, low=1, help="Recinti nello stesso mondo; se ne guarda uno alla volta.")
-        self.m_beings = Number("Esseri per recinto", 3, step=1, low=1, help="Quanti esseri in ogni recinto.")
+        self.p_agent = Choice("Cervello", [("sezioni", "a sezioni"), ("attore-critico", "attore-critico"), ("guidato", "guidato a mano")])
+        self.p_phase = Choice("Fase", [("A", "A: si misura l'apprendimento"), ("B", "B: con evoluzione")])
+        self.p_lesion = Choice("Lesione", [("", "nessuna")] + [(k, f"senza {k}") for k in "BDCLUV"])
+        self.p_good = Choice("Pile buone per", [("colore", "colore"), ("grandezza", "grandezza")])
+        self.p_teacher = Choice("Maestro", [("", "no"), ("fantasma", "fantasma"), ("visibile", "visibile")])
+        self.p_encl = Number("Recinti", 200, step=50, low=1)
+        self.p_beings = Number("Esseri per recinto", 6, step=1, low=1)
+        # Il mondo 3D (docs/SPEC_CERVELLO_RAGIONANTE.md).
+        self.m_agent = Choice("Agente", [("ragionante", "ragionante"), ("vedente", "vedente, rete nostra"),
+                                         ("vedente finto", "vedente finto"), ("vedente pronto", "vedente, reti pronte"),
+                                         ("perfetto", "perfetto"), ("base", "base")])
+        self.m_body = Choice("Corpo", [(k, k) for k in BODIES])
+        self.m_encl = Number("Recinti", 1, step=1, low=1)
+        self.m_beings = Number("Esseri per recinto", 3, step=1, low=1)
         load = defaults.get("load")
         self.extra = [load] if load and Path(load).exists() and Path(load).parent.resolve() != RUNS.resolve() else []
         self.picker: SavePicker | None = None
         self._moved = False
-        self.load = Picker("Riprendi da", self._open_picker,
-                           help="Invio o clic: l'elenco dei salvataggi in runs/, per giorno, da cui continuare "
-                                "o da esplorare.")
+        self.load = Picker("Riprendi da", self._open_picker)
         self._show_load(None)
-        self.save = Text("Salva in", defaults.get("save") or self._fresh_name(),
-                         help="Dove salvare: tasto S, fine delle generazioni, uscita dalla corsa.")
+        self.save = Text("Salva in", defaults.get("save") or self._fresh_name())
+        for name, text in HELP.items():
+            getattr(self, name).help = text
+        for name, text in DETAILS.items():
+            getattr(self, name).details = text
         self._task_seen = None
-        self.fields = [self.mode, self.sim, self.genome, self.net, self.agents, self.task, self.ladder, self.cap,
-                       self.chance, self.seed,
-                       self.gens, self.exam_every, self.select, self.load, self.save]
-        self.pile_fields = [self.task, self.p_agent, self.p_phase, self.p_lesion, self.p_good, self.p_teacher, self.p_encl,
-                            self.p_beings,
-                            self.chance, self.seed, self.gens, self.load, self.save]
-        self.world3d_fields = [self.task, self.m_agent, self.m_body, self.p_good, self.m_encl, self.m_beings, self.chance,
-                               self.seed, self.gens]
+        chance = ("Durata e caso", [self.gens, self.chance, self.seed])
+        saves = ("Salvataggi", [self.load, self.save])
+        self.pages = {
+            "evoluzione": [("Mondo", [self.task, self.ladder, self.cap]),
+                           ("Rete", [self.net, self.genome, self.sim]),
+                           ("Popolazione", [self.agents, self.mode]),
+                           ("Durata e caso", [self.gens, self.exam_every, self.select, self.chance, self.seed]), saves],
+            "pile": [("Mondo", [self.task, self.p_good]),
+                     ("Cervello", [self.p_agent, self.p_lesion, self.p_teacher]),
+                     ("Popolazione", [self.p_phase, self.p_encl, self.p_beings]), chance, saves],
+            "mondo3d": [("Mondo", [self.task, self.p_good]),
+                        ("Agente", [self.m_agent, self.m_body]),
+                        ("Popolazione", [self.m_encl, self.m_beings]), chance],
+        }
+        self.tabs = []  # (riquadro, prima riga della pagina), fissati da `draw`
+        self.help_open = False
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
         self.inspect_btn = Button("Esplora reti e genomi del salvataggio", self.explore)
         self.quit_btn = Button("Esci", self.quit)
+        self.help_btn = Button("Aiuto  [F1]", self._toggle_help)
         if load:
             self._choose(load)
 
+    def _sections(self) -> list:
+        """Le pagine del menu: [(titolo, righe)]. Ogni tipo di mondo ha le sue."""
+        return self.pages.get(self.task.value, self.pages["evoluzione"])
+
     def _visible(self) -> list:
-        """Le righe da mostrare: l'arena delle pile ha le sue."""
-        return {"pile": self.pile_fields, "mondo3d": self.world3d_fields}.get(self.task.value, self.fields)
+        """Tutte le righe, pagina dopo pagina: Su e Giù passano da una pagina all'altra."""
+        return [f for _, fields in self._sections() for f in fields]
+
+    def _page(self) -> int:
+        """La pagina che contiene la riga scelta."""
+        k = self.focus
+        for page, (_, fields) in enumerate(self._sections()):
+            if k < len(fields):
+                return page
+            k -= len(fields)
+        return 0
+
+    def _go(self, page: int) -> None:
+        pages = self._sections()
+        self.focus = sum(len(f) for _, f in pages[:page % len(pages)])
+
+    def _summary(self) -> str:
+        """Che cosa partirebbe adesso, in una riga."""
+        if self.load.value:
+            return "riprende il salvataggio scelto"
+        how = {"pile": lambda: f"{self.p_agent.options[self.p_agent.index][1]}, recinti {self.p_encl.value} × esseri {self.p_beings.value}",
+               "mondo3d": lambda: f"{self.m_agent.options[self.m_agent.index][1]}, recinti {self.m_encl.value} × esseri {self.m_beings.value}"}
+        rest = how.get(self.task.value, lambda: f"neurone {self.net.options[self.net.index][1]}, {self.agents.value} individui")()
+        return f"{self.task.options[self.task.index][1]}: {rest}"
+
+    def _toggle_help(self) -> None:
+        self.help_open = not self.help_open
 
     def _files(self) -> list[Path]:
         return sorted(RUNS.glob("*.npz"), key=lambda p: p.stat().st_mtime, reverse=True) + \
@@ -681,10 +689,21 @@ class Launcher(Screen):
                 if f.rect.collidepoint(ev.pos):
                     self.focus = k
                     f.click(ev.pos)
-            for b in (self.start_btn, self.inspect_btn, self.quit_btn):
+            for rect, first in self.tabs:
+                if rect.collidepoint(ev.pos):
+                    self.focus = first
+            for b in (self.start_btn, self.inspect_btn, self.help_btn, self.quit_btn):
                 b.click(ev.pos)
         elif ev.type == pygame.KEYDOWN:
-            if ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            if self.help_open:
+                self.help_open = False
+            elif ev.key == pygame.K_F1:
+                self.help_open = True
+            elif ev.key == pygame.K_PAGEDOWN:
+                self._go(self._page() + 1)
+            elif ev.key == pygame.K_PAGEUP:
+                self._go(self._page() - 1)
+            elif ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 if field is self.load:
                     self._open_picker()  # Invio su "Riprendi da" apre l'elenco
                 else:
@@ -710,70 +729,76 @@ class Launcher(Screen):
             elif not arena and self.exam_every.value == 10:
                 self.exam_every.value = Config().exam_every
         self._task_seen = self.task.value
-        self.gens.label = "Minuti di mondo" if arena else "Generazioni"
+        self.gens.label = "Minuti di mondo" if arena or self.task.value in ("pile", "mondo3d") else "Generazioni"
         self.exam_every.label = "Esame ogni (min)" if arena else "Esame ogni"
         self.cap.enabled = self.task.enabled and arena
         self.select.enabled = self.gens.value > 0 and not arena  # serve un punto in cui le generazioni finiscono
         self.seed.enabled = self.chance.enabled and self.chance.value == "fixed"
         self.ladder.enabled = self.task.enabled and self.task.value == "cibo"
-        s.fill(BG)
-        s.blit(app.big.render("Evolutionary nets", True, PLAYER), (60, 40))
-        s.blit(app.font.render("nuova corsa, ripresa di un salvataggio o esplorazione delle sue reti", True, DIM),
-               (60, 76))
-        y = 100
-        fields = self._visible()
-        self.focus = min(self.focus, len(fields) - 1)
-        pile = fields is not self.fields
-        self.gens.label = "Minuti di mondo" if pile else self.gens.label
         self.p_lesion.enabled = self.p_agent.value == "sezioni"
-        self.m_body.enabled = self.m_agent.value == "ragionante"
-        for k, f in enumerate(fields):
-            f.draw(s, app.font, 60, y, 175, 540, k == self.focus)
-            y += ROW_H  # righe fitte: con il tetto dell'arena sono 15
-        field = fields[self.focus]
-        help = field.help if field.enabled or field is not self.select else \
-            "La selezione finale parte quando le generazioni finiscono: imposta prima Generazioni."
-        s.blit(app.small.render(help, True, DIM), (235, y + 2))
+        motor = self.m_agent.value not in ("perfetto", "base")
+        self.m_body.enabled = motor
+        seeing = self.task.value == "mondo3d" and self.m_agent.value.startswith("vedente")
+        if seeing:
+            self.p_good.select("colore")  # il comandante del vedente sa solo quale colore è buono
+        self.p_good.enabled = self.task.enabled and not seeing
+        s.fill(BG)
+        s.blit(app.big.render("Evolutionary nets", True, PLAYER), (SIDE_X, 18))
+        s.blit(app.font.render("Scegli le opzioni, una pagina alla volta, poi avvia.", True, DIM), (SIDE_X + 290, 26))
+        pages = self._sections()
+        self.focus = min(self.focus, len(self._visible()) - 1)
+        current = self._page()
+        self.tabs, y, first = [], 66, 0
+        for page, (title, fields) in enumerate(pages):
+            rect = pygame.Rect(SIDE_X, y, TAB_W, TAB_H)
+            pygame.draw.rect(s, (70, 58, 24) if page == current else IDLE, rect, border_radius=4)
+            s.blit(app.font.render(title, True, PLAYER if page == current else TEXT), (rect.x + 12, rect.y + 11))
+            self.tabs.append((rect, first))
+            first += len(fields)
+            y += TAB_H + 8
+        x, y = SIDE_X + TAB_W + 24, 66
+        s.blit(app.font.render(pages[current][0], True, TARGET), (x, y))
+        y += 30
+        k = self.focus - sum(len(f) for _, f in pages[:current])
+        for row, field in enumerate(pages[current][1]):
+            room = s.get_width() - x - LABEL_W - BOX_W - 44
+            what = wrap(app.font, field.detail() or field.help, room)
+            why = wrap(app.small, field.help, room) if field.detail() else []
+            if field is self.select and not field.enabled:
+                what, why = wrap(app.font, "Parte quando le generazioni finiscono: imposta prima Generazioni.", room), []
+            high = max(ROW_MIN, 19 * len(what) + 15 * len(why) + 14)
+            if row == k:
+                pygame.draw.rect(s, (30, 32, 42), pygame.Rect(x - 8, y - 4, s.get_width() - x - 8, high), border_radius=4)
+            field.draw(s, app.font, x, y + (high - ROW_H) // 2 - 2, LABEL_W, BOX_W, row == k)
+            note_x = x + LABEL_W + BOX_W + 20
+            for n, line in enumerate(what):
+                s.blit(app.font.render(line, True, TEXT), (note_x, y + 3 + 19 * n))
+            for n, line in enumerate(why):
+                s.blit(app.small.render(line, True, DIM), (note_x, y + 5 + 19 * len(what) + 15 * n))
+            y += high + 6
+        bottom = s.get_height() - 62
         if self.load.value:
-            s.blit(app.small.render(save_info(self.load.value), True, TARGET), (235, y + 20))
-        y += 44
-        x = 60
+            s.blit(app.small.render(save_info(self.load.value), True, TARGET), (SIDE_X, bottom - 40))
+        s.blit(app.font.render(f"Partirà: {self._summary()}", True, TEXT), (SIDE_X, bottom - 22))
+        x = SIDE_X
         self.inspect_btn.enabled = self.load.value is not None and self.task.value != "mondo3d"
-        for b in (self.start_btn, self.inspect_btn, self.quit_btn):
-            x += b.draw(s, app.font, x, y) + 14
+        for b in (self.start_btn, self.inspect_btn, self.help_btn, self.quit_btn):
+            x += b.draw(s, app.font, x, bottom) + 14
         if self.message:
-            s.blit(app.font.render(self.message[:150], True, (255, 110, 90) if self.error else TARGET), (60, y + 50))
-
-        help_x = 830
-        lines = [
-            ("Come si usa", TEXT),
-            ("", TEXT),
-            ("Su/Giù o Tab   scegli la riga", DIM),
-            ("Sinistra/Destra o clic   cambia il valore", DIM),
-            ("numeri e percorso si scrivono da tastiera", DIM),
-            ("Invio   avvia      Esc   esci", DIM),
-            ("Invio su Riprendi da   elenco dei salvataggi", DIM),
-            ("", TEXT),
-            ("Durante la corsa", TEXT),
-            ("", TEXT),
-            ("La pagina principale ha due schede: la", DIM),
-            ("panoramica (a che punto siamo, a parole) e", DIM),
-            ("le reti dei vincitori.  V   cambia scheda", DIM),
-            ("F   apre/chiude l'arena (la corsa continua)", DIM),
-            ("T   prova da sola la rete scelta", DIM),
-            ("I   reti e genomi a tutto schermo", DIM),
-            ("E   esame    L   esame con una lesione", DIM),
-            ("Con Generazioni e Selezione finale, alla fine", DIM),
-            ("i sopravvissuti rifanno la prova senza figli.", DIM),
-            ("S   salva     Spazio   pausa", DIM),
-            ("Esc torna qui (salva se ci sono novità)", DIM),
-            ("", TEXT),
-            ("Le tracce delle reti (un campione per", DIM),
-            ("generazione) finiscono nel salvataggio:", DIM),
-            ("si possono esplorare anche dopo.", DIM),
-        ]
-        for k, (text, color) in enumerate(lines):
-            s.blit(app.font.render(text, True, color), (help_x, 110 + 20 * k))
+            s.blit(app.font.render(self.message[:100], True, (255, 110, 90) if self.error else TARGET), (x + 10, bottom + 8))
+        if self.help_open:
+            self._draw_help(s)
         if self.picker is not None:
             self.picker.draw(s, app, self._moved)
             self._moved = False
+
+    def _draw_help(self, s) -> None:
+        """I tasti, sopra il menu: si chiude con un tasto qualsiasi."""
+        shade = pygame.Surface(s.get_size(), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, 190))
+        s.blit(shade, (0, 0))
+        box = pygame.Rect(160, 50, s.get_width() - 320, s.get_height() - 100)
+        pygame.draw.rect(s, (20, 22, 30), box)
+        pygame.draw.rect(s, BORDER, box, 1)
+        for k, (text, color) in enumerate(KEYS):
+            s.blit(self.app.font.render(text, True, color), (box.x + 24, box.y + 20 + 22 * k))
