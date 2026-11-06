@@ -118,6 +118,9 @@ evonets/
       base.py perfect.py   vede solo la profondità; legge la verità dal simulatore
     ragionante/          il cervello nuovo, staccato da quello a sezioni: per ora il motore
       motor.py brain.py  sezione 7, con neuroni nascosti e taratura; il cervello attorno a lei
+      vision.py          sezione 1: detector finto e rete nostra (train_vision.py, exam_vision.py)
+      ready.py           sezione 1 con SlimSAM e DINOv2, memoria degli oggetti (exam_identity.py)
+      seeing.py          comandante finto che ha solo gli occhi
   viz/                 interfaccia (l'unica parte che usa la grafica)
     app.py launcher.py   finestra; menu
     render.py inspector.py widgets.py   arena e rete dal vivo; reti e genomi; controlli

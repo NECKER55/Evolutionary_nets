@@ -119,7 +119,7 @@ si blocca. La sezione dopo impara con quelle prima già bloccate.
 | 2 | con una domanda data da noi sceglie l'oggetto giusto; un pericolo vicino passa comunque | domande date da noi |
 | 6 basso | raggiunge un sotto-scopo dato | 2, 3, 4, 5, 7 bloccate |
 | 6 alto | **rivalutazione alla prima prova** | tutto bloccato, anche 6 basso |
-| 1 | trova gli oggetti e dà la stessa interfaccia del detector finto | etichette del simulatore |
+| 1 | trova gli oggetti e dà la stessa interfaccia del detector finto (**superato**, con le due reti: vedi "1. Percezione") | etichette del simulatore |
 
 Regole:
 
@@ -155,7 +155,8 @@ Il morso resta una regola nostra: MuJoCo dice solo che due oggetti si toccano.
 oggetti. Non chiamano mai MuJoCo direttamente, così il motore si può sostituire.
 
 **Primo mondo.** L'arena delle pile in 3D (fatta): 5 m di lato, pile cilindriche che un urto
-sposta, che nascono lontane dagli esseri e compaiono e spariscono in 0,6 s. Corpo su due ruote con telecamera a 120°, immagine 264×264 più profondità in cm. Il
+sposta, che nascono lontane dagli esseri e compaiono e spariscono in 0,6 s. Corpo su due ruote con telecamera a 120°, immagine 264×264 più profondità in cm. La telecamera
+sta dentro il corpo, 8 cm davanti al centro: sul muso, a contatto, finirebbe dentro ciò che tocca. Il
 telaio si inclina al massimo di 6° perché ribaltandosi resterebbe bloccato. Poi l'arena
 delle casse, con casse e interruttori come forme colorate. Le zampe, se serviranno, arrivano dopo.
 
@@ -169,7 +170,8 @@ delle casse, con casse e interruttori come forme colorate. Le zampe, se serviran
 Misure con 1 essere per recinto: perfetto su 4 recinti per 20 minuti, base su 4 recinti per 12
 minuti (solo 6 pile: la scelta è indicativa). Il cervello ragionante con la sola sezione 7, 3 recinti per 5
 minuti compreso il minuto di taratura, fa in media 9,25 pile buone al minuto sui 6 corpi di
-prova, con 3 semi (minimo 8,1, massimo 10,6). Il perfetto ha la scelta perfetta, ma la strada
+prova, con 3 semi (minimo 8,1, massimo 10,6). Il vedente, con la percezione vera dalla
+telecamera, fa circa 8 pile al minuto su 3 recinti per 4 minuti, senza morti. Il perfetto ha la scelta perfetta, ma la strada
 è avida: non è il massimo teorico di pile al minuto. Il guidato dell'arena 2D, con le
 stesse regole, fa 9,0 pile al minuto, di cui il 96% buone.
 
@@ -187,7 +189,8 @@ non basta, perché mostra il mondo ma non la rete. Sullo schermo:
 - attività delle sezioni, memorie e catena dell'immaginazione.
 
 Col cervello ragionante la schermata mostra anche la sezione 7: neuroni, sinapsi, cablaggio
-nascosto e sensi, con i pulsanti "Tara i sensi" e "Cambia corpo".
+nascosto e sensi, con i pulsanti "Tara i sensi" e "Cambia corpo". Col vedente, sull'immagine
+compaiono i riquadri degli oggetti trovati, con la loro distanza.
 
 Sullo schermo la profondità ha una scala logaritmica a colori, perché più dell'80% dei pixel
 che non sono cielo è pavimento a meno di 50 cm: la telecamera è bassa (11 cm) e larga. La
@@ -227,9 +230,39 @@ essere.
 - **Fa:** separa gli oggetti e li descrive.
 - **Entra:** immagine della telecamera. **Esce:** un embedding per oggetto, fino a un massimo fisso.
 - **Anello esterno:** impara a vedere. **Anello interno:** non cambia, o molto poco.
-- **Prima versione:** un **detector finto**, cioè gli oggetti letti dal simulatore,
-  trasformati in embedding, con un'interfaccia uguale a quella del detector vero.
-  Il detector vero legge la telecamera e arriva quando il resto funziona.
+- **Interfaccia:** `Percept` (`vision.py`), uguale per tutti: che cos'è, angolo, distanza,
+  larghezza, embedding. Nessun detector sa quali oggetti siano buoni.
+- **Detector finto:** legge il simulatore. Costa niente, ma vede attraverso i muri: serve
+  ad allenare le altre sezioni, non a misurare.
+- **Rete nostra** (`Detector`): piccola rete convoluzionale, 18 KB, addestrata sulle etichette
+  del simulatore. Dice che cosa c'è in ogni pixel; le macchie sono gli oggetti, la profondità
+  dice dove sono. Conosce solo i tipi su cui è stata addestrata.
+- **Reti pronte** (`ReadyDetector`, opzionali, gruppo `percezione`): la profondità indica che
+  cosa sporge dal pavimento, **SlimSAM** ne fa la maschera, **DINOv2 small** più il colore
+  fanno il vettore, `ObjectMemory` lo conserva anche su disco e dice se l'oggetto è già noto. Il
+  `Tracker` lo segue tra un'immagine e l'altra. Niente etichette: per i nomi bastano 5 esempi
+  per tipo. Un oggetto mai visto si riconosce la volta dopo senza riaddestrare nulla.
+- **Da solo DINOv2 vede quasi solo la forma:** un cubo blu e uno arancione avevano somiglianza
+  0,91. Per questo il colore si aggiunge al vettore.
+
+| esame in mondi mai visti | rete nostra | reti pronte |
+|---|---|---|
+| pile trovate, guidando | 88% | 96% |
+| rilevamenti giusti, guidando | 97% | 97% |
+| pile trovate, scene difficili (muri, pile a un passo) | 90% | 92% |
+| rilevamenti giusti, scene difficili | 85% | 89% |
+| errore di angolo / distanza | 0,9° / 2,4% | 0,6° / 1,2% |
+| tempo per vista, su CPU | 19 ms | 3,2 s |
+| pile/min in guida (1 essere, 4 min) | 8,9 | 7,4 |
+
+In guida le reti pronte guardano ogni 0,5 s di mondo, ma a ogni sguardo il mondo le aspetta:
+su questa macchina non reggono il tempo reale.
+
+**Identità** (`exam_identity.py`), con oggetti mai visti, memoria ricaricata da disco e nuovi
+punti di vista: 18 su 18 riconosciuti, nessuno scambiato, 18 su 18 oggetti nuovi detti nuovi,
+con soglia 0,8. Un oggetto che cambia colore sotto gli occhi resta lo stesso grazie al
+tracker; fuori dalla vista diventa un oggetto nuovo. Due oggetti che si toccano si separano se
+sono diversi. **Due oggetti uguali, anche uno dietro l'altro, restano uno solo.**
 
 ### 2. Attenzione
 
@@ -303,6 +336,8 @@ come "se succede A, faccio X, prevedo B".
 - **Fa:** traduce un'intenzione in comandi per un corpo che non conosce.
 - **Entra:** tre intenzioni, sempre uguali qualunque sia il corpo: velocità, rotazione, bocca.
   Più i sensi del corpo, gli stessi tre: che cosa ha fatto davvero.
+- **Chi comanda non importa:** il motore riceve intenzioni dal comandante finto che legge la
+  verità (`Perfect`) o da quello che ha solo gli occhi (`Seeing`), senza saperlo.
 - **Esce:** K uscite, tante quante ne ha il corpo. Tra ingressi e uscite ci sono 8 neuroni
   nascosti (tanh).
 - **Infanzia:** alla nascita la rete non sa niente e si tara per 60 s. Impara col gradiente,
@@ -421,7 +456,7 @@ Ma il rischio di 6 si misura **subito**, prima di costruire le sezioni che dovre
 | 6 | 6 basso, con la catena dell'immaginazione | sequenze di sotto-scopi che reggono ai distrattori |
 | 7 | 6 alto | rivalutazione alla prima prova; togliendo la catena, peggiora |
 | 8 | ritocco finale di tutto insieme | tutti gli esami ripetuti e superati |
-| 9 | 1: detector vero sulla telecamera, poi ritocco | i risultati restano vicini a quelli col detector finto |
+| 9 | 1: detector vero sulla telecamera (**anticipata e fatta**, con due reti da confrontare), poi ritocco | i risultati restano vicini a quelli col detector finto |
 | 10 | evoluzione sopra il gradiente | tara le costanti e si misura che cosa cambia |
 
 La fase 2 è la più importante: se 6 non ragiona nemmeno con sezioni perfette, inutile
