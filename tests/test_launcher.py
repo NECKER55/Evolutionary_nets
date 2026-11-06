@@ -113,6 +113,24 @@ def test_pages_change_by_click_and_keys_and_rows_flow_between_them():
     assert not m.help_open
 
 
+def test_a_click_changes_only_the_row_on_the_page_in_view():
+    """Le righe delle altre pagine tengono il riquadro di quando erano disegnate:
+    un clic nello stesso punto non deve cambiare anche loro."""
+    m, s, pygame = menu()
+    click = lambda pos: m.handle(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=pos))
+    m.task.select("mondo3d")
+    m.draw(s)
+    m.p_good.rect, m.m_map.rect = m.task.rect.move(0, 40), m.task.rect.move(0, 80)
+    click(m.tabs[1][0].center)
+    m.draw(s)
+    before = (m.task.value, m.p_good.value, m.m_map.value)
+    agent, body = m.m_agent.index, m.m_body.index
+    click((m.m_agent.rect.right - 5, m.m_agent.rect.centery))
+    click((m.m_body.rect.right - 5, m.m_body.rect.centery))
+    assert (m.m_agent.index, m.m_body.index) != (agent, body)
+    assert (m.task.value, m.p_good.value, m.m_map.value) == before
+
+
 def test_the_start_button_launches_the_3d_world_with_the_choices_made():
     pytest.importorskip("mujoco")
     from evonets.viz.mondo3d.view import Mondo3DScreen

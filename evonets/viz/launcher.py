@@ -688,10 +688,16 @@ class Launcher(Screen):
         self.focus = min(self.focus, len(fields) - 1)
         field = fields[self.focus]
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-            for k, f in enumerate(fields):
+            # Solo le righe della pagina in vista: quelle delle altre pagine tengono il
+            # riquadro di quando erano disegnate, nello stesso punto dello schermo.
+            pages = self._sections()
+            page = self._page()
+            first = sum(len(f) for _, f in pages[:page])
+            for k, f in enumerate(pages[page][1], first):
                 if f.rect.collidepoint(ev.pos):
                     self.focus = k
                     f.click(ev.pos)
+                    break
             for rect, first in self.tabs:
                 if rect.collidepoint(ev.pos):
                     self.focus = first
