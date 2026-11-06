@@ -105,8 +105,18 @@ def test_the_camera_sees_the_colour_and_the_depth_is_the_true_distance():
     assert v["rgb"].shape == (n, n, 3) and v["depth"].shape == (n, n)
     r, g, b = v["rgb"][c, c - 2:c + 2].mean(0)
     assert r > 1.5 * g and r > 1.5 * b  # rossa, davanti al muso
-    # Dalla telecamera (raggio + 1,2 cm davanti al centro) alla faccia della pila.
-    assert v["depth"][c, c] == pytest.approx(100.0 - 11.2 - 8.0, abs=1.5)
+    # Dalla telecamera (8 cm davanti al centro) alla faccia della pila.
+    assert v["depth"][c, c] == pytest.approx(100.0 - 8.0 - 8.0, abs=1.5)
+
+
+def test_a_pile_is_really_in_its_own_enclosure():
+    w = Mondo3D(Mondo3DConfig(beings=1), 3, seed=0)
+    w.bon[:], w.bwait[:] = False, 1e9
+    w.pos[:], w.heading[:] = [[100.0, 250.0]], 0.0
+    w.bon[1, 0], w.bpos[1, 0], w.bcolor[1, 0], w.bbig[1, 0] = True, [200.0, 250.0], 0, 1
+    w.sync()
+    assert (w.labels(1, 0) > 0).sum() > 100
+    assert (w.labels(0, 0) == 0).all() and (w.labels(2, 0) == 0).all()
 
 
 def test_every_camera_shows_its_own_being_and_enclosures_are_separate():

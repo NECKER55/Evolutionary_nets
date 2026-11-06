@@ -15,7 +15,22 @@ from ...brains.ragionante import Reasoning
 from .world import BODIES, Mondo3D, Mondo3DConfig
 
 
-AGENTS = {"ragionante": Reasoning} | CONTROLS
+
+def seeing(world, seed: int, eyes: str = "Detector") -> Reasoning:
+    """Il motore col comandante che ha solo gli occhi. Qui dentro perché le reti si portano dietro JAX o torch."""
+    from ...brains.ragionante import vision
+    from ...brains.ragionante.seeing import Seeing
+
+    if eyes == "ReadyDetector":
+        from ...brains.ragionante.ready import ReadyDetector as found
+    else:
+        found = getattr(vision, eyes)
+    return Reasoning(world, seed, Seeing(world, found(world), seed))
+
+
+AGENTS = {"ragionante": Reasoning, "vedente": seeing,
+          "vedente finto": lambda world, seed: seeing(world, seed, "FakeDetector"),
+          "vedente pronto": lambda world, seed: seeing(world, seed, "ReadyDetector")} | CONTROLS
 
 
 class Run3D:
