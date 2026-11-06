@@ -8,6 +8,19 @@ from .render import BG, BORDER, DIM, IDLE, PLAYER, TEXT
 ROW_H = 34
 
 
+def wrap(font, text: str, width: int) -> list:
+    """Il testo a righe larghe al massimo `width` pixel."""
+    lines, line = [], ""
+    for word in text.split():
+        trial = f"{line} {word}".strip()
+        if line and font.size(trial)[0] > width:
+            lines.append(line)
+            line = word
+        else:
+            line = trial
+    return lines + [line] if line else lines
+
+
 class Field:
     """Una riga del modulo: etichetta a sinistra, valore in un riquadro."""
 
@@ -18,6 +31,14 @@ class Field:
 
     def text(self) -> str:
         raise NotImplementedError
+
+    def detail(self) -> str:
+        """Che cosa vuol dire il valore di adesso, se serve dirlo."""
+        return ""
+
+    def explain(self) -> str:
+        """Che cosa significa la riga, col valore di adesso."""
+        return f"{self.detail()} {self.help}".strip()
 
     def change(self, step: int) -> None:
         """Freccia sinistra (-1) o destra (+1)."""
@@ -44,9 +65,10 @@ class Field:
 class Choice(Field):
     """Una tra più opzioni: `options` = [(valore, testo), ...]."""
 
-    def __init__(self, label, options, index: int = 0, help: str = "", on_change=None):
+    def __init__(self, label, options, index: int = 0, help: str = "", on_change=None, details=None):
         super().__init__(label, help)
         self.options, self.index, self.on_change = list(options), index, on_change
+        self.details = details or {}  # valore -> che cosa vuol dire sceglierlo
 
     @property
     def value(self):
@@ -57,6 +79,9 @@ class Choice(Field):
 
     def text(self) -> str:
         return f"< {self.options[self.index][1]} >"
+
+    def detail(self) -> str:
+        return self.details.get(self.value, "")
 
     def change(self, step: int) -> None:
         if self.enabled:
