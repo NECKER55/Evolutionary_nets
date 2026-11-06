@@ -386,3 +386,20 @@ nessuno viene eliminato, si osserva soltanto.
 | `V` | recettori disegnati sì/no |
 | `B` | pausa/ripresa della corsa in sottofondo |
 | `Esc` | torna indietro |
+
+## Il cervello del mondo 3D
+
+Con gli agenti "ragionante" e "vedente", il tasto **N** apre lo schema delle sezioni a tutto schermo,
+mentre la prova continua a girare. N torna al mondo. Il colore del bordo dice che cos'è ogni blocco:
+
+| colore | significato |
+|---|---|
+| verde | vera: lavora davvero |
+| arancione | finta: una regola scritta a mano al posto della sezione |
+| azzurro | guarda: riceve i morsi veri e prevede, ma non guida l'essere |
+| grigio | non esiste ancora |
+
+P mostra l'immagine con gli oggetti trovati, A quale oggetto viene scelto, D l'intenzione, C i suoi
+neuroni e tutte le sinapsi. L mostra i suoi 64 neuroni, W i suoi due strati con le sinapsi più forti
+e che cosa si aspetta dalle pile in vista. Sotto: che cosa sta facendo l'essere e gli ultimi morsi, con
+la previsione fatta prima di mordere. Passando il mouse su un blocco o su un neurone si legge che cos'è.
