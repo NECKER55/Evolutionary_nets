@@ -1,4 +1,4 @@
-"""La sezione 7 sullo schermo: intenzione, nascosti, uscite, corpo e sensi, con
+"""La sezione C sullo schermo: intenzione, nascosti, uscite, corpo e sensi, con
 il cerchio chiuso da cui impara. Si legge da sinistra a destra."""
 
 import numpy as np

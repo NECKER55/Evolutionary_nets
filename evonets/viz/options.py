@@ -32,7 +32,7 @@ HELP = {
     "p_beings": "Quanti esseri in ogni recinto. Competono per le stesse pile.",
     "m_agent": "Chi guida gli esseri. Gli agenti si misurano tra base (pavimento) e perfetto (soffitto).",
     "m_body": "Come le uscite del cervello diventano movimento. Il cervello non lo sa: lo scopre tarandosi. "
-              "Vale per gli agenti col motore (sezione 7).",
+              "Vale per gli agenti col motore (sezione C).",
     "m_map": "Com'è fatto il mondo. Il seme decide la pianta: lo stesso seme dà la stessa casa, e ogni recinto ne ha una sua. "
              "I vedenti non hanno ancora una mappa: tra le stanze si perdono.",
     "m_encl": "Quanti recinti nello stesso mondo, indipendenti. Con la telecamera ogni recinto in più rallenta.",
@@ -86,7 +86,7 @@ DETAILS = {
     "p_teacher": {"": "Nessun maestro: ognuno impara da ciò che gli succede.",
                   "fantasma": "Nessuno lo vede e mangia la sua copia delle pile: si può imparare da lui senza che rubi cibo.",
                   "visibile": "Un compagno vero, che si mangia davvero le pile buone."},
-    "m_agent": {"ragionante": "Il motore (sezione 7) con sopra un comandante finto che legge la verità. Per vedere la rete e la "
+    "m_agent": {"ragionante": "Il motore (sezione C) con sopra un comandante finto che legge la verità. Per vedere la rete e la "
                               "taratura.",
                 "vedente": "Motore più rete nostra: 19 ms per vista. Conosce solo le pile rosse, gialle e gli esseri. "
                            "Il comandante è finto ma sa solo ciò che vede.",
