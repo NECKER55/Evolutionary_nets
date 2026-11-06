@@ -30,7 +30,7 @@ MIN_PIXELS = 3  # una macchia più piccola è rumore
 MIN_FILL = 0.3  # una macchia che riempie meno del suo riquadro è un filo lungo un bordo, non un oggetto
 MAX_THIN = 5.0  # e così una macchia molto più alta che larga
 WEIGHTS = Path(__file__).parent / "vision.npz"
-SPREAD = np.tan(SECTORS[-1])  # la telecamera: a distanza 1, metà immagine copre questa larghezza
+SPREAD = np.tan(SECTORS[-1])  # la telecamera: a distanza 1, metà larghezza dell'immagine copre questa larghezza
 
 
 @dataclass
@@ -87,14 +87,25 @@ class FakeDetector:
         return out
 
 
+def factor(image: np.ndarray) -> int:
+    """Di quanto si rimpicciolisce un'immagine per la rete: larga circa `SIDE` pixel."""
+    return max(1, image.shape[1] // SIDE)
+
+
 def shrink(rgb: np.ndarray, depth: np.ndarray) -> np.ndarray:
-    """Dalla telecamera a ciò che legge la rete: (`SIDE`, `SIDE`, 4), colori e
-    logaritmo della distanza (i colpi d'occhio lontani non si perdono in cm)."""
-    f = rgb.shape[0] // SIDE
-    h = f * SIDE
-    small = rgb[:h, :h].reshape(SIDE, f, SIDE, f, 3).mean((1, 3)) / 255.0
-    far = np.log(np.clip(depth[:h, :h], 3.0, 1000.0)).reshape(SIDE, f, SIDE, f).mean((1, 3)) / np.log(1000.0)
+    """Dalla telecamera a ciò che legge la rete: (H/f, W/f, 4), con f = `factor`,
+    colori e logaritmo della distanza (i colpi d'occhio lontani non si perdono in cm)."""
+    f = factor(rgb)
+    h, w = rgb.shape[0] // f, rgb.shape[1] // f
+    small = rgb[:h * f, :w * f].reshape(h, f, w, f, 3).mean((1, 3)) / 255.0
+    far = np.log(np.clip(depth[:h * f, :w * f], 3.0, 1000.0)).reshape(h, f, w, f).mean((1, 3)) / np.log(1000.0)
     return np.concatenate([small, far[..., None]], -1).astype(np.float32)
+
+
+def sampled(image: np.ndarray, like: np.ndarray) -> np.ndarray:
+    """Un pixel ogni f di `image`, della misura di `like` (ciò che esce da `shrink`)."""
+    f = factor(image)
+    return image[f // 2::f, f // 2::f][:like.shape[0], :like.shape[1]]
 
 
 def network(key, inputs: int = 4) -> list:
@@ -123,23 +134,23 @@ def logits(params, x):
 def blobs(classes: np.ndarray, depth: np.ndarray, cfg) -> list:
     """Dalle classi per pixel agli oggetti: una macchia di un tipo è un oggetto.
     `depth` è della stessa misura. -> [(tipo, ang, dist, size, box)], dal più vicino."""
-    side = classes.shape[0]
-    scale = side / 2.0
+    height, width = classes.shape
+    scale = width / 2.0  # i pixel sono quadrati: anche in verticale un pixel vale quanto in orizzontale
     found = []
     for k in range(len(KINDS)):
         marks, _ = ndimage.label(classes == k + 1)
         for label, place in enumerate(ndimage.find_objects(marks), 1):
             rows, cols = place
             pixels = marks[place] == label
-            high, broad = pixels.shape
-            if pixels.sum() < MIN_PIXELS or pixels.mean() < MIN_FILL or high > MAX_THIN * broad:
+            tall, broad = pixels.shape
+            if pixels.sum() < MIN_PIXELS or pixels.mean() < MIN_FILL or tall > MAX_THIN * broad:
                 continue
             z = float(np.median(depth[place][pixels]))
             wide = (cols.stop - cols.start) * z * SPREAD / scale
             side_x = ((cols.start + cols.stop) / 2.0 - scale) / scale * z * SPREAD
             forward = z + cfg.camera_ahead
             found.append((k, -np.arctan2(side_x, forward), np.hypot(side_x, forward) + wide / 2.0, wide,
-                          (cols.start / side, rows.start / side, cols.stop / side, rows.stop / side)))
+                          (cols.start / width, rows.start / height, cols.stop / width, rows.stop / height)))
     found.sort(key=lambda o: o[2])
     return found[:MAX_OBJECTS]
 
@@ -160,8 +171,7 @@ class Detector:
         inputs = np.stack([shrink(v["rgb"], v["depth"]) for v in views])
         classes = np.asarray(self.read(self.params, inputs))
         for (b, i), v, c in zip(np.ndindex(w.B, w.n), views, classes):
-            f = v["depth"].shape[0] // SIDE
-            for m, (k, ang, dist, wide, box) in enumerate(blobs(c, v["depth"][f // 2::f, f // 2::f][:SIDE, :SIDE], w.cfg)):
+            for m, (k, ang, dist, wide, box) in enumerate(blobs(c, sampled(v["depth"], c), w.cfg)):
                 out.on[b, i, m] = True
                 out.kind[b, i, m], out.ang[b, i, m], out.dist[b, i, m], out.size[b, i, m] = k, ang, dist, wide
                 out.box[b, i, m] = box

@@ -17,16 +17,16 @@ from ...arenas.mondo3d.run import Run3D
 from ...arenas.mondo3d.world import Mondo3DConfig
 from ...arenas.pile.world import RED
 from .train_vision import stage
-from .vision import SIDE, Detector, Percept
+from .vision import Detector, Percept, factor
 
-MIN_PILE = 4  # pixel, nell'immagine da `SIDE`
+MIN_PILE = 4  # pixel, nell'immagine rimpicciolita per la rete
 ANGLE = np.radians(6.0)
 
 
 def truth(w, b, i) -> list:
     """Le pile davvero visibili: [(tipo, angolo, distanza)]."""
     seg = w.segments(b, i)
-    f = seg.shape[0] // SIDE
+    f = factor(seg)
     d = w.bpos[b] - w.pos[b, i]
     dist, ang = np.hypot(*d.T), (np.arctan2(d[:, 1], d[:, 0]) - w.heading[b, i] + np.pi) % (2.0 * np.pi) - np.pi
     out = []

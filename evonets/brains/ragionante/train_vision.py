@@ -15,7 +15,7 @@ import numpy as np
 from ...arenas.mondo3d.maps import PLANS
 from ...arenas.mondo3d.run import Run3D
 from ...arenas.mondo3d.world import Mondo3D, Mondo3DConfig
-from .vision import SIDE, WEIGHTS, logits, network, shrink
+from .vision import WEIGHTS, logits, network, sampled, shrink
 
 EVERY = 7  # passi del mondo tra un'immagine e l'altra
 STAGED = 0.6  # quota di scene costruite (`stage`); le altre vengono da esseri che guidano
@@ -57,9 +57,8 @@ def stage(w, rng) -> None:
 def sample(w, x, y) -> None:
     for b, i in np.ndindex(w.B, w.n):
         v = w.view(b, i)
-        f = v["rgb"].shape[0] // SIDE
         x.append(shrink(v["rgb"], v["depth"]))
-        y.append(w.labels(b, i)[f // 2::f, f // 2::f][:SIDE, :SIDE])
+        y.append(sampled(w.labels(b, i), x[-1]))
 
 
 def collect(images: int, seed: int) -> tuple:

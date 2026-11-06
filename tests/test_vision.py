@@ -120,3 +120,23 @@ def test_with_mistakes_it_also_bites_what_is_bad():
 def test_changing_who_commands_does_not_touch_the_motor():
     assert "vision" not in (folder / "motor.py").read_text()
     assert "wiring" not in (folder / "seeing.py").read_text()
+
+
+@pytest.mark.parametrize("frame", [(264, 0), (640, 480), (1280, 720)])
+def test_angle_distance_and_width_come_out_right_at_every_resolution(frame):
+    """Una pila a 30° a sinistra e a 150 cm: da maschera e profondità si ritrovano
+    dov'è e quanto è larga, con l'immagine quadrata e con quelle larghe."""
+    w = Mondo3D(Mondo3DConfig(beings=1, image=frame[0], image_height=frame[1]), 1, 3)
+    w.bon[:], w.bwait[:] = False, 1e9
+    w.pos[0, 0], w.heading[0, 0] = [100.0, 250.0], 0.0
+    turn = np.radians(30.0)
+    w.bon[0, 0], w.bpos[0, 0], w.bcolor[0, 0], w.bbig[0, 0] = True, [100.0 + 150.0 * np.cos(turn), 250.0 + 150.0 * np.sin(turn)], 1, 1
+    w.sync()
+    v = w.view(0, 0)
+    assert v["rgb"].shape[:2] == w.cfg.frame[::-1] and v["depth"].shape == w.cfg.frame[::-1]
+    (kind, ang, dist, wide, box), = blobs(w.labels(0, 0), v["depth"], w.cfg)
+    assert np.degrees(ang) == pytest.approx(30.0, abs=1.5)
+    assert dist == pytest.approx(150.0, abs=6.0)
+    assert wide == pytest.approx(2.0 * w.cfg.battery_radius, rel=0.15)
+    assert 0.0 <= box[0] < box[2] <= 0.5 and 0.0 <= box[1] < box[3] <= 1.0  # a sinistra dell'immagine
+    w.close()
