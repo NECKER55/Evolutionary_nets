@@ -1,4 +1,4 @@
-"""La sezione P, la percezione: la rete nostra (vision.py), il detector finto e il
+"""La sezione P, la percezione: la geometria comune (vision.py), il detector finto e il
 comandante che ha solo gli occhi. Le reti pronte stanno in test_ready.py."""
 
 import os
@@ -14,7 +14,7 @@ os.environ.setdefault("JAX_PLATFORMS", "cpu")
 import evonets.brains.ragionante as ragionante
 from evonets.arenas.mondo3d.run import Run3D, measures
 from evonets.arenas.mondo3d.world import Mondo3D, Mondo3DConfig
-from evonets.brains.ragionante.vision import EMBED, KINDS, MAX_OBJECTS, Detector, FakeDetector, Percept, blobs
+from evonets.brains.ragionante.vision import EMBED, FEATURES, KINDS, MAX_OBJECTS, FakeDetector, Percept, box_of, locate
 
 folder = Path(ragionante.__file__).parent
 
@@ -39,53 +39,25 @@ def test_the_labels_show_what_is_there_and_nothing_else():
     assert (empty.labels(0, 0) == 0).all()
 
 
-def test_blobs_put_an_object_where_the_camera_sees_it():
+def test_locate_puts_an_object_where_the_camera_sees_it():
     cfg = Mondo3DConfig()
-    classes = np.zeros((132, 132), dtype=int)
-    classes[60:80, 100:120] = 1  # a destra del centro
-    found = blobs(classes, np.full((132, 132), 100.0), cfg)
-    assert len(found) == 1
-    kind, ang, dist, wide, box = found[0]
+    mask = np.zeros((132, 132), dtype=bool)
+    mask[60:80, 100:120] = True  # a destra del centro
+    ang, dist, wide = locate(mask, np.full((132, 132), 100.0), cfg)
     expected = np.arctan2((110.0 - 66.0) / 66.0 * 100.0 * np.tan(np.radians(60.0)), 100.0 + cfg.camera_ahead)
-    assert kind == 0 and ang == pytest.approx(-expected, abs=1e-6) and dist == pytest.approx(184.4, abs=0.3)
+    assert ang == pytest.approx(-expected, abs=1e-6) and dist == pytest.approx(184.4, abs=0.3)
+    assert wide == pytest.approx(20.0 / 66.0 * 100.0 * np.tan(np.radians(60.0)))
+    assert box_of(mask) == (100, 60, 120, 80)
 
 
-def test_a_thin_line_along_an_edge_is_not_an_object():
-    classes = np.zeros((132, 132), dtype=int)
-    classes[np.arange(100), np.arange(100)] = 2  # l'angolo tra due muri
-    classes[10:120, 50] = 2
-    assert blobs(classes, np.full((132, 132), 100.0), Mondo3DConfig()) == []
-
-
-@pytest.mark.parametrize("colour,angle", [(0, 0.0), (1, 0.0), (1, 0.6), (0, -0.6)])
-def test_the_real_detector_finds_a_pile_in_the_right_place(colour, angle):
-    w = world((100.0 + 90.0 * np.cos(angle), 250.0 + 90.0 * np.sin(angle)), colour)
-    seen = Detector(w).see()
-    on = np.flatnonzero(seen.on[0, 0])
-    assert len(on) == 1 and seen.kind[0, 0, on[0]] == colour
-    assert seen.ang[0, 0, on[0]] == pytest.approx(angle, abs=np.radians(3.0))
-    assert seen.dist[0, 0, on[0]] == pytest.approx(90.0, rel=0.1)
-
-
-def test_the_real_detector_sees_nothing_in_an_empty_enclosure_even_by_a_wall():
-    w = world(None)
-    seen = Detector(w)
-    assert not seen.see().on.any()
-    w.pos[0, 0], w.heading[0, 0] = [470.0, 250.0], 0.0
-    w.sync()
-    found = seen.see()
-    assert not (found.on[0, 0] & (found.kind[0, 0] < 2)).any()
-
-
-def test_fake_and_real_detector_give_the_same_interface():
+def test_the_fake_detector_gives_the_interface_of_p():
     w = world()
-    fake, real = FakeDetector(w).see(), Detector(w).see()
-    for name in Percept.__dataclass_fields__:
-        assert getattr(fake, name).shape == getattr(real, name).shape
-    assert fake.on.shape == (1, 1, MAX_OBJECTS)
-    assert fake.embedding(350.0).shape == real.embedding(350.0).shape == (1, 1, MAX_OBJECTS, EMBED)
+    fake = FakeDetector(w).see()
+    assert fake.on.shape == (1, 1, MAX_OBJECTS) and fake.vector.shape[:3] == (1, 1, MAX_OBJECTS)
+    assert fake.embedding(350.0).shape == (1, 1, MAX_OBJECTS, EMBED)
+    assert fake.features(350.0).shape == (1, 1, MAX_OBJECTS, FEATURES)
     k = np.flatnonzero(fake.on[0, 0])[0]
-    assert fake.kind[0, 0, k] == real.kind[0, 0, np.flatnonzero(real.on[0, 0])[0]] == 1
+    assert fake.kind[0, 0, k] == 1
 
 
 def test_seeing_knows_colours_but_not_what_is_good():
@@ -134,7 +106,9 @@ def test_angle_distance_and_width_come_out_right_at_every_resolution(frame):
     w.sync()
     v = w.view(0, 0)
     assert v["rgb"].shape[:2] == w.cfg.frame[::-1] and v["depth"].shape == w.cfg.frame[::-1]
-    (kind, ang, dist, wide, box), = blobs(w.labels(0, 0), v["depth"], w.cfg)
+    ang, dist, wide = locate(w.labels(0, 0) > 0, v["depth"], w.cfg)
+    left, top, right, down = box_of(w.labels(0, 0) > 0)
+    box = (left / w.cfg.frame[0], top / w.cfg.frame[1], right / w.cfg.frame[0], down / w.cfg.frame[1])
     assert np.degrees(ang) == pytest.approx(30.0, abs=1.5)
     assert dist == pytest.approx(150.0, abs=6.0)
     assert wide == pytest.approx(2.0 * w.cfg.battery_radius, rel=0.15)

@@ -3,8 +3,9 @@
 Le reti pronte sono troppo lente per milioni di vite, e un mondo senza immagini non ha
 niente da mostrare loro. Così si guarda ogni oggetto da molti punti di vista, si salva il
 vettore con ciò che serve a ritrovarlo, e poi si legge dalla tabella: è la lingua comune
-delle sezioni, ricavata da P e non scritta a mano. Il ritaglio lo dà il simulatore, quindi
-qui SlimSAM non serve. Ci sono anche forme e colori che nel mondo non esistono ancora.
+delle sezioni, ricavata da P e non scritta a mano. La maschera la dà il simulatore, quindi
+qui FastSAM non serve; il resto è come in P: telecamera 1280×720, ritaglio a scala fissa,
+DINOv2 più il colore. Ci sono anche forme e colori che nel mondo non esistono ancora.
 
 Uso: `uv run --group percezione python -m evonets.brains.ragionante.bank --viste 200`.
 """
@@ -17,8 +18,11 @@ import mujoco
 import numpy as np
 
 from ...arenas.mondo3d.world import SCALE, Mondo3D, Mondo3DConfig
+from .vision import KINDS, VECTOR
 
-SIZE = 64  # numeri della lingua comune
+SIZE = VECTOR  # numeri della lingua comune
+FRAME = (1280, 720)  # la telecamera di P
+NAMED = 0.5  # somiglianza con la banca da cui una cosa riceve un nome: sotto, è sfondo o sconosciuta
 RAW = 387  # i vettori di `ready.Eyes`: DINOv2 più il colore
 PATH = Path(__file__).parent / "embeddings.npz"
 COLOURS = {"rossa": (0.92, 0.31, 0.27), "gialla": (0.94, 0.82, 0.24), "blu": (0.20, 0.35, 0.90),
@@ -76,14 +80,15 @@ def _pose(w, rng, kind) -> tuple:
 
 
 def record(views: int, seed: int = 0) -> dict:
-    """`views` viste per tipo. -> vettori grezzi, tipo, angolo e distanza di ogni riga."""
+    """`views` viste per tipo. -> vettori grezzi, tipo, angolo, distanza e larghezza misurata di ogni riga."""
     from .ready import MIN_AREA, Eyes
+    from .vision import locate
 
     eyes = Eyes()
-    w = Mondo3D(Mondo3DConfig(beings=2, size=800.0), 1, seed)
+    w = Mondo3D(Mondo3DConfig(beings=2, size=800.0, image=FRAME[0], image_height=FRAME[1]), 1, seed)
     w.bon[:], w.bwait[:] = False, 1e9
     rng = np.random.default_rng(seed)
-    out = {"raw": [], "kind": [], "ang": [], "dist": []}
+    out = {"raw": [], "kind": [], "ang": [], "dist": [], "wide": []}
     start = time.time()
     for k, kind in enumerate(kinds()):
         done = 0
@@ -92,7 +97,9 @@ def record(views: int, seed: int = 0) -> dict:
             mask = np.isin(w.segments(0, 0), geoms)
             if mask.sum() < MIN_AREA:
                 continue
-            out["raw"].append(eyes.describe(w.view(0, 0, depth=False)["rgb"], [mask])[0])
+            view = w.view(0, 0)
+            out["raw"].append(eyes.describe(view["rgb"], [mask], view["depth"])[0])
+            out["wide"].append(locate(mask, view["depth"], w.cfg)[2])
             out["kind"].append(k)
             out["ang"].append(ang)
             out["dist"].append(dist)
@@ -129,7 +136,25 @@ class Bank:
     def __init__(self, path=PATH):
         data = np.load(path)
         self.vectors, self.kind, self.ang, self.dist = data["vectors"], data["kind"], data["ang"], data["dist"]
+        self.wide = data["wide"]
         self.mean, self.basis, self.names = data["mean"], data["basis"], [str(n) for n in data["names"]]
+        # Quale tipo di `KINDS` è ogni tipo della banca: le pile del mondo sono cilindri rossi o gialli.
+        world = {f"{c} cilindro {s}": KINDS.index(f"pila {c}") for c in ("rossa", "gialla") for s in SIZES}
+        self.world_kind = np.array([world.get(n, KINDS.index("essere") if n == BEING else -1) for n in self.names])
+
+    def shrink(self, raw: np.ndarray) -> np.ndarray:
+        """Vettori grezzi di P (..., `RAW`) -> (..., `SIZE`)."""
+        return shrink(raw, self.mean, self.basis).astype(np.float32)
+
+    def name(self, vectors: np.ndarray, named: float = NAMED) -> tuple:
+        """Il nome per il comandante finto: (tipi in `KINDS`, -1 se non è una cosa del mondo o
+        somiglia meno di `named`; somiglianza con la riga più simile)."""
+        if not len(vectors):
+            return np.zeros(0, dtype=int), np.zeros(0)
+        score = vectors @ self.vectors.T
+        best = score.argmax(-1)
+        top = score.max(-1)
+        return np.where(top >= named, self.world_kind[self.kind[best]], -1), top
 
     def pick(self, rng, kind: int, ang: float, dist: float, close: int = 8) -> np.ndarray:
         """Una vista vera di `kind`, a caso tra le `close` più simili a quella chiesta."""
@@ -147,12 +172,14 @@ def main() -> None:
     mean, basis, kept = fit(data["raw"])
     vectors = shrink(data["raw"], mean, basis).astype(np.float32)
     all_kinds = kinds()
-    np.savez_compressed(PATH, vectors=vectors, kind=data["kind"], ang=data["ang"], dist=data["dist"],
+    np.savez_compressed(PATH, vectors=vectors, kind=data["kind"], ang=data["ang"], dist=data["dist"], wide=data["wide"],
                         mean=mean, basis=basis.astype(np.float32), names=np.array([name(k) for k in all_kinds]))
     colour = np.array([list(COLOURS).index(k[0]) if k[0] != BEING else len(COLOURS) for k in all_kinds])[data["kind"]]
+    size = np.array([list(SIZES).index(k[2]) if k[2] else len(SIZES) for k in all_kinds])[data["kind"]]
     print(f"{len(vectors)} righe; varianza tenuta {kept:.1%}; riconosciuti 387 numeri "
           f"{recognised(data['raw'], data['kind']):.1%}, 64 numeri {recognised(vectors, data['kind']):.1%}, "
-          f"solo colore {recognised(vectors, data['kind'], colour):.1%}", flush=True)
+          f"solo colore {recognised(vectors, data['kind'], colour):.1%}, "
+          f"solo grandezza {recognised(vectors, data['kind'], size):.1%}", flush=True)
 
 
 if __name__ == "__main__":

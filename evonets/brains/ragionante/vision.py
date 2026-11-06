@@ -1,43 +1,35 @@
 """La sezione P, la percezione: dalla telecamera agli oggetti.
 
-`Percept` è l'interfaccia verso il resto del cervello, ed è la stessa per il
-detector finto (legge il simulatore) e per quello vero (`Detector`): una lista di
-oggetti, ognuno con che cos'è, dov'è e un embedding. Nessuno dei due sa quali pile
-siano buone: quello si impara, non si vede.
+`Percept` è l'interfaccia verso il resto del cervello, la stessa per il detector finto
+(`FakeDetector`, legge il simulatore) e per quello vero (`ready.ReadyDetector`: FastSAM,
+profondità, DINOv2): una lista di cose, ognuna con dove sta e com'è fatta. Nessuno dei
+due sa quali pile siano buone: quello si impara, non si vede.
 
-Il detector vero è una piccola rete convoluzionale, addestrata sulle etichette del
-simulatore (`train_vision.py`), che dice che cosa c'è in ogni pixel. Le macchie di
-uno stesso tipo sono gli oggetti, e la profondità dice quanto sono lontani.
+Qui c'è anche la geometria comune: da una maschera e dalla profondità ad angolo,
+distanza e larghezza (`locate`).
 """
 
 from dataclasses import dataclass
-from pathlib import Path
 
-import jax
-import jax.numpy as jnp
 import numpy as np
-from scipy import ndimage
 
 from ...arenas.mondo3d.world import Mondo3D
 from ...arenas.pile.world import RED, SECTORS
 
 KINDS = Mondo3D.KINDS
-SIDE = 132  # lato dell'immagine che legge la rete: la telecamera, rimpicciolita
-MAX_OBJECTS = 12  # oggetti al massimo in una vista
+MAX_OBJECTS = 32  # cose al massimo in una vista: con lo sfondo, FastSAM ne ha trovate fino a 27
 EMBED = len(KINDS) + 4  # che cos'è, grandezza, vicinanza, seno e coseno dell'angolo
-FILTERS = (12, 16, 16)  # neuroni per strato; il secondo e il terzo guardano più largo
-MIN_PIXELS = 3  # una macchia più piccola è rumore
-MIN_FILL = 0.3  # una macchia che riempie meno del suo riquadro è un filo lungo un bordo, non un oggetto
-MAX_THIN = 5.0  # e così una macchia molto più alta che larga
-WEIGHTS = Path(__file__).parent / "vision.npz"
+VECTOR = 64  # il vettore "com'è fatto" delle reti pronte, come `bank.SIZE`
+FEATURES = VECTOR + 5  # più larghezza, seno e coseno dell'angolo, vicinanza, "c'è"
 SPREAD = np.tan(SECTORS[-1])  # la telecamera: a distanza 1, metà larghezza dell'immagine copre questa larghezza
 
 
 @dataclass
 class Percept:
-    """Tutto (B, n, M), con M = `MAX_OBJECTS`. `kind`: indice in `KINDS`; `ang`: rad
-    rispetto al muso, positivo a sinistra; `dist`: cm dal centro dell'essere;
-    `size`: larghezza in cm; `box`: (..., 4), sx, su, dx, giù tra 0 e 1, se c'è."""
+    """Tutto (B, n, M), con M = `MAX_OBJECTS`. `kind`: indice in `KINDS`, -1 se non somiglia
+    a nessuno; `ang`: rad rispetto al muso, positivo a sinistra; `dist`: cm dal centro
+    dell'essere; `size`: larghezza in cm; `box`: (..., 4), sx, su, dx, giù tra 0 e 1, se
+    c'è; `vector`: (..., `VECTOR`) com'è fatto, solo con le reti pronte (altrimenti zeri)."""
 
     on: np.ndarray
     kind: np.ndarray
@@ -45,19 +37,27 @@ class Percept:
     dist: np.ndarray
     size: np.ndarray
     box: np.ndarray
+    vector: np.ndarray
 
     @classmethod
     def empty(cls, B: int, n: int) -> "Percept":
         s = (B, n, MAX_OBJECTS)
         return cls(np.zeros(s, dtype=bool), np.zeros(s, dtype=int), np.zeros(s), np.zeros(s), np.zeros(s),
-                   np.zeros(s + (4,)))
+                   np.zeros(s + (4,)), np.zeros(s + (VECTOR,), dtype=np.float32))
 
     def embedding(self, eye_range: float) -> np.ndarray:
-        """(B, n, M, `EMBED`): ciò che riceveranno le sezioni dopo."""
-        kind = np.eye(len(KINDS))[self.kind]
+        """(B, n, M, `EMBED`): i 7 numeri con il nome, quelli con cui sono addestrate L e W."""
+        kind = np.eye(len(KINDS) + 1)[self.kind][..., :len(KINDS)]  # -1, nessun nome: tutti zeri
         rest = np.stack([self.size / 20.0, np.clip(1.0 - self.dist / eye_range, 0.0, 1.0),
                          np.sin(self.ang), np.cos(self.ang)], -1)
         return np.concatenate([kind, rest], -1) * self.on[..., None]
+
+    def features(self, eye_range: float) -> np.ndarray:
+        """(B, n, M, `FEATURES`): ciò che esce da P con le reti pronte, senza nomi. Vettore, larghezza
+        in m, seno e coseno dell'angolo, vicinanza, "c'è"; un posto vuoto è tutto zeri."""
+        rest = np.stack([self.size / 100.0, np.sin(self.ang), np.cos(self.ang),
+                         np.clip(1.0 - self.dist / eye_range, 0.0, 1.0), np.ones(self.on.shape)], -1)
+        return np.concatenate([self.vector, rest], -1) * self.on[..., None]
 
 
 class FakeDetector:
@@ -87,92 +87,19 @@ class FakeDetector:
         return out
 
 
-def factor(image: np.ndarray) -> int:
-    """Di quanto si rimpicciolisce un'immagine per la rete: larga circa `SIDE` pixel."""
-    return max(1, image.shape[1] // SIDE)
+def box_of(mask: np.ndarray) -> tuple:
+    """(sx, su, dx, giù) in pixel."""
+    rows, cols = np.flatnonzero(mask.any(1)), np.flatnonzero(mask.any(0))
+    return cols[0], rows[0], cols[-1] + 1, rows[-1] + 1
 
 
-def shrink(rgb: np.ndarray, depth: np.ndarray) -> np.ndarray:
-    """Dalla telecamera a ciò che legge la rete: (H/f, W/f, 4), con f = `factor`,
-    colori e logaritmo della distanza (i colpi d'occhio lontani non si perdono in cm)."""
-    f = factor(rgb)
-    h, w = rgb.shape[0] // f, rgb.shape[1] // f
-    small = rgb[:h * f, :w * f].reshape(h, f, w, f, 3).mean((1, 3)) / 255.0
-    far = np.log(np.clip(depth[:h * f, :w * f], 3.0, 1000.0)).reshape(h, f, w, f).mean((1, 3)) / np.log(1000.0)
-    return np.concatenate([small, far[..., None]], -1).astype(np.float32)
-
-
-def sampled(image: np.ndarray, like: np.ndarray) -> np.ndarray:
-    """Un pixel ogni f di `image`, della misura di `like` (ciò che esce da `shrink`)."""
-    f = factor(image)
-    return image[f // 2::f, f // 2::f][:like.shape[0], :like.shape[1]]
-
-
-def network(key, inputs: int = 4) -> list:
-    """I pesi: due file per strato, kernel 3×3 e bias, più la lettura finale."""
-    params, wide = [], inputs
-    for out in FILTERS:
-        key, k = jax.random.split(key)
-        params.append([jax.nn.initializers.he_normal()(k, (3, 3, wide, out)), jnp.zeros(out)])
-        wide = out
-    key, k = jax.random.split(key)
-    params.append([0.1 * jax.random.normal(k, (1, 1, wide, len(KINDS) + 1)), jnp.zeros(len(KINDS) + 1)])
-    return params
-
-
-def logits(params, x):
-    """`x` (N, H, W, 4) -> (N, H, W, classi): 0 lo sfondo, poi `KINDS`."""
-    for layer, ((kernel, bias), dilation) in enumerate(zip(params, (1, 2, 3, 1))):
-        pad = "SAME"
-        x = jax.lax.conv_general_dilated(x, kernel, (1, 1), pad, rhs_dilation=(dilation, dilation),
-                                         dimension_numbers=("NHWC", "HWIO", "NHWC")) + bias
-        if layer < len(params) - 1:
-            x = jax.nn.relu(x)
-    return x
-
-
-def blobs(classes: np.ndarray, depth: np.ndarray, cfg) -> list:
-    """Dalle classi per pixel agli oggetti: una macchia di un tipo è un oggetto.
-    `depth` è della stessa misura. -> [(tipo, ang, dist, size, box)], dal più vicino."""
-    height, width = classes.shape
-    scale = width / 2.0  # i pixel sono quadrati: anche in verticale un pixel vale quanto in orizzontale
-    found = []
-    for k in range(len(KINDS)):
-        marks, _ = ndimage.label(classes == k + 1)
-        for label, place in enumerate(ndimage.find_objects(marks), 1):
-            rows, cols = place
-            pixels = marks[place] == label
-            tall, broad = pixels.shape
-            if pixels.sum() < MIN_PIXELS or pixels.mean() < MIN_FILL or tall > MAX_THIN * broad:
-                continue
-            z = float(np.median(depth[place][pixels]))
-            wide = (cols.stop - cols.start) * z * SPREAD / scale
-            side_x = ((cols.start + cols.stop) / 2.0 - scale) / scale * z * SPREAD
-            forward = z + cfg.camera_ahead
-            found.append((k, -np.arctan2(side_x, forward), np.hypot(side_x, forward) + wide / 2.0, wide,
-                          (cols.start / width, rows.start / height, cols.stop / width, rows.stop / height)))
-    found.sort(key=lambda o: o[2])
-    return found[:MAX_OBJECTS]
-
-
-class Detector:
-    """Il detector vero: legge solo immagine e profondità della telecamera."""
-
-    def __init__(self, world, weights=WEIGHTS):
-        self.w = world
-        data = np.load(weights)
-        self.params = [[jnp.asarray(data[f"k{i}"]), jnp.asarray(data[f"b{i}"])] for i in range(len(data.files) // 2)]
-        self.read = jax.jit(lambda p, x: jnp.argmax(logits(p, x), -1))
-
-    def see(self) -> Percept:
-        w = self.w
-        out = Percept.empty(w.B, w.n)
-        views = [w.view(b, i) for b, i in np.ndindex(w.B, w.n)]
-        inputs = np.stack([shrink(v["rgb"], v["depth"]) for v in views])
-        classes = np.asarray(self.read(self.params, inputs))
-        for (b, i), v, c in zip(np.ndindex(w.B, w.n), views, classes):
-            for m, (k, ang, dist, wide, box) in enumerate(blobs(c, sampled(v["depth"], c), w.cfg)):
-                out.on[b, i, m] = True
-                out.kind[b, i, m], out.ang[b, i, m], out.dist[b, i, m], out.size[b, i, m] = k, ang, dist, wide
-                out.box[b, i, m] = box
-        return out
+def locate(mask, depth, cfg) -> tuple:
+    """Dalla maschera e dalla profondità a (angolo, distanza dal centro dell'essere, larghezza).
+    I pixel sono quadrati: anche in verticale un pixel vale quanto in orizzontale."""
+    side = mask.shape[1] / 2.0
+    left, _, right, _ = box_of(mask)
+    z = float(np.median(depth[mask]))
+    wide = (right - left) * z * SPREAD / side
+    across = ((left + right) / 2.0 - side) / side * z * SPREAD
+    forward = z + cfg.camera_ahead
+    return -np.arctan2(across, forward), np.hypot(across, forward) + wide / 2.0, wide

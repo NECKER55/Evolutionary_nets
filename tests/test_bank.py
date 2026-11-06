@@ -38,7 +38,7 @@ def test_the_bank_finds_a_view_close_to_the_one_asked():
 
 
 @pytest.mark.skipif(not PATH.exists(), reason="serve la banca registrata")
-def test_the_bank_tells_colours_and_forms_but_hardly_sizes():
+def test_the_bank_tells_colours_forms_and_sizes():
     bank = Bank()
     table = kinds()
     colour = np.array([table[k][0] for k in bank.kind])
@@ -46,4 +46,5 @@ def test_the_bank_tells_colours_and_forms_but_hardly_sizes():
     size = np.array([table[k][2] for k in bank.kind])
     assert recognised(bank.vectors, bank.kind, colour) > 0.98
     assert recognised(bank.vectors, bank.kind, form) > 0.95
-    assert recognised(bank.vectors, bank.kind, size) < 0.8  # il ritaglio si ridimensiona: la grandezza si perde
+    assert recognised(bank.vectors, bank.kind, size) > 0.9  # il ritaglio a scala fissa tiene la grandezza
+    assert ((bank.wide > 3.0) & (bank.wide < 40.0)).all()  # la larghezza misurata, in cm

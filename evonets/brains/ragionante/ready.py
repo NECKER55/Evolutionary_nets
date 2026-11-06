@@ -1,18 +1,20 @@
 """La sezione P con reti già pronte, da confrontare con la nostra (`vision.py`):
 
-- **SlimSAM** (nielsr/slimsam-77-uniform, Apache 2.0) separa ogni cosa che vede,
-  senza sapere che cosa sia e senza etichette;
-- **DINOv2 small** (facebook/dinov2-small, Apache 2.0) descrive ogni ritaglio con un
-  vettore, a cui si aggiunge il colore;
+- **FastSAM-s** (Ultralytics, AGPL-3.0) trova in un colpo solo tutte le cose
+  dell'immagine, senza nomi: una maschera per cosa, anche pezzi di muro e pavimento;
+- la **profondità** sulla maschera dice angolo, distanza e larghezza vera (`locate`);
+- un **ritaglio a scala fissa** (`fixed`) di `WINDOW` cm veri tiene la grandezza nell'immagine;
+- **DINOv2 small** (facebook/dinov2-small, Apache 2.0) ne fa un vettore, a cui si
+  aggiunge il colore, ridotto a 64 numeri con la riduzione della banca (`bank.py`);
 - `ObjectMemory` conserva i vettori, anche su disco: un vettore vicino a uno noto
   è un oggetto già visto, altrimenti è nuovo e si salva.
 
-Tra un'immagine e l'altra l'oggetto si segue col `Tracker`: se cambia aspetto sotto
-gli occhi resta lo stesso, e il suo aspetto nuovo si aggiunge alla stessa voce.
+Tra un'immagine e l'altra la cosa si segue col `Tracker`: se resta nello stesso posto
+è la stessa, anche se cambia aspetto.
 
-Non sa che cosa sia una pila: per dire "pila gialla" al comandante bastano pochi
-esempi (`Prototypes`), non migliaia di immagini. Pesa troppo per ogni passo:
-guarda ogni `PERIOD` secondi e nel frattempo tiene ciò che sa, aggiornato col
+Non sa che cosa sia una pila: il nome (`KINDS`) serve solo al comandante finto, e
+viene dalla banca: la riga più simile, se somiglia abbastanza. Pesa troppo per ogni
+passo: guarda ogni `PERIOD` secondi e nel frattempo tiene ciò che sa, aggiornato col
 movimento sentito. Richiede `uv run --group percezione`.
 """
 
@@ -20,48 +22,44 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from scipy import ndimage
-from transformers import AutoImageProcessor, AutoModel, SamModel, SamProcessor
+from transformers import AutoImageProcessor, AutoModel
 
-from .vision import KINDS, MAX_OBJECTS, SPREAD, Percept
+from .vision import MAX_OBJECTS, SPREAD, Percept, box_of, locate
 
-SEGMENTER = "nielsr/slimsam-77-uniform"
+FINDER = Path.home() / ".cache" / "evonets" / "FastSAM-s.pt"  # si scarica la prima volta, 23 MB
 DESCRIBER = "facebook/dinov2-small"
 EMBED = 384 + 3  # i vettori di DINOv2 small, più il colore
 HUE = 1.5  # quanto pesa il colore nel vettore: da solo, DINOv2 sui nostri ritagli vede quasi solo la forma
 PALE = 0.04  # sotto questa saturazione un oggetto è grigio: il colore non dice niente
-FLOOR = 1.5  # cm: più in alto di così non è pavimento
-TALL = 20.0  # cm: ciò che sale fin qui è un muro
-SAME_WALL = 0.06  # quota di distanza entro cui un pixel basso appartiene allo stesso muro
-STEP = 6.0  # cm: un salto di profondità tra due pixel vicini separa due oggetti
-MIN_SPOT = 8  # pixel di una macchia di profondità perché meriti una domanda
-MIN_SCORE = 0.7  # sotto questa qualità dichiarata da SlimSAM, la maschera si butta
-MAX_AREA = 0.2  # più grande di così è pavimento, muro o cielo: sfondo
+CONFIDENCE = 0.4  # FastSAM: sotto questa fiducia una cosa si butta (il loro valore)
+SAME_THING = 0.9  # FastSAM: maschere che si coprono così sono la stessa cosa (il loro valore)
+SIDE = 1024  # FastSAM legge l'immagine con il lato lungo di tanti pixel
 MIN_AREA = 6  # pixel: più piccola è rumore
-OVERLAP = 0.6  # maschere che si coprono così sono lo stesso oggetto
 SAME = 0.8  # coseno da cui due vettori sono lo stesso oggetto
 VIEWS = 16  # viste ricordate per oggetto: si impara a riconoscerlo da più lati
 PERIOD = 0.5  # s tra uno sguardo e l'altro
 FOLLOW = 0.3  # sovrapposizione dei riquadri da cui, tra due immagini, è lo stesso oggetto
 WINDOW = 40.0  # cm: il lato del ritaglio a scala fissa, più largo dell'oggetto più largo (un essere, 20 cm)
 GREY = 128  # fuori dalla maschera: così lo sfondo non conta
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class ObjectMemory:
-    """Gli oggetti visti: per ognuno fino a `VIEWS` vettori. Sopravvive tra una
-    vita e l'altra se la si salva: l'encoder non cambia, quindi i vettori restano validi."""
+    """Gli oggetti visti: per ognuno fino a `VIEWS` vettori, di lunghezza 1 e della misura del
+    primo che riceve. Sopravvive tra una vita e l'altra se la si salva: l'encoder non cambia,
+    quindi i vettori restano validi."""
 
     def __init__(self, same: float = SAME):
         self.same = same
         self.owner = np.zeros(0, dtype=int)  # di chi è ogni vista
-        self.views = np.zeros((0, EMBED), dtype=np.float32)
+        self.views = np.zeros((0, 0), dtype=np.float32)
         self.kinds = 0  # oggetti conosciuti
 
-    def closest(self, vector) -> tuple:
-        """-> (oggetto, somiglianza); (-1, -1) se non si conosce niente."""
+    def closest(self, vector, taken=()) -> tuple:
+        """-> (oggetto, somiglianza); (-1, -1) se non si conosce niente. Gli oggetti `taken` non contano."""
         if not len(self.views):
             return -1, -1.0
-        score = self.views @ vector
+        score = np.where(np.isin(self.owner, list(taken)), -np.inf, self.views @ vector)
         best = int(score.argmax())
         return int(self.owner[best]), float(score[best])
 
@@ -71,12 +69,13 @@ class ObjectMemory:
         if len(mine) >= VIEWS:
             self.views[mine[(self.views[mine] @ vector).argmax()]] = vector
             return
-        self.views = np.concatenate([self.views, vector[None]])
+        self.views = np.concatenate([self.views, vector[None]]) if len(self.views) else vector[None].astype(np.float32)
         self.owner = np.append(self.owner, who)
 
-    def know(self, vector) -> tuple:
-        """Il cuore: già visto o nuovo? -> (oggetto, se è nuovo)."""
-        who, score = self.closest(vector)
+    def know(self, vector, taken=()) -> tuple:
+        """Il cuore: già visto o nuovo? -> (oggetto, se è nuovo). `taken`: gli oggetti già
+        nella stessa immagine, che non possono essere anche questo."""
+        who, score = self.closest(vector, taken)
         if score >= self.same:
             return who, False
         who, self.kinds = self.kinds, self.kinds + 1
@@ -93,28 +92,6 @@ class ObjectMemory:
         return out
 
 
-def proposals(depth: np.ndarray, cfg) -> np.ndarray:
-    """Dove chiedere a SlimSAM. Da solo, con una griglia di punti, si ferma a pavimento e
-    muri: gli oggetti sono piccoli e tutti sull'orizzonte. Qui è la profondità a dire che
-    cosa sporge dal pavimento e non è un muro. -> (P, 2): riga e colonna, tra 0 e 1."""
-    h, w = depth.shape
-    up = (h / 2.0 - np.arange(h)[:, None] - 0.5) / (w / 2.0) * SPREAD  # pixel quadrati: si misura sulla larghezza
-    height = cfg.camera_height + depth * up
-    near = depth < cfg.eye_range
-    tall = near & (height > TALL)
-    wall = np.where(tall.any(0), np.ma.median(np.ma.array(depth, mask=~tall), axis=0).filled(np.inf), np.inf)
-    on_wall = np.abs(depth - wall) < SAME_WALL * depth
-    spots = near & (height > FLOOR) & (height <= TALL) & ~on_wall
-    step = np.zeros((h, w), dtype=bool)
-    step[:, 1:] = np.abs(np.diff(depth, axis=1)) > STEP
-    marks, count = ndimage.label(spots & ~step)
-    sizes = np.bincount(marks.ravel(), minlength=count + 1)
-    rows, cols = np.indices((h, w))
-    points = [(np.median(rows[marks == k]) / h, np.median(cols[marks == k]) / w) for k in range(1, count + 1)
-              if sizes[k] >= MIN_SPOT]
-    return np.array(points).reshape(-1, 2)
-
-
 def hue(pixels: np.ndarray) -> np.ndarray:
     """Il colore di un oggetto, a prescindere da quanto è illuminato: (3,) di lunghezza 1, o zeri se è grigio."""
     mean = pixels.mean(0) / 255.0
@@ -124,40 +101,27 @@ def hue(pixels: np.ndarray) -> np.ndarray:
 
 
 class Eyes:
-    """SlimSAM più DINOv2: da un'immagine a [(maschera, vettore)]."""
+    """FastSAM più DINOv2: da un'immagine a [(maschera, vettore)]."""
 
     def __init__(self, threads: int = 0):
         if threads:
             torch.set_num_threads(threads)
-        self.sam = SamModel.from_pretrained(SEGMENTER).eval()
-        self.sam_in = SamProcessor.from_pretrained(SEGMENTER)
-        self.dino = AutoModel.from_pretrained(DESCRIBER).eval()
+        self.finder = None  # FastSAM si carica la prima volta che serve: la banca non lo usa
+        self.dino = AutoModel.from_pretrained(DESCRIBER).eval().to(DEVICE)
         self.dino_in = AutoImageProcessor.from_pretrained(DESCRIBER)
 
-    @torch.no_grad()
-    def masks(self, rgb: np.ndarray, depth: np.ndarray, cfg) -> list:
-        """Ogni cosa che si stacca dallo sfondo, senza nomi: [(H, W) di bool], dalla migliore."""
-        h, w = rgb.shape[:2]
-        spots = proposals(depth, cfg)
-        if not len(spots):
+    def masks(self, rgb: np.ndarray) -> list:
+        """Tutte le cose dell'immagine, senza nomi e sfondo compreso: [(H, W) di bool]."""
+        if self.finder is None:
+            from ultralytics import FastSAM
+
+            FINDER.parent.mkdir(parents=True, exist_ok=True)
+            self.finder = FastSAM(str(FINDER))
+        found = self.finder(np.ascontiguousarray(rgb[..., ::-1]), device=DEVICE, retina_masks=True, imgsz=SIDE,
+                            conf=CONFIDENCE, iou=SAME_THING, verbose=False)[0]  # vuole i colori al contrario
+        if found.masks is None:
             return []
-        x = self.sam_in(images=rgb, return_tensors="pt")
-        codes = self.sam.get_image_embeddings(x["pixel_values"])
-        high, wide = (float(v) for v in x["reshaped_input_sizes"][0])  # il lato lungo diventa 1024
-        points = torch.tensor(spots[:, ::-1].copy() * (wide, high), dtype=torch.float32)[None, :, None]
-        out = self.sam(image_embeddings=codes, input_points=points, multimask_output=False)
-        # Le maschere coprono il quadrato da 1024 con i bordi aggiunti: si tolgono, poi si ingrandisce.
-        full = self.sam_in.post_process_masks(out.pred_masks, x["original_sizes"], x["reshaped_input_sizes"])[0][:, 0]
-        keep, score = full.numpy(), out.iou_scores[0, :, 0].numpy()
-        kept: list = []
-        for k in np.argsort(-score):
-            m = keep[k]
-            area = m.sum()
-            if score[k] < MIN_SCORE or area < MIN_AREA or area > MAX_AREA * h * w:
-                continue
-            if all((m & o).sum() < OVERLAP * min(area, o.sum()) for o in kept):
-                kept.append(m)
-        return kept
+        return [m for m in found.masks.data.cpu().numpy() > 0.5 if m.sum() >= MIN_AREA]
 
     @torch.no_grad()
     def describe(self, rgb: np.ndarray, masks: list, depth: np.ndarray | None = None) -> np.ndarray:
@@ -173,26 +137,10 @@ class Eyes:
             crops = [fixed(rgb, m, depth) for m in masks]
             sizes = {"size": {"height": 224, "width": 224}, "do_center_crop": False}  # tutta la finestra, senza tagli
         x = self.dino_in(images=crops, input_data_format="channels_last", return_tensors="pt", **sizes)  # un ritaglio piccolo sembrerebbe avere i canali davanti
-        v = self.dino(**x).last_hidden_state[:, 0].numpy()
+        v = self.dino(pixel_values=x["pixel_values"].to(DEVICE)).last_hidden_state[:, 0].cpu().numpy()
         v = v / np.linalg.norm(v, axis=-1, keepdims=True)
         v = np.concatenate([v, HUE * np.stack([hue(rgb[m]) for m in masks])], -1)
         return (v / np.linalg.norm(v, axis=-1, keepdims=True)).astype(np.float32)
-
-
-class Prototypes:
-    """Il minimo per dare un nome: pochi vettori di esempio per ogni tipo in `KINDS`."""
-
-    PATH = Path(__file__).parent / "prototypes.npz"
-
-    def __init__(self, path=PATH):
-        data = np.load(path)
-        self.vectors, self.kinds = data["vectors"], data["kinds"]
-
-    def name(self, vectors: np.ndarray) -> tuple:
-        """-> (tipi, somiglianza)."""
-        score = vectors @ self.vectors.T
-        best = score.argmax(-1)
-        return self.kinds[best], score.max(-1)
 
 
 def span(mask: np.ndarray) -> tuple:
@@ -214,12 +162,6 @@ def fixed(rgb: np.ndarray, mask: np.ndarray, depth: np.ndarray, window: float = 
     yb, xb = min(y0 + side, rgb.shape[0]), min(x0 + side, rgb.shape[1])
     out[ya - y0:yb - y0, xa - x0:xb - x0] = seen[ya:yb, xa:xb]
     return out
-
-
-def box_of(mask: np.ndarray) -> tuple:
-    """(sx, su, dx, giù) in pixel."""
-    rows, cols = np.flatnonzero(mask.any(1)), np.flatnonzero(mask.any(0))
-    return cols[0], rows[0], cols[-1] + 1, rows[-1] + 1
 
 
 def overlap(a, b) -> float:
@@ -249,60 +191,60 @@ class Tracker:
         return out
 
 
-def locate(mask, depth, cfg) -> tuple:
-    """Dalla maschera a (angolo, distanza, larghezza), come in `vision.blobs`."""
-    side = mask.shape[1] / 2.0
-    left, _, right, _ = box_of(mask)
-    z = float(np.median(depth[mask]))
-    wide = (right - left) * z * SPREAD / side
-    across = ((left + right) / 2.0 - side) / side * z * SPREAD
-    forward = z + cfg.camera_ahead
-    return -np.arctan2(across, forward), np.hypot(across, forward) + wide / 2.0, wide
-
-
 class ReadyDetector:
-    """La stessa interfaccia del detector nostro (`Percept`), più `ids`, `memory`
-    e il nome dell'oggetto che si vede. Lo sguardo dura più di un passo del mondo,
-    ma la simulazione lo aspetta: il robot non è penalizzato dal tempo di calcolo,
-    solo dal fatto che guarda ogni `PERIOD` secondi."""
+    """La stessa interfaccia del detector nostro (`Percept`), con il vettore, più `ids` e
+    `memory`. Lo sguardo dura più di un passo del mondo, ma la simulazione lo aspetta: il
+    robot non è penalizzato dal tempo di calcolo, solo dal fatto che guarda ogni `PERIOD` secondi.
+
+    `kind` è il tipo della riga più simile della banca, se è una cosa del mondo (pila rossa,
+    pila gialla, essere) e somiglia almeno `NAMED`: serve solo al comandante finto.
+    `looks[b][i]`: l'ultimo sguardo intero, per lo schermo; con `truth` anche gli oggetti veri."""
 
     def __init__(self, world, memory: ObjectMemory | None = None, eyes: Eyes | None = None):
+        from .bank import Bank
+
         self.w = world
         self.eyes = eyes or Eyes()
         self.memory = memory or ObjectMemory()
-        self.names = Prototypes()
+        self.bank = Bank()
         self.tracks = [[Tracker() for _ in range(world.n)] for _ in range(world.B)]
         self.every = max(1, round(PERIOD / world.cfg.dt))
         self.ticks = 0
         self.held = Percept.empty(world.B, world.n)
         self.ids = np.full((world.B, world.n, MAX_OBJECTS), -1)
         self.fresh = np.zeros((world.B, world.n, MAX_OBJECTS), dtype=bool)  # visti ora per la prima volta
+        self.looks = [[None] * world.n for _ in range(world.B)]
+        self.truth = False  # se registrare anche gli oggetti veri a ogni sguardo: costa un'immagine in più
 
     def _look(self, b: int, i: int) -> None:
         w, held = self.w, self.held
         view = w.view(b, i)
         rgb, depth = view["rgb"], view["depth"]
-        masks = self.eyes.masks(rgb, depth, w.cfg)
-        vectors = self.eyes.describe(rgb, masks)
+        masks = self.eyes.masks(rgb)
+        masks = [masks[k] for k in np.argsort([np.median(depth[m]) for m in masks])][:MAX_OBJECTS]  # dalle più vicine
+        raw = self.eyes.describe(rgb, masks, depth)
+        vectors = self.bank.shrink(raw)
+        kinds, score = self.bank.name(vectors)
         for field in (held.on[b, i], self.fresh[b, i]):
             field[:] = False
-        if not masks:
-            self.tracks[b][i].last = []
-            return
-        kinds, score = self.names.name(vectors)
         boxes = [box_of(m) for m in masks]
         followed = self.tracks[b][i].follow(boxes)
         tracked = []
-        for m, (mask, vector, kind, was, box) in enumerate(zip(masks[:MAX_OBJECTS], vectors, kinds, followed, boxes)):
-            who, new = (was, False) if was >= 0 else self.memory.know(vector)
+        for m, (mask, vector, kind, was, box) in enumerate(zip(masks, vectors, kinds, followed, boxes)):
+            # I 64 numeri, non i grezzi: col ritaglio a scala fissa il grigio attorno rende simili tutti i grezzi.
+            who, new = (was, False) if was >= 0 else self.memory.know(vector, [w for _, w in tracked] + followed)
             self.memory.add(vector, who)
             tracked.append((box, who))
             ang, dist, wide = locate(mask, depth, w.cfg)
             held.on[b, i, m], held.kind[b, i, m], held.ang[b, i, m] = True, kind, ang
-            held.dist[b, i, m], held.size[b, i, m] = dist, wide
+            held.dist[b, i, m], held.size[b, i, m], held.vector[b, i, m] = dist, wide, vector
             held.box[b, i, m] = np.array(box) / np.tile(rgb.shape[1::-1], 2)
             self.ids[b, i, m], self.fresh[b, i, m] = who, new
         self.tracks[b][i].last = tracked
+        self.looks[b][i] = {"t": w.t, "rgb": rgb, "depth": depth, "masks": masks, "ids": [who for _, who in tracked],
+                            "kind": kinds, "score": score, "dist": held.dist[b, i, :len(masks)].copy(),
+                            "size": held.size[b, i, :len(masks)].copy(),
+                            "truth": things(w, b, i) if self.truth else None}
 
     def see(self) -> Percept:
         w = self.w
@@ -318,3 +260,20 @@ class ReadyDetector:
             held.dist, held.ang = np.hypot(x, y), np.arctan2(y, x) - spin * cfg.dt
         self.ticks += 1
         return self.held
+
+
+def things(w, b: int, i: int) -> list:
+    """Gli oggetti veri nell'immagine dell'essere `i`, dal simulatore: [(maschera, nome)].
+    Solo per controllare la percezione: nessuna sezione lo legge."""
+    seg = w.segments(b, i)
+    out = []
+    for k in np.flatnonzero(w.bon[b]):
+        mask = seg == w.pgeom[b, k]
+        if mask.sum() >= MIN_AREA:
+            out.append((mask, f"pila {('rossa', 'gialla')[int(w.bcolor[b, k])]}"))
+    for j in range(w.n):
+        if j != i:
+            mask = np.isin(seg, w.body_of[b][j])
+            if mask.sum() >= MIN_AREA:
+                out.append((mask, "essere"))
+    return out

@@ -13,17 +13,16 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 
 os.environ.setdefault("MUJOCO_GL", "egl")
 
 import mujoco
 import numpy as np
 
-from .ready import Eyes, ObjectMemory, Tracker, box_of
+from .ready import Eyes, ObjectMemory, Tracker
+from .vision import box_of
 
 SIDE = 264
-CAMERA = SimpleNamespace(camera_height=11.0, eye_range=350.0)
 # Forme e colori mai visti, nessuno nel mondo delle pile: (tipo, misure in m, colore).
 KNOWN = {"cubo blu": ("box", ".07 .07 .07", ".1 .2 .9"), "palla viola": ("sphere", ".08", ".6 .1 .8"),
          "capsula verde": ("capsule", ".04 .05", ".1 .7 .2"), "lastra rosa": ("box", ".1 .03 .08", ".95 .5 .7"),
@@ -84,7 +83,7 @@ class Stage:
 
 def biggest(eyes, rgb, depth):
     """Il vettore dell'oggetto più centrale. -> (vettore, maschera) o (None, None)."""
-    masks = eyes.masks(rgb, depth, CAMERA)
+    masks = eyes.masks(rgb)
     if not masks:
         return None, None
     centre = [abs((box_of(m)[0] + box_of(m)[2]) / 2.0 - SIDE / 2.0) for m in masks]
@@ -142,7 +141,7 @@ def overlapping(eyes) -> dict:
     for name, objects in cases.items():
         stage = Stage(list(objects))
         rgb, depth = stage.look((0.7, 0.0), 0.0, 0.7)
-        out[name] = len(eyes.masks(rgb, depth, CAMERA))
+        out[name] = len(eyes.masks(rgb))
         stage.close()
     return out
 

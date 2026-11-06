@@ -54,7 +54,7 @@ class Seeing:
         self.away = np.maximum(self.away - cfg.dt, 0.0)
         has, ang, far = self._aim(seen)
         reach = cfg.radius + cfg.battery_radius + cfg.bite_reach
-        bad = seen.on & (seen.kind < 2) & (seen.kind != self._goal()[..., None])
+        bad = seen.on & (seen.kind >= 0) & (seen.kind < 2) & (seen.kind != self._goal()[..., None])  # -1: senza nome
         # Come il perfetto: le cattive vicine e davanti spostano di lato, accanto alla meta niente deviazioni.
         rel = seen.dist[..., None] * np.stack([np.cos(seen.ang), np.sin(seen.ang)], -1)
         way = np.stack([np.cos(ang), np.sin(ang)], -1)
