@@ -141,3 +141,27 @@ def test_every_agent_with_a_motor_can_choose_a_body_and_who_sees_only_knows_colo
     m.m_agent.select("vedente")
     m.draw(s)
     assert m.m_body.enabled and not m.p_good.enabled and m.p_good.value == "colore"
+
+
+def test_the_brain_page_opens_with_n_and_the_run_keeps_going():
+    pytest.importorskip("mujoco")
+    from evonets.viz.mondo3d.view import Mondo3DScreen
+
+    m, s, pygame = menu()
+    shown = []
+    m.app.show = shown.append
+    m.task.select("mondo3d")
+    m.m_agent.select("ragionante")
+    m.m_map.select("stanze")
+    m.m_beings.value = 1
+    m.draw(s)
+    m.handle(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=m.start_btn.rect.center))
+    screen = shown[0]
+    assert isinstance(screen, Mondo3DScreen) and screen.run.w.cfg.map == "stanze"
+    screen.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_n, unicode="n", mod=0))
+    t = screen.run.t
+    screen.update()
+    screen.update()
+    screen.draw(s)
+    assert screen.page and screen.run.t > t
+    screen.close()

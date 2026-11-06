@@ -14,6 +14,7 @@ from ...brains.ragionante import RETUNE
 from ..launcher import Screen
 from ..render import BG, BORDER, DIM, PLAYER, TEXT
 from ..widgets import Button
+from .brain_page import BrainPage
 from .motor_panel import MotorPanel
 
 SPEEDS = (1, 3, 6, 12, 24, 48)  # volte il tempo reale, come nell'arena delle pile
@@ -33,7 +34,7 @@ HELP = "Spazio pausa   +/- velocità   T turbo   Tab o frecce </> essere   frecc
 NO_NET = "La rete si vede solo con gli agenti 'cervello ragionante' e 'vedente': questo non ha neuroni. Esc per tornare al menu."
 KIND_C = ((235, 80, 70), (240, 210, 60), (120, 170, 255))  # i riquadri degli oggetti trovati, come in `vision.KINDS`
 MESSAGE = 3.0  # s veri per cui resta un avviso
-BRAIN_HELP = "   R tara   C cambia corpo"
+BRAIN_HELP = "   R tara   C cambia corpo   N cervello"
 
 
 def surface(rgb: np.ndarray) -> pygame.Surface:
@@ -72,6 +73,11 @@ class Mondo3DScreen(Screen):
         self.boxes = []
         self.brain = run.brain if hasattr(run.brain, "motor") else None
         self.panel = MotorPanel()
+        self.page = None  # il cervello a tutto schermo, se aperto
+        if self.brain:
+            from ...brains.ragionante.watch import Watch
+
+            run.watch = Watch(run.w, self.brain)
         self.buttons = [Button("Tara i sensi  [R]", self._tune, primary=True),
                         Button("Cambia corpo  [C]", self._next_body)] if self.brain else []
         self.pointer = None
@@ -160,6 +166,8 @@ class Mondo3DScreen(Screen):
             self._tune()
         elif k == pygame.K_c and self.brain:
             self._next_body()
+        elif k == pygame.K_n and self.brain:
+            self.page = None if self.page else BrainPage()
 
     def close(self) -> None:
         self.run.close()
@@ -167,6 +175,9 @@ class Mondo3DScreen(Screen):
     def draw(self, s) -> None:
         app, r, w = self.app, self.run, self.run.w
         s.fill(BG)
+        if self.page:
+            self.page.draw(s, app, r, self.encl, self.follow, self.pointer, self.paused)
+            return
         head = (f"Mondo 3D — agente {r.agent} — recinto {self.encl + 1}/{r.B} — essere {self.follow + 1}/{r.n}")
         s.blit(app.font.render(head, True, PLAYER), (16, 12))
         speed = "turbo" if self.turbo else f"x{SPEEDS[self.speed_i]}"
@@ -205,7 +216,7 @@ class Mondo3DScreen(Screen):
             s.blit(app.font.render(self.note, True, PLAYER), (left.x + 8, left.y + 8))
 
     def _found(self, s, box, x, y, width) -> None:
-        """La sezione 1: gli oggetti trovati, sopra l'immagine, con la loro distanza."""
+        """La sezione P: gli oggetti trovati, sopra l'immagine, con la loro distanza."""
         seen = getattr(self.brain.boss, "seen", None)
         if seen is None:
             return
@@ -224,7 +235,7 @@ class Mondo3DScreen(Screen):
         s.blit(self.app.small.render(text, True, TEXT), (box.x + 6, box.y + 4))
 
     def _motor(self, s, x, y) -> None:
-        """La sezione 7 dell'essere seguito e i suoi pulsanti."""
+        """La sezione C dell'essere seguito e i suoi pulsanti."""
         box = pygame.Rect(x, y, s.get_width() - x - 16, 520)
         self.panel.draw(s, self.app, box, self.run.w, self.brain.motor, self.encl, self.follow, self.pointer)
         bx = box.right - 12
