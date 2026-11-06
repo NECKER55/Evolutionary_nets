@@ -1,4 +1,4 @@
-"""La sezione 1 con reti già pronte, da confrontare con la nostra (`vision.py`):
+"""La sezione P con reti già pronte, da confrontare con la nostra (`vision.py`):
 
 - **SlimSAM** (nielsr/slimsam-77-uniform, Apache 2.0) separa ogni cosa che vede,
   senza sapere che cosa sia e senza etichette;
@@ -166,7 +166,7 @@ class Eyes:
             rows, cols = np.flatnonzero(m.any(1)), np.flatnonzero(m.any(0))
             top, down, left, right = rows[0], rows[-1] + 1, cols[0], cols[-1] + 1
             crops.append(np.where(m[..., None], rgb, 128)[top:down, left:right].astype(np.uint8))
-        x = self.dino_in(images=crops, return_tensors="pt")
+        x = self.dino_in(images=crops, input_data_format="channels_last", return_tensors="pt")  # un ritaglio piccolo sembrerebbe avere i canali davanti
         v = self.dino(**x).last_hidden_state[:, 0].numpy()
         v = v / np.linalg.norm(v, axis=-1, keepdims=True)
         v = np.concatenate([v, HUE * np.stack([hue(rgb[m]) for m in masks])], -1)
