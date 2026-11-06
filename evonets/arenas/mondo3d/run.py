@@ -1,0 +1,116 @@
+"""Le prove nel mondo 3D: quante pile prende un agente di controllo.
+
+Uso: `uv run python -m evonets.arenas.mondo3d.run --agente perfetto --minuti 10`;
+`--confronto` fa tutti gli agenti con lo stesso seme, `--corpo` sceglie il cablaggio.
+"""
+
+import argparse
+import json
+import time
+
+import numpy as np
+
+from ...brains.mondo3d import CONTROLS
+from ...brains.ragionante import Reasoning
+from .maps import PLANS
+from .world import BODIES, Mondo3D, Mondo3DConfig
+
+
+
+def seeing(world, seed: int, eyes: str = "FakeDetector") -> Reasoning:
+    """Il motore col comandante che ha solo gli occhi. Qui dentro perché le reti si portano dietro JAX o torch."""
+    from ...brains.ragionante import vision
+    from ...brains.ragionante.seeing import Seeing
+
+    if eyes == "ReadyDetector":
+        from ...brains.ragionante.ready import ReadyDetector as found
+    else:
+        found = getattr(vision, eyes)
+    return Reasoning(world, seed, Seeing(world, found(world), seed))
+
+
+def looking(world, seed: int) -> Reasoning:
+    """Come il vedente con le reti pronte, ma la scelta resta del perfetto: gli occhi vedono e basta."""
+    from ...brains.ragionante.looking import Looking
+    from ...brains.ragionante.ready import ReadyDetector
+
+    return Reasoning(world, seed, Looking(world, ReadyDetector(world), seed))
+
+
+AGENTS = {"ragionante": Reasoning, "vedente finto": seeing,
+          "vedente pronto": lambda world, seed: seeing(world, seed, "ReadyDetector"),
+          "perfetto con occhi": looking} | CONTROLS
+
+
+class Run3D:
+    """Un agente in un mondo 3D; stessa idea di `arenas.pile.run.NumpyRun`."""
+
+    def __init__(self, cfg: Mondo3DConfig, agent: str, enclosures: int = 1, seed: int = 0):
+        self.cfg, self.agent = cfg, agent
+        self.w = Mondo3D(cfg, enclosures, seed)
+        self.B, self.n = self.w.B, self.w.n
+        self.brain = AGENTS[agent](self.w, seed)
+        self.watch = None  # chi guarda da fuori (`ragionante.watch`): non guida niente
+
+    @property
+    def t(self) -> float:
+        return self.w.t
+
+    def step(self) -> None:
+        action = self.brain.act()
+        if self.watch:
+            self.watch.before()
+        self.w.step(*action)
+        if self.watch:
+            self.watch.after()
+
+    def advance(self, k: int) -> None:
+        for _ in range(int(k)):
+            self.step()
+
+    def close(self) -> None:
+        self.w.close()
+
+
+def measures(r: Run3D) -> dict:
+    """Le misure da confrontare, con le stesse parole di `arenas.pile.run.measures`."""
+    w = r.w
+    good = sum(1 for x in w.taken if x[4])
+    bad = len(w.taken) - good
+    minutes = max(w.t / 60.0, 1e-9) * r.B * r.n
+    extra = {"tarature": int(r.brain.motor.tunings.sum())} if hasattr(r.brain, "motor") else {}
+    return extra | {"agente": r.agent, "minuti": round(w.t / 60.0, 2), "esseri": r.B * r.n,
+            "buone": good, "cattive": bad, "pile/min": round(good / minutes, 2), "cattive/min": round(bad / minutes, 2),
+            "scelta": round(good / len(w.taken), 3) if w.taken else None, "morti di fame": w.deaths["fame"],
+            "energia media": round(float(w.energy.mean()), 1)}
+
+
+def run(agent: str, enclosures: int, minutes: float, seed: int, cfg: Mondo3DConfig) -> dict:
+    r = Run3D(cfg, agent, enclosures, seed)
+    start = time.perf_counter()
+    r.advance(int(round(minutes * 60.0 / cfg.dt)))
+    seconds = time.perf_counter() - start
+    out = measures(r) | {"s di mondo/s": round(r.t / seconds, 1)}
+    r.close()
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--agente", choices=tuple(AGENTS), default="perfetto")
+    ap.add_argument("--confronto", action="store_true", help="tutti gli agenti")
+    ap.add_argument("--recinti", type=int, default=4)
+    ap.add_argument("--esseri", type=int, default=1, help="esseri per recinto")
+    ap.add_argument("--minuti", type=float, default=10.0)
+    ap.add_argument("--buone", choices=("colore", "grandezza"), default="colore")
+    ap.add_argument("--corpo", choices=tuple(BODIES), default=tuple(BODIES)[0])
+    ap.add_argument("--mappa", choices=tuple(PLANS), default="aperta")
+    ap.add_argument("--seed", type=int, default=0)
+    args = ap.parse_args()
+    cfg = lambda: Mondo3DConfig(beings=args.esseri, good_by=args.buone, body=args.corpo, map=args.mappa)
+    for agent in tuple(AGENTS) if args.confronto else (args.agente,):
+        print(json.dumps(run(agent, args.recinti, args.minuti, args.seed, cfg()), ensure_ascii=False), flush=True)
+
+
+if __name__ == "__main__":
+    main()
