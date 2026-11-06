@@ -12,6 +12,7 @@ import numpy as np
 
 from ...brains.mondo3d import CONTROLS
 from ...brains.ragionante import Reasoning
+from .maps import PLANS
 from .world import BODIES, Mondo3D, Mondo3DConfig
 
 
@@ -89,9 +90,10 @@ def main() -> None:
     ap.add_argument("--minuti", type=float, default=10.0)
     ap.add_argument("--buone", choices=("colore", "grandezza"), default="colore")
     ap.add_argument("--corpo", choices=tuple(BODIES), default=tuple(BODIES)[0])
+    ap.add_argument("--mappa", choices=tuple(PLANS), default="aperta")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
-    cfg = lambda: Mondo3DConfig(beings=args.esseri, good_by=args.buone, body=args.corpo)
+    cfg = lambda: Mondo3DConfig(beings=args.esseri, good_by=args.buone, body=args.corpo, map=args.mappa)
     for agent in tuple(AGENTS) if args.confronto else (args.agente,):
         print(json.dumps(run(agent, args.recinti, args.minuti, args.seed, cfg()), ensure_ascii=False), flush=True)
 

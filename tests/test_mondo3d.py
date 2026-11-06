@@ -6,8 +6,10 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
+from evonets.arenas.mondo3d.maps import PLANS, WALL, Layout
 from evonets.arenas.mondo3d.run import Run3D, measures
 from evonets.arenas.mondo3d.world import Mondo3D, Mondo3DConfig
+from evonets.arenas.pile.world import BUMP
 
 ONE, ZERO = np.ones((1, 1)), np.zeros((1, 1))
 
@@ -234,3 +236,81 @@ def test_a_battery_fades_out_before_it_expires():
     w.born[0, 0] = 0.0
     w.step(ZERO, ZERO)
     assert w.bon[0, 0] and 0.2 < w.model.geom_rgba[w.pgeom[0, 0], 3] < 0.8
+
+
+# --- Le mappe a stanze ---------------------------------------------------------------
+
+
+def rooms(name="stanze", **kw):
+    return world(map=name, **kw)
+
+
+def test_the_open_map_has_no_inner_walls_and_the_size_it_always_had():
+    w = world()
+    assert w.cfg.size == 500.0 and len(w.layouts[0].rects) == 0 and not w.layouts[0].doors
+
+
+@pytest.mark.parametrize("name, side", (("stanze", 1200.0), ("labirinto", 1300.0)))
+def test_every_room_can_be_reached_and_the_map_fills_the_enclosure(name, side):
+    w = rooms(name)
+    assert w.cfg.size == side
+    assert (w.layouts[0]._next >= 0).all()
+
+
+def test_the_same_seed_gives_the_same_house_and_another_seed_another():
+    plan = PLANS["stanze"]
+    first, again, other = Layout(plan, 0, 4), Layout(plan, 0, 4), Layout(plan, 1, 4)
+    assert (first.rects == again.rects).all() and (first.tints == again.tints).all()
+    assert first.rects.shape != other.rects.shape or (first.rects != other.rects).any()
+
+
+def test_a_being_is_never_born_inside_a_wall():
+    w = rooms()
+    for _ in range(50):
+        w.reborn(np.ones((1, 1), dtype=bool))
+        assert not len(w.layouts[0].near_wall(w.pos[0, 0], w.cfg.radius + WALL))
+
+
+def test_inner_walls_stop_the_body_and_are_felt_as_a_bump():
+    w = rooms()
+    put(w, (w.layouts[0].cell - 60.0, 50.0))
+    steps(w, 80, thrust=ONE)
+    assert w.pos[0, 0, 0] < w.layouts[0].cell
+    assert w.senses()[0, 0, BUMP].any()
+
+
+def test_a_wall_hides_what_is_behind_it_from_the_truth_too():
+    w = rooms()
+    l = w.layouts[0]
+    wall = next(r for r in l.rects if r[3] - r[1] > 100.0)  # un muro lungo in y
+    x, y = wall[0] - 60.0, (wall[1] + wall[3]) / 2.0
+    put(w, (x, y))
+    pile(w, (x + 130.0, y))
+    assert not w.objects()["vis"][0, 0, 0]
+    pile(w, (x + 40.0, y))
+    assert w.objects()["vis"][0, 0, 0]
+
+
+@pytest.mark.parametrize("name", ("stanze", "labirinto"))
+def test_the_way_leads_from_any_room_to_any_other_through_the_doors(name):
+    l = rooms(name).layouts[0]
+    centre = lambda r: (np.array((r % l.cells, r // l.cells)) + 0.5) * l.cell
+    for start in range(l.cells ** 2):
+        for goal in range(l.cells ** 2):
+            at, passed = centre(start), 0
+            while l.room_of(at) != goal:
+                stop, done = l.way(at, centre(goal))
+                assert not l.hides(at, stop) and not done
+                at, passed = stop, passed + 1
+                assert passed < 4 * l.cells ** 2
+
+
+def test_the_perfect_agent_crosses_the_house_when_the_zone_changes():
+    r = Run3D(Mondo3DConfig(beings=1, map="stanze", image=64, zone_every=45.0), "perfetto", 1, 0)
+    zones = set()
+    for _ in range(4):
+        r.advance(int(50.0 / r.w.cfg.dt))
+        zones.add(int(r.w.zone[0]))
+    good = sum(1 for x in r.w.taken if x[4])
+    r.close()
+    assert len(zones) >= 2 and good >= 12 and r.w.deaths["fame"] == 0
