@@ -1,5 +1,5 @@
-"""Il cervello ragionante, per ora: il motore (sezione 7) con sopra un
-comandante finto, che tiene il posto delle sezioni 1-6 che ancora mancano."""
+"""Il cervello ragionante, per ora: il motore (sezione C) con sopra un
+comandante finto, che tiene il posto delle altre sezioni, che ancora mancano."""
 
 import numpy as np
 

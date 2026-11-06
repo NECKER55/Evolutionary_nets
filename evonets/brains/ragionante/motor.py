@@ -1,4 +1,4 @@
-"""La sezione 7, il motore: traduce un'intenzione (velocità, rotazione, bocca)
+"""La sezione C, il motore: traduce un'intenzione (velocità, rotazione, bocca)
 in uscite per un corpo che non conosce. Sopra, nessuno sa com'è fatto il corpo.
 
 Tre neuroni d'ingresso, `HIDDEN` nascosti e K d'uscita. Si tara da solo col

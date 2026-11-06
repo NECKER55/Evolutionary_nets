@@ -1,4 +1,4 @@
-"""Il cervello ragionante (evonets/brains/ragionante/): per ora la sezione 7, il
+"""Il cervello ragionante (evonets/brains/ragionante/): per ora la sezione C, il
 motore che si tara da solo su un corpo che non conosce."""
 
 import ast
