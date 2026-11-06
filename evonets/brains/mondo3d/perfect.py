@@ -22,6 +22,8 @@ class Perfect:
         self.target = np.full((world.B, world.n), -1)
         self.blocked = np.zeros((world.B, world.n))  # s passati accanto alla meta senza morderla
         self.left = np.zeros((world.B, world.cfg.batteries))  # s prima di riprovare una pila lasciata
+        self.far = np.zeros((world.B, world.n))  # quanto dista la meta
+        self.stop = np.zeros((world.B, world.n))  # a che distanza dalla meta ci si ferma
 
     def _assign(self, good, dist) -> None:
         """A ogni essere libero la sua pila buona, dalle coppie più vicine."""
@@ -61,6 +63,7 @@ class Perfect:
         way = way - 2.0 * (side / np.maximum(dist, 1e-6)[..., None] * push[..., None]).sum(2)
         ang = _wrap(np.arctan2(way[..., 1], way[..., 0]) - w.heading)
         stop = np.where(has, reach - 4.0, cfg.zone_half / 2.0)
+        self.far, self.stop = far, stop
         thrust = np.clip((far - stop) / 50.0, 0.0, 1.0) * np.clip(1.0 - np.abs(ang) / 0.8, 0.0, 1.0)
         steer = np.clip(3.0 * ang, -1.0, 1.0)
         # Il morso prende la prima pila a portata: mai se ce n'è una cattiva.

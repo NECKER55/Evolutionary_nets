@@ -4,6 +4,6 @@ base è il pavimento, il perfetto il soffitto: un cervello si misura tra i due."
 from .base import Base
 from .perfect import Perfect
 
-AGENTS = {"base": Base, "perfetto": Perfect}
+CONTROLS = {"base": Base, "perfetto": Perfect}
 
-__all__ = ["AGENTS", "Base", "Perfect"]
+__all__ = ["CONTROLS", "Base", "Perfect"]

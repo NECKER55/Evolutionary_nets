@@ -8,6 +8,9 @@ un muro, si incastrerebbe per sempre con le ruote a vuoto. Le pile sono cilindri
 le sposta, e nessun oggetto attraversa l'altro. Una pila assente non si vede e
 non si tocca.
 
+Un corpo (`BODIES`) è un cablaggio che il cervello non conosce: dalle sue uscite
+a spinta, sterzo e morso. Il corpo sente che cosa ha fatto davvero (`felt`).
+
 Le misure del mondo restano quelle di `PileConfig` (1 unità = 1 cm), la
 fisica lavora in metri (`SCALE`). `pos`, `heading`, `speed` e `bpos` sono letti
 dalla fisica a ogni passo. Con asse z verso l'alto, una rotta che cresce gira a
@@ -17,6 +20,7 @@ sinistra (nell'arena 2D, disegnata con la y verso il basso, a destra).
 import atexit
 import os
 import queue
+import sys
 import threading
 import weakref
 from concurrent.futures import Future
@@ -28,6 +32,7 @@ import mujoco
 import numpy as np
 
 from ..pile.world import SECTORS, PileConfig, PileWorld, _wrap
+from .bodies import BODIES
 
 SCALE = 0.01  # metri per unità del mondo
 RED_RGB, YELLOW_RGB = (0.92, 0.31, 0.27), (0.94, 0.82, 0.24)
@@ -42,6 +47,7 @@ class Mondo3DConfig(PileConfig):
     """`PileConfig` più ciò che esiste solo in 3D."""
 
     beings: int = 1
+    body: str = "spinta, sterzo, morso"  # un nome di `BODIES`
     image: int = 264  # lato dell'immagine della telecamera, in pixel
     physics_dt: float = 0.005  # s: passo della fisica (in un passo del mondo ce ne stanno più d'uno)
     wheel_radius: float = 3.0
@@ -50,6 +56,8 @@ class Mondo3DConfig(PileConfig):
     pile_height: float = 12.0
     pile_small: float = 0.6  # raggio di una pila piccola rispetto a una grande
     camera_height: float = 11.0
+    pile_clear: float = 60.0  # una pila nuova nasce almeno così lontana dagli esseri: altrimenti è morsa appena nata
+    pile_fade: float = 0.6  # s per comparire e per sparire: una pila non scatta dal nulla
     gap: float = 300.0  # spazio tra un recinto e l'altro
 
 
@@ -178,6 +186,10 @@ class Mondo3D(PileWorld):
         mujoco.mj_forward(self.model, self.data)
         self._renderers = {}
         self._gl = Painter()
+        self.spin = np.zeros((B, n))  # rotazione dell'ultimo passo, in quote di quella massima
+        self.jaw = np.zeros((B, n))
+        self.born = np.zeros((B, K))  # l'età di ogni pila quando è comparsa
+        self.set_body(cfg.body)
 
     # --- Dalle regole alla fisica e ritorno ----------------------------------------
 
@@ -192,6 +204,23 @@ class Mondo3D(PileWorld):
             d.qvel[self.wheel_dofs[b, i]] = 0.0
             d.qpos[self.wheel_q[b, i]] = 0.0
             d.ctrl[[self.left[b, i], self.right[b, i]]] = 0.0
+
+    def _spawn(self, mask):
+        """Come nell'arena delle pile, ma in 3D i corpi occupano spazio: una
+        pila nuova cerca un posto libero (dopo qualche tentativo si accontenta)."""
+        super()._spawn(mask)
+        cfg = self.cfg
+        lo, hi = cfg.battery_radius, cfg.size - cfg.battery_radius
+        for b, k in zip(*np.nonzero(mask)):
+            for _ in range(12):
+                others = self.bon[b].copy()
+                others[k] = False
+                far = np.hypot(*(self.pos[b] - self.bpos[b, k]).T).min() >= cfg.pile_clear
+                if far and np.hypot(*(self.bpos[b][others] - self.bpos[b, k]).T).min(initial=np.inf) >= 3.0 * cfg.battery_radius:
+                    break
+                centre = self.zone_centres()[self.zone[b]]
+                self.bpos[b, k] = np.clip(centre + self.rng.uniform(-cfg.zone_half, cfg.zone_half, 2), lo, hi)
+        self.born[mask] = self.bage[mask]
 
     def _hide(self, mask) -> None:
         g = self.pgeom[mask]
@@ -238,7 +267,8 @@ class Mondo3D(PileWorld):
         d = self.data
         q, v = self.qadr, self.vadr
         self.pos = np.stack([d.qpos[q], d.qpos[q + 1]], -1) / SCALE - self.origin[:, None]
-        self.heading = _wrap(d.qpos[q + 3])
+        before, self.heading = self.heading, _wrap(d.qpos[q + 3])
+        self.spin = _wrap(self.heading - before) / (self.cfg.turn * self.cfg.dt)
         self.speed = (d.qvel[v] * np.cos(self.heading) + d.qvel[v + 1] * np.sin(self.heading)) / SCALE
         here = self.shown
         self.bpos[here] = (np.stack([d.qpos[self.px[here]], d.qpos[self.py[here]]], -1)) / SCALE - \
@@ -250,11 +280,32 @@ class Mondo3D(PileWorld):
         self._hide(self.shown & ~self.bon)
         moved = self.bon & (~self.shown | (self.bpos != self.shown_pos).any(-1))
         self._show(moved)
+        fade = self.cfg.pile_fade
+        alpha = np.minimum(self.bage - self.born, self.cfg.battery_life - self.bage) / fade
+        self.model.geom_rgba[self.pgeom[self.bon], 3] = np.clip(alpha[self.bon], 0.05, 1.0)
         return out
 
     def reborn(self, mask):
         super().reborn(mask)
         self._place(mask)
+
+    # --- Il corpo --------------------------------------------------------------------
+
+    def set_body(self, name: str) -> None:
+        """Cambia il cablaggio, anche a metà vita: il cervello non viene avvisato."""
+        self.body = name
+        wiring, self.outputs = BODIES[name]
+        self.wiring = np.array(wiring, dtype=float)
+
+    def wires(self, u):
+        """Dalle uscite `u` (B, n, K) ai comandi di `step`: (spinta, sterzo, morso)."""
+        thrust, steer, jaw = np.moveaxis(u @ self.wiring.T, -1, 0)
+        self.jaw = np.clip(jaw, 0.0, 1.0)
+        return np.clip(thrust, -1.0, 1.0), np.clip(steer, -1.0, 1.0), jaw > 0.5
+
+    def felt(self) -> np.ndarray:
+        """Che cosa ha fatto il corpo nell'ultimo passo (B, n, 3): vedi `FELT`."""
+        return np.stack([self.speed / self.cfg.speed, self.spin, self.jaw], -1)
 
     # --- Le immagini -----------------------------------------------------------------
 
@@ -333,9 +384,11 @@ class Mondo3D(PileWorld):
 
     def close(self) -> None:
         if self._gl is not None:
-            self._gl.call(self._free)
+            if self._renderers:
+                self._gl.call(self._free)
             self._gl = None
 
     def __del__(self):
-        if getattr(self, "_gl", None) is not None:
+        # Se l'interprete sta chiudendo il thread è già fermo: ci pensa `atexit`.
+        if getattr(self, "_gl", None) is not None and not sys.is_finalizing():
             self.close()
