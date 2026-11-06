@@ -277,10 +277,7 @@ class PileWorld:
         bite = np.zeros((B, n), dtype=bool) if bite is None else np.asarray(bite, dtype=bool)
         # Mentre consuma una pila l'essere sta fermo (come il robot attaccato alla pila).
         thrust = np.where(self.charging > 0.0, 0.0, np.clip(thrust, -1.0, 1.0))
-        self.heading = _wrap(self.heading + np.clip(steer, -1.0, 1.0) * cfg.turn * dt)
-        self.speed = thrust * cfg.speed * np.where(thrust < 0, cfg.reverse, 1.0)
-        u = np.stack([np.cos(self.heading), np.sin(self.heading)], -1)
-        self.pos = np.clip(self.pos + u * self.speed[..., None] * dt, cfg.radius, cfg.size - cfg.radius)
+        self._move(thrust, steer)
         self.age += dt
         spent = (cfg.drain + cfg.move_cost * np.abs(thrust) + cfg.bite_cost * bite) * dt
         self.energy -= spent
@@ -352,6 +349,14 @@ class PileWorld:
         if dead.any():
             self.reborn(dead)
         return {"pleasure": pleasure, "pain": hurt, "spent": spent / cfg.good_energy, "dead": dead, "mates": mates}
+
+    def _move(self, thrust, steer):
+        """Il corpo si muove: qui senza fisica. Il mondo 3D fa solo questo in modo diverso."""
+        cfg, dt = self.cfg, self.cfg.dt
+        self.heading = _wrap(self.heading + np.clip(steer, -1.0, 1.0) * cfg.turn * dt)
+        self.speed = thrust * cfg.speed * np.where(thrust < 0, cfg.reverse, 1.0)
+        u = np.stack([np.cos(self.heading), np.sin(self.heading)], -1)
+        self.pos = np.clip(self.pos + u * self.speed[..., None] * dt, cfg.radius, cfg.size - cfg.radius)
 
     def reborn(self, mask):
         """Il corpo degli esseri `mask` (B, n) rinasce: posto e direzione a caso,
