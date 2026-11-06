@@ -1,4 +1,4 @@
-"""La sezione 1, la percezione: dalla telecamera agli oggetti.
+"""La sezione P, la percezione: dalla telecamera agli oggetti.
 
 `Percept` è l'interfaccia verso il resto del cervello, ed è la stessa per il
 detector finto (legge il simulatore) e per quello vero (`Detector`): una lista di

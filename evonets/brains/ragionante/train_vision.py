@@ -1,4 +1,4 @@
-"""Addestra la sezione 1 sulle etichette del simulatore: raccoglie immagini vere
+"""Addestra la sezione P sulle etichette del simulatore: raccoglie immagini vere
 in mondi a caso e impara che cosa c'è in ogni pixel.
 
 Uso: `uv run python -m evonets.brains.ragionante.train_vision --immagini 3000`.

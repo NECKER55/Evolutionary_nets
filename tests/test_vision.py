@@ -1,4 +1,4 @@
-"""La sezione 1, la percezione: la rete nostra (vision.py), il detector finto e il
+"""La sezione P, la percezione: la rete nostra (vision.py), il detector finto e il
 comandante che ha solo gli occhi. Le reti pronte stanno in test_ready.py."""
 
 import os

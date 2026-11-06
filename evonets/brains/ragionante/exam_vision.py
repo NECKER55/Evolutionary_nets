@@ -1,4 +1,4 @@
-"""L'esame della sezione 1 nel mondo delle pile, in mondi mai visti: confronta ogni
+"""L'esame della sezione P nel mondo delle pile, in mondi mai visti: confronta ogni
 detector con la verità del simulatore, sulle stesse immagini.
 
 Una pila conta se se ne vedono almeno `MIN_PILE` pixel e non sta sfumando. È trovata
