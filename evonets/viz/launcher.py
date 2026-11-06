@@ -14,6 +14,7 @@ import pygame
 
 from ..arenas.generational.evolution import Evolution
 from ..arenas.mondo3d.bodies import BODIES
+from ..arenas.mondo3d.maps import PLANS
 from ..brains.freeform.anatomy import KIND_NAMES
 from ..config import Config
 from .render import BG, BORDER, DIM, IDLE, PLAYER, TARGET, TEXT
@@ -361,6 +362,7 @@ class Launcher(Screen):
                                          ("vedente finto", "vedente finto"), ("vedente pronto", "vedente, reti pronte"),
                                          ("perfetto", "perfetto"), ("base", "base")])
         self.m_body = Choice("Corpo", [(k, k) for k in BODIES])
+        self.m_map = Choice("Mappa", [(k, k) for k in PLANS])
         self.m_encl = Number("Recinti", 1, step=1, low=1)
         self.m_beings = Number("Esseri per recinto", 3, step=1, low=1)
         load = defaults.get("load")
@@ -385,7 +387,7 @@ class Launcher(Screen):
             "pile": [("Mondo", [self.task, self.p_good]),
                      ("Cervello", [self.p_agent, self.p_lesion, self.p_teacher]),
                      ("Popolazione", [self.p_phase, self.p_encl, self.p_beings]), chance, saves],
-            "mondo3d": [("Mondo", [self.task, self.p_good]),
+            "mondo3d": [("Mondo", [self.task, self.p_good, self.m_map]),
                         ("Agente", [self.m_agent, self.m_body]),
                         ("Popolazione", [self.m_encl, self.m_beings]), chance],
         }
@@ -614,7 +616,8 @@ class Launcher(Screen):
 
         if self.chance.value == "random":
             self.seed.value = secrets.randbelow(2**31)
-        cfg = Mondo3DConfig(beings=self.m_beings.fixed(), good_by=self.p_good.value, body=self.m_body.value)
+        cfg = Mondo3DConfig(beings=self.m_beings.fixed(), good_by=self.p_good.value, body=self.m_body.value,
+                             map=self.m_map.value)
         try:
             run = Run3D(cfg, self.m_agent.value, self.m_encl.fixed(), self.seed.fixed())
         except Exception as err:

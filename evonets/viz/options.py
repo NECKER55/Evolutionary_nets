@@ -33,6 +33,8 @@ HELP = {
     "m_agent": "Chi guida gli esseri. Gli agenti si misurano tra base (pavimento) e perfetto (soffitto).",
     "m_body": "Come le uscite del cervello diventano movimento. Il cervello non lo sa: lo scopre tarandosi. "
               "Vale per gli agenti col motore (sezione 7).",
+    "m_map": "Com'è fatto il mondo. Il seme decide la pianta: lo stesso seme dà la stessa casa, e ogni recinto ne ha una sua. "
+             "I vedenti non hanno ancora una mappa: tra le stanze si perdono.",
     "m_encl": "Quanti recinti nello stesso mondo, indipendenti. Con la telecamera ogni recinto in più rallenta.",
     "m_beings": "Quanti esseri in ogni recinto. Tab li cambia durante la corsa.",
     "load": "Un salvataggio da cui ripartire. Rete, individui e costanti vengono da lì, e quelle righe si bloccano.",
@@ -95,6 +97,9 @@ DETAILS = {
                 "perfetto": "Regole a mano che leggono la verità, anche dietro le spalle. Il soffitto: nessun cervello, "
                             "non usa la telecamera.",
                 "base": "Vaga guardando solo la profondità e morde ciò che ha davanti. Il pavimento."},
+    "m_map": {"aperta": "Una stanza sola di 5 m, tutta visibile da quasi ogni punto.",
+              "stanze": "12 m di lato, 9 stanze con una porta o due, colorate. Le pile stanno in una stanza d'angolo.",
+              "labirinto": "13 m di lato, 25 stanze piccole e una sola strada tra due punti."},
     "m_body": {"spinta, sterzo, morso": "Ogni uscita fa una cosa sola: il corpo più semplice.",
                "due ruote e morso": "Due uscite per le ruote: per andare dritto vanno mosse insieme, per girare al contrario.",
                "uscite in disordine": "Due ruote e morso, ma con le uscite in un ordine diverso.",
