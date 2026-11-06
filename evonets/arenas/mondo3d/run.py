@@ -29,8 +29,17 @@ def seeing(world, seed: int, eyes: str = "FakeDetector") -> Reasoning:
     return Reasoning(world, seed, Seeing(world, found(world), seed))
 
 
+def looking(world, seed: int) -> Reasoning:
+    """Come il vedente con le reti pronte, ma la scelta resta del perfetto: gli occhi vedono e basta."""
+    from ...brains.ragionante.looking import Looking
+    from ...brains.ragionante.ready import ReadyDetector
+
+    return Reasoning(world, seed, Looking(world, ReadyDetector(world), seed))
+
+
 AGENTS = {"ragionante": Reasoning, "vedente finto": seeing,
-          "vedente pronto": lambda world, seed: seeing(world, seed, "ReadyDetector")} | CONTROLS
+          "vedente pronto": lambda world, seed: seeing(world, seed, "ReadyDetector"),
+          "perfetto con occhi": looking} | CONTROLS
 
 
 class Run3D:
