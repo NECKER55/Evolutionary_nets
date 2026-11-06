@@ -98,6 +98,7 @@ evonets/
       world.py run.py gpu.py         il mondo; prove e misure; la GPU
       saves.py bench.py              salvataggi; banco di prova fisso
     mondo3d/             le stesse regole delle pile, con corpi e telecamere MuJoCo
+      maps.py            le mappe: stanze e porte generate da un seme
       world.py bodies.py run.py   il mondo; i cablaggi dei corpi; prove e misure
   brains/              una cartella per famiglia di cervelli
     freeform/            reti a forma libera, evolvono (arene generational e continuous)
@@ -117,19 +118,22 @@ evonets/
     mondo3d/             agenti di controllo del mondo 3D, non cervelli
       base.py perfect.py   vede solo la profondità; legge la verità dal simulatore
     ragionante/          il cervello nuovo, staccato da quello a sezioni: per ora il motore
-      motor.py brain.py  sezione 7, con neuroni nascosti e taratura; il cervello attorno a lei
-      vision.py          sezione 1: detector finto e rete nostra (train_vision.py, exam_vision.py)
-      ready.py           sezione 1 con SlimSAM e DINOv2, memoria degli oggetti (exam_identity.py)
+      motor.py brain.py  sezione C, con neuroni nascosti e taratura; il cervello attorno a lei
+      vision.py          sezione P: detector finto e rete nostra (train_vision.py, exam_vision.py)
+      ready.py           sezione P con SlimSAM e DINOv2, memoria degli oggetti (exam_identity.py)
       seeing.py          comandante finto che ha solo gli occhi
       events.py          il mondo a eventi: vite di righe con una regola nascosta
-      memory.py          sezioni 3 e 4, world model a eventi (train_memory.py, exam_memory.py)
+      memory.py          sezioni L e W, world model a eventi (train_memory.py, exam_memory.py)
+      watch.py           L e W accanto a un agente, senza guidarlo
+      bank.py            la banca di embedding veri, la lingua comune delle sezioni
   viz/                 interfaccia (l'unica parte che usa la grafica)
     app.py launcher.py   finestra; menu
     render.py inspector.py widgets.py   arena e rete dal vivo; reti e genomi; controlli
     generational/        corsa, panoramica, banco di prova
     continuous/          vista del mondo e schede
     pile/                recinto e cervello a sezioni
-    mondo3d/             vista da fuori, immagine, profondità e sezione 7 (motor_panel.py)
+    mondo3d/             vista da fuori, immagine, profondità e sezione C (motor_panel.py)
+      brain_page.py      il cervello a tutto schermo mentre la prova gira (tasto N)
 main.py              avvio: interfaccia, terminale, benchmark
 tests/               un file di test per ciascun gruppo
 ```
