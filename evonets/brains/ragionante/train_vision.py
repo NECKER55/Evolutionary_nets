@@ -12,6 +12,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from ...arenas.mondo3d.maps import PLANS
 from ...arenas.mondo3d.run import Run3D
 from ...arenas.mondo3d.world import Mondo3D, Mondo3DConfig
 from .vision import SIDE, WEIGHTS, logits, network, shrink
@@ -38,6 +39,7 @@ def stage(w, rng) -> None:
             side = rng.integers(0, 2)
             w.pos[0, i, side] = rng.choice((near, cfg.size - near)) + rng.uniform(-2.0, 2.0)
             w.pos[0, i, 1 - side] = rng.uniform(near, cfg.size - near)
+    w._clear(w.pos, np.ones((w.B, w.n), dtype=bool))
     w.heading[0] = rng.uniform(-np.pi, np.pi, w.n)
     w.bcolor[0] = rng.integers(0, 2, cfg.batteries)
     w.bbig[0] = rng.integers(0, 2, cfg.batteries)
@@ -47,6 +49,8 @@ def stage(w, rng) -> None:
         if rng.random() < CLOSE:
             k, far, turn = rng.integers(cfg.batteries), rng.uniform(near + 8.0, 70.0), w.heading[0, i] + rng.uniform(-1.0, 1.0)
             w.bon[0, k], w.bpos[0, k] = True, w.pos[0, i] + far * np.array((np.cos(turn), np.sin(turn)))
+    for k in range(cfg.batteries):
+        w.bon[0, k] &= not len(w.layouts[0].near_wall(w.bpos[0, k], cfg.battery_radius))  # non dentro un muro
     w.sync()
 
 
@@ -62,18 +66,20 @@ def collect(images: int, seed: int) -> tuple:
     """Immagini e verità da mondi diversi, con esseri che girano davvero: `images` in tutto."""
     x, y = [], []
     run = None
-    world = Mondo3D(Mondo3DConfig(beings=3), 1, seed)
+    worlds = [Mondo3D(Mondo3DConfig(beings=3, map=name), 1, seed) for name in PLANS]  # ogni mappa ha muri suoi
     rng = np.random.default_rng(seed)
     while len(x) < images * STAGED:
+        world = worlds[len(x) // 3 % len(worlds)]  # 3 immagini a scena
         stage(world, rng)
         sample(world, x, y)
-    world.close()
+    for world in worlds:
+        world.close()
     while len(x) < images:
         if run is None or run.w.t > 120.0:
             if run:
                 run.close()
             seed += 1
-            run = Run3D(Mondo3DConfig(beings=3), WHO[seed % len(WHO)], 1, seed)
+            run = Run3D(Mondo3DConfig(beings=3, map=tuple(PLANS)[seed // len(WHO) % len(PLANS)]), WHO[seed % len(WHO)], 1, seed)
             run.advance(100)
         run.advance(EVERY)
         sample(run.w, x, y)
