@@ -356,7 +356,7 @@ def test_the_menu_starts_the_battery_arena_and_the_screen_draws_the_brain(monkey
     menu.task.select("pile")
     menu.p_encl.value, menu.chance.index = 3, 1
     menu.draw(app.screen)  # le righe dell'arena delle pile
-    assert menu._visible() is menu.pile_fields
+    assert menu.p_agent in menu._visible() and menu.net not in menu._visible()
     for agent in ("sezioni", "attore-critico", "guidato"):
         menu.p_agent.select(agent)
         menu.save.value = str(tmp_path / f"{agent}.npz")
