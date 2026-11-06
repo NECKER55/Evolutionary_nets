@@ -335,10 +335,12 @@ class Launcher(Screen):
         self.task = Choice("Mondo", [("bersaglio", "bersaglio e veleno (il mondo di prima)"),
                                      ("cibo", "nutrirsi: cibo, prede e predatori"),
                                      ("arena", "arena continua: tutti insieme, nascite e morti"),
-                                     ("pile", "arena delle pile: cervello a sezioni, sensi fissi")],
+                                     ("pile", "arena delle pile: cervello a sezioni, sensi fissi"),
+                                     ("mondo3d", "mondo 3D: pile con MuJoCo, telecamera e profondità")],
                            help="Il compito. Nel mondo del cibo si riproduce chi mangia almeno N cibi; il veleno "
                                 "è spento. Nell'arena continua si vive insieme, senza generazioni "
-                                "(docs/SPEC_ARENA.md). Pile: docs/SPEC_ARENA_PILE.md.")
+                                "(docs/SPEC_ARENA.md). Pile: docs/SPEC_ARENA_PILE.md. "
+                                "Mondo 3D: docs/SPEC_CERVELLO_RAGIONANTE.md.")
         self.task.select(defaults.get("task") or "bersaglio")
         self.ladder = Choice("Scala", [("scala", "adattiva: sale se va bene, scende se va male"),
                                        ("basico", "ferma al mondo basico (controllo)"),
@@ -379,6 +381,12 @@ class Launcher(Screen):
         self.p_encl = Number("Recinti", 200, step=50, low=1,
                              help="Recinti che girano insieme (GPU); se ne guarda uno alla volta.")
         self.p_beings = Number("Esseri per recinto", 6, step=1, low=1, help="Quanti esseri in ogni recinto.")
+        # Il mondo 3D (docs/SPEC_CERVELLO_RAGIONANTE.md): per ora solo gli agenti di controllo.
+        self.m_agent = Choice("Agente", [("perfetto", "perfetto: legge la verità dal simulatore (soffitto)"),
+                                         ("base", "base: vaga guardando solo la profondità (pavimento)")],
+                              help="Agenti di controllo, non cervelli: un cervello si misurerà tra i due.")
+        self.m_encl = Number("Recinti", 1, step=1, low=1, help="Recinti nello stesso mondo; se ne guarda uno alla volta.")
+        self.m_beings = Number("Esseri per recinto", 1, step=1, low=1, help="Quanti esseri in ogni recinto.")
         load = defaults.get("load")
         self.extra = [load] if load and Path(load).exists() and Path(load).parent.resolve() != RUNS.resolve() else []
         self.picker: SavePicker | None = None
@@ -396,6 +404,8 @@ class Launcher(Screen):
         self.pile_fields = [self.task, self.p_agent, self.p_phase, self.p_lesion, self.p_good, self.p_teacher, self.p_encl,
                             self.p_beings,
                             self.chance, self.seed, self.gens, self.load, self.save]
+        self.world3d_fields = [self.task, self.m_agent, self.p_good, self.m_encl, self.m_beings, self.chance, self.seed,
+                               self.gens]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
         self.inspect_btn = Button("Esplora reti e genomi del salvataggio", self.explore)
@@ -405,7 +415,7 @@ class Launcher(Screen):
 
     def _visible(self) -> list:
         """Le righe da mostrare: l'arena delle pile ha le sue."""
-        return self.pile_fields if self.task.value == "pile" else self.fields
+        return {"pile": self.pile_fields, "mondo3d": self.world3d_fields}.get(self.task.value, self.fields)
 
     def _files(self) -> list[Path]:
         return sorted(RUNS.glob("*.npz"), key=lambda p: p.stat().st_mtime, reverse=True) + \
@@ -582,9 +592,27 @@ class Launcher(Screen):
         self.app.active_run = screen
         self.app.show(screen)
 
+    def _world3d(self) -> None:
+        from ..arenas.mondo3d.run import Run3D
+        from ..arenas.mondo3d.world import Mondo3DConfig
+        from .mondo3d.view import Mondo3DScreen
+
+        if self.chance.value == "random":
+            self.seed.value = secrets.randbelow(2**31)
+        cfg = Mondo3DConfig(beings=self.m_beings.fixed(), good_by=self.p_good.value)
+        try:
+            run = Run3D(cfg, self.m_agent.value, self.m_encl.fixed(), self.seed.fixed())
+        except Exception as err:
+            self.message, self.error = f"non riesco ad avviare il mondo 3D: {err}", True
+            return
+        self.app.show(Mondo3DScreen(self.app, run, self.gens.fixed()))
+
     def start(self) -> None:
         if self.task.value == "pile":
             self._pile()
+            return
+        if self.task.value == "mondo3d":
+            self._world3d()
             return
         if self._is_arena():
             from .continuous.view import ArenaScreen
@@ -688,7 +716,7 @@ class Launcher(Screen):
         y = 100
         fields = self._visible()
         self.focus = min(self.focus, len(fields) - 1)
-        pile = fields is self.pile_fields
+        pile = fields is not self.fields
         self.gens.label = "Minuti di mondo" if pile else self.gens.label
         self.p_lesion.enabled = self.p_agent.value == "sezioni"
         for k, f in enumerate(fields):
@@ -702,7 +730,7 @@ class Launcher(Screen):
             s.blit(app.small.render(save_info(self.load.value), True, TARGET), (235, y + 20))
         y += 44
         x = 60
-        self.inspect_btn.enabled = self.load.value is not None
+        self.inspect_btn.enabled = self.load.value is not None and self.task.value != "mondo3d"
         for b in (self.start_btn, self.inspect_btn, self.quit_btn):
             x += b.draw(s, app.font, x, y) + 14
         if self.message:

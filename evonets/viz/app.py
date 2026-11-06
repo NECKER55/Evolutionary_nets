@@ -10,6 +10,8 @@ schermate (B la mette in pausa).
 """
 
 
+import os
+
 import numpy as np
 import pygame
 
@@ -22,6 +24,7 @@ BACKGROUND_BUDGET = 0.025  # s per fotogramma alla corsa mentre si guarda un'alt
 
 class App:
     def __init__(self, defaults: dict):
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")  # niente suoni: chiudere l'audio vero può bloccare `pygame.quit`
         pygame.init()
         pygame.key.set_repeat(350, 40)
         self.screen = pygame.display.set_mode(Renderer.window_size(Config()))
