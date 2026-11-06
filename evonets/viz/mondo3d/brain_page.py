@@ -99,7 +99,8 @@ class BrainPage:
 
         seen = getattr(boss, "seen", None)
         side = min(box.w - 16, box.h - 60)
-        pic = pygame.Rect(box.x + 8, box.y + 44, side, side)
+        wide, high = run.w.cfg.frame
+        pic = pygame.Rect(box.x + 8, box.y + 44, side, side * high // wide)
         s.blit(pygame.transform.smoothscale(surface(run.w.view(b, i, depth=False)["rgb"]), pic.size), pic)
         pygame.draw.rect(s, BORDER, pic, 1)
         if seen is None:

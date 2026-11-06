@@ -21,6 +21,9 @@ from .render import BG, BORDER, DIM, IDLE, PLAYER, TARGET, TEXT
 from .options import DETAILS, HELP
 from .widgets import ROW_H, Button, Choice, Number, Picker, Text, wrap
 
+# Le telecamere del mondo 3D: (larghezza, altezza), 0 per un'immagine quadrata.
+CAMERAS = {"264×264": (264, 0), "640×480": (640, 480), "1280×720": (1280, 720)}
+
 RUNS = Path("runs")
 DAYS = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
 MONTHS = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre",
@@ -363,6 +366,7 @@ class Launcher(Screen):
                                          ("perfetto", "perfetto"), ("base", "base")])
         self.m_body = Choice("Corpo", [(k, k) for k in BODIES])
         self.m_map = Choice("Mappa", [(k, k) for k in PLANS])
+        self.m_camera = Choice("Telecamera", [(k, k) for k in CAMERAS])
         self.m_encl = Number("Recinti", 1, step=1, low=1)
         self.m_beings = Number("Esseri per recinto", 3, step=1, low=1)
         load = defaults.get("load")
@@ -388,7 +392,7 @@ class Launcher(Screen):
                      ("Cervello", [self.p_agent, self.p_lesion, self.p_teacher]),
                      ("Popolazione", [self.p_phase, self.p_encl, self.p_beings]), chance, saves],
             "mondo3d": [("Mondo", [self.task, self.p_good, self.m_map]),
-                        ("Agente", [self.m_agent, self.m_body]),
+                        ("Agente", [self.m_agent, self.m_body, self.m_camera]),
                         ("Popolazione", [self.m_encl, self.m_beings]), chance],
         }
         self.tabs = []  # (riquadro, prima riga della pagina), fissati da `draw`
@@ -617,7 +621,8 @@ class Launcher(Screen):
         if self.chance.value == "random":
             self.seed.value = secrets.randbelow(2**31)
         cfg = Mondo3DConfig(beings=self.m_beings.fixed(), good_by=self.p_good.value, body=self.m_body.value,
-                             map=self.m_map.value)
+                             map=self.m_map.value, image=CAMERAS[self.m_camera.value][0],
+                             image_height=CAMERAS[self.m_camera.value][1])
         try:
             run = Run3D(cfg, self.m_agent.value, self.m_encl.fixed(), self.seed.fixed())
         except Exception as err:

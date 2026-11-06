@@ -193,9 +193,10 @@ class Mondo3DScreen(Screen):
         x, y = (16, left.bottom + 24) if self.brain else (left.right + 24, 62)
         gap = 8 if self.brain else 16
         self.boxes = []
+        wide, high = w.cfg.frame
         for name, image, dx in (("immagine", view["rgb"], 0), ("profondità", depth_image(view["depth"]), eye + gap)):
-            s.blit(app.small.render(f"{name} ({w.cfg.image}×{w.cfg.image})", True, TEXT), (x + dx, y - 18))
-            box = pygame.Rect(x + dx, y, eye, eye)
+            s.blit(app.small.render(f"{name} ({wide}×{high})", True, TEXT), (x + dx, y - 18))
+            box = pygame.Rect(x + dx, y, eye, eye * high // wide)
             s.blit(pygame.transform.smoothscale(surface(image), box.size), box)
             pygame.draw.rect(s, BORDER, box, 1)
             self.boxes.append(box)

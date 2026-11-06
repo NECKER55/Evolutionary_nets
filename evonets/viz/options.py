@@ -35,6 +35,8 @@ HELP = {
               "Vale per gli agenti col motore (sezione C).",
     "m_map": "Com'è fatto il mondo. Il seme decide la pianta: lo stesso seme dà la stessa casa, e ogni recinto ne ha una sua. "
              "I vedenti non hanno ancora una mappa: tra le stanze si perdono.",
+    "m_camera": "Quanti pixel ha la telecamera di ogni essere. L'apertura orizzontale resta 120°: più pixel, oggetti lontani "
+                "più grandi nell'immagine, ma ogni passo è più lento.",
     "m_encl": "Quanti recinti nello stesso mondo, indipendenti. Con la telecamera ogni recinto in più rallenta.",
     "m_beings": "Quanti esseri in ogni recinto. Tab li cambia durante la corsa.",
     "load": "Un salvataggio da cui ripartire. Rete, individui e costanti vengono da lì, e quelle righe si bloccano.",
@@ -100,6 +102,9 @@ DETAILS = {
     "m_map": {"aperta": "Una stanza sola di 5 m, tutta visibile da quasi ogni punto.",
               "stanze": "12 m di lato, 9 stanze con una porta o due, colorate. Le pile stanno in una stanza d'angolo.",
               "labirinto": "13 m di lato, 25 stanze piccole e una sola strada tra due punti."},
+    "m_camera": {"264×264": "Quadrata e piccola: una pila piccola a 3 m è 2-3 pixel. Quella con cui è addestrata la rete nostra.",
+                 "640×480": "Come molte telecamere dei robot: la stessa pila è circa 6 pixel.",
+                 "1280×720": "Come una telecamera normale: la stessa pila è circa 12 pixel, ma è 13 volte più lenta da disegnare."},
     "m_body": {"spinta, sterzo, morso": "Ogni uscita fa una cosa sola: il corpo più semplice.",
                "due ruote e morso": "Due uscite per le ruote: per andare dritto vanno mosse insieme, per girare al contrario.",
                "uscite in disordine": "Due ruote e morso, ma con le uscite in un ordine diverso.",
