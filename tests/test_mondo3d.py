@@ -201,3 +201,26 @@ def test_the_depth_colours_tell_near_from_far_where_most_of_the_image_is():
     assert depth_scale(np.array([10.0]))[0] < depth_scale(np.array([25.0]))[0] < depth_scale(np.array([50.0]))[0]
     near, far, sky = depth_image(np.array([[10.0, 400.0, 2000.0]]))[0]
     assert abs(near.astype(int) - far.astype(int)).sum() > 100 and tuple(sky) == SKY_C
+
+
+def test_a_new_battery_is_never_born_on_top_of_a_being_and_fades_in():
+    r = Run3D(Mondo3DConfig(beings=3, image=64), "perfetto", 1, 0)
+    w, was = r.w, r.w.bon.copy()
+    seen = 0
+    for _ in range(1500):
+        r.step()
+        for k in np.flatnonzero(w.bon[0] & ~was[0]):
+            seen += 1
+            assert np.hypot(*(w.pos[0] - w.bpos[0, k]).T).min() > 50.0
+            assert w.model.geom_rgba[w.pgeom[0, k], 3] < 0.2  # appena nata: quasi trasparente
+        was = w.bon.copy()
+    assert seen > 10
+
+
+def test_a_battery_fades_out_before_it_expires():
+    w = world()
+    pile(w, [300.0, 300.0])
+    w.bage[0, 0] = w.cfg.battery_life - 0.3
+    w.born[0, 0] = 0.0
+    w.step(ZERO, ZERO)
+    assert w.bon[0, 0] and 0.2 < w.model.geom_rgba[w.pgeom[0, 0], 3] < 0.8

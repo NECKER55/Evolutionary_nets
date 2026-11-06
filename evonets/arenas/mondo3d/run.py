@@ -1,7 +1,7 @@
 """Le prove nel mondo 3D: quante pile prende un agente di controllo.
 
 Uso: `uv run python -m evonets.arenas.mondo3d.run --agente perfetto --minuti 10`;
-`--confronto` fa tutti gli agenti con lo stesso seme.
+`--confronto` fa tutti gli agenti con lo stesso seme, `--corpo` sceglie il cablaggio.
 """
 
 import argparse
@@ -10,8 +10,12 @@ import time
 
 import numpy as np
 
-from ...brains.mondo3d import CONTROLS as AGENTS
-from .world import Mondo3D, Mondo3DConfig
+from ...brains.mondo3d import CONTROLS
+from ...brains.ragionante import Reasoning
+from .world import BODIES, Mondo3D, Mondo3DConfig
+
+
+AGENTS = {"ragionante": Reasoning} | CONTROLS
 
 
 class Run3D:
@@ -44,7 +48,8 @@ def measures(r: Run3D) -> dict:
     good = sum(1 for x in w.taken if x[4])
     bad = len(w.taken) - good
     minutes = max(w.t / 60.0, 1e-9) * r.B * r.n
-    return {"agente": r.agent, "minuti": round(w.t / 60.0, 2), "esseri": r.B * r.n,
+    extra = {"tarature": int(r.brain.motor.tunings.sum())} if hasattr(r.brain, "motor") else {}
+    return extra | {"agente": r.agent, "minuti": round(w.t / 60.0, 2), "esseri": r.B * r.n,
             "buone": good, "cattive": bad, "pile/min": round(good / minutes, 2), "cattive/min": round(bad / minutes, 2),
             "scelta": round(good / len(w.taken), 3) if w.taken else None, "morti di fame": w.deaths["fame"],
             "energia media": round(float(w.energy.mean()), 1)}
@@ -68,9 +73,10 @@ def main() -> None:
     ap.add_argument("--esseri", type=int, default=1, help="esseri per recinto")
     ap.add_argument("--minuti", type=float, default=10.0)
     ap.add_argument("--buone", choices=("colore", "grandezza"), default="colore")
+    ap.add_argument("--corpo", choices=tuple(BODIES), default=tuple(BODIES)[0])
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
-    cfg = lambda: Mondo3DConfig(beings=args.esseri, good_by=args.buone)
+    cfg = lambda: Mondo3DConfig(beings=args.esseri, good_by=args.buone, body=args.corpo)
     for agent in tuple(AGENTS) if args.confronto else (args.agente,):
         print(json.dumps(run(agent, args.recinti, args.minuti, args.seed, cfg()), ensure_ascii=False), flush=True)
 
