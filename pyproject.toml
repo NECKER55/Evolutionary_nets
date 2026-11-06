@@ -13,6 +13,16 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8"]
+# Le reti già pronte per la percezione: opzionali, `uv run --group percezione ...`.
+percezione = ["pillow>=10", "torch>=2.6", "transformers>=4.50"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
