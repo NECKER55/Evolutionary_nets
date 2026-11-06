@@ -67,6 +67,7 @@ Il gradiente non insegna il mondo. **Insegna a imparare il mondo.**
                  ▼   ▼                      │
       ┌──────────────────────────────────┐  │
       │ 6. RAGIONAMENTO                  │  │
+      │ valutazione: che cosa conviene   │  │
       │ alto: scopo, piano (lento)       │  │
       │ basso: prossima azione (veloce)  │◄─┼── azione eseguita
       │ memoria del pensiero (ricorrente)│  │
@@ -115,6 +116,7 @@ si blocca. La sezione dopo impara con quelle prima già bloccate.
 |---|---|---|
 | 7 | si tara da sola in corpi sconosciuti, raggiunge l'oggetto indicato e lo morde (**superato**) | comandante finto |
 | 3 e 4 | dopo pochi eventi prevede il prossimo evento e il suo esito | in coppia: che cosa ricordare dipende da che cosa serve prevedere |
+| M | dopo aver girato indica dov'erano gli oggetti non più inquadrati | percezione e movimento sentito |
 | 5 | richiama l'esito giusto dopo molti eventi diversi, anche partendo dall'esito; regge ai cambi di regime | sequenze generate da noi |
 | 2 | con una domanda data da noi sceglie l'oggetto giusto; un pericolo vicino passa comunque | domande date da noi |
 | 6 basso | raggiunge un sotto-scopo dato | 2, 3, 4, 5, 7 bloccate |
@@ -223,6 +225,42 @@ Nel mondo vero, oggi in un solo processo: il perfetto (senza immagini) fa 70 s d
 secondo con 4 esseri e 5,5 con 100 esseri; il base, che legge la profondità a 264×264, 18 con 1
 essere.
 
+## Il mondo a eventi
+
+Le sezioni che lavorano a eventi (3, 4, 5, 6) hanno bisogno di molte vite, non di fisica: nel 3D
+costerebbero circa 13 giorni di calcolo. Il mondo a eventi non simula niente: ogni vita è una
+lista di righe "oggetto, azione, esito", generata da una regola nascosta. Gira in JAX.
+
+**Regole tra le vite.** Ogni vita ha la sua regola, e il cervello deve scoprirla vivendo. Se
+fossero tutte uguali la memorizzerebbe. I livelli, uno alla volta:
+
+1. l'esito dipende da una caratteristica, con scambi;
+2. in ogni vita conta una caratteristica diversa, o una combinazione;
+3. l'esito arriva qualche evento dopo;
+4. sequenze: "premo X, si apre Q".
+
+Una famiglia di regole resta fuori dall'addestramento, per l'esame. Le sezioni si provano poi,
+bloccate, su eventi veri registrati nel 3D: senza, funzionerebbero solo sugli eventi inventati.
+
+**Imparare una lista o imparare a imparare.** Con poche famiglie (colore, grandezza, "e") la rete
+impara quelle: su "vicinanza", mai decisiva in addestramento, fa il 50%. Con la famiglia larga, 92
+regole a soglia sulle caratteristiche, riconosce anche le regole tenute fuori. Non è una regola
+universale: generalizza dentro la famiglia di mondi che ha visto. Tre difetti trovati, tutti da
+ricontrollare per ogni livello: l'esito dentro gli ingressi (il bisogno), caratteristiche su scale
+diverse (si impara solo il colore), e scambi troppo regolari (si impara quando avvengono).
+
+| morsi giusti dopo 5, vite mai viste | limite | ricordo dell'ultimo esito | GRU, 3 famiglie | plastica, 3 famiglie | GRU, famiglia larga |
+|---|---|---|---|---|---|
+| regole viste | 0,96 | 0,80 | 0,97 | 0,96 | 0,93 |
+| "o", mai vista | 0,96 | 0,78 | 0,82 | 0,76 | **0,86** |
+| "vicinanza", mai vista | 0,97 | 0,80 | 0,50 | 0,50 | **0,90** |
+| morsi veri dal 3D, con 2 scambi | | | 0,98 | 0,98 | 0,98 |
+
+Il limite tiene una probabilità per ogni regola ma non sa che due scambi distano almeno 10 eventi:
+per questo la rete può superarlo di poco. La plastica ha visto 768.000 vite, la GRU 2 milioni, la
+famiglia larga 5 milioni. Senza la memoria si torna intorno al 50%. Gli eventi veri sono solo
+regole di colore: non provano la generalizzazione nel 3D.
+
 ## Le sezioni
 
 ### 1. Percezione
@@ -282,17 +320,24 @@ sono diversi. **Due oggetti uguali, anche uno dietro l'altro, restano uno solo.*
 - **Esce:** il contenuto recente, verso 4, 5 e 6 (linea residuale).
 - **Un evento:** la terna **oggetto, azione, esito**, scritta quando cambia qualcosa,
   non a ogni passo. Altrimenti si riempirebbe di passi quasi uguali.
-- **Anello esterno:** impara che cosa scrivere e quando. **Anello interno:** cambia solo
-  l'attività.
-- **Fatta di neuroni:** un gruppo ricorrente con cancelli, come D, o una fila di
-  posti. Quale dei due è una decisione aperta.
+- **Anello esterno:** impara che cosa scrivere e quando, e con quale regola cambiare.
+  **Anello interno:** cambiano le attività e, nella seconda variante, le sinapsi.
+- **Due varianti, sullo stesso esame:** una GRU, con la memoria nell'attività, e una rete con
+  sinapsi plastiche veloci che decadono, con la memoria anche nei pesi. Non a impulsi: per tenere
+  l'informazione nei pesi serve la plasticità, non gli impulsi, che costano di più.
+- **Fatta, per ora la GRU:** `memory.py`. Le sinapsi plastiche non hanno reso di più (tabella sotto),
+  costano circa tre volte a passo, e dopo eventi inutili non ricordano meglio.
 
 ### 4. Modello del mondo
 
 La sezione causale e quella della previsione sono **la stessa**: "A causa B" si impara
 come "se succede A, faccio X, prevedo B".
 
-- **Fa:** data la memoria e un'azione, prevede il prossimo evento e il suo esito.
+- **Fa:** data la memoria e un'azione, prevede il prossimo evento e il suo esito. Con 3 è un
+  **world model** come Dreamer (3 lo stato, 4 la previsione, 6 chi agisce nell'immaginazione),
+  ma a eventi, sugli oggetti e non sulle immagini, e deve cambiare idea in pochi eventi.
+- **Incertezza:** dà anche quanto è sicura. "Non lo so" è diverso da "non succede niente", e
+  guida l'esplorazione.
 - **Entra:** memoria a breve, azione (eseguita o immaginata), bisogni, esito vero.
 - **Esce:** previsione, ed **errore di previsione**.
 - **Due usi:** con l'azione eseguita prevede e confronta. Con un'azione immaginata
@@ -304,8 +349,8 @@ come "se succede A, faccio X, prevedo B".
   essere a qualche evento di distanza.
 - **Causa e coincidenza:** osservare da solo non basta. Serve provare, quindi il
   modello collabora con l'esplorazione: dove il suo errore è alto, conviene agire.
-- **Anello esterno:** impara come si impara. **Anello interno:** sinapsi plastiche che
-  fissano ciò che vale in questo mondo.
+- **Anello esterno:** impara come si impara. **Anello interno:** ciò che vale in questo mondo
+  si fissa nella memoria di 3 e, se la variante plastica rende, nelle sinapsi.
 
 ### 5. Memoria a lungo termine
 
@@ -319,14 +364,32 @@ come "se succede A, faccio X, prevedo B".
 
 ### 6. Ragionamento
 
-- **Livello alto:** sceglie lo scopo, con un ritmo lento. Si aggiorna quando un evento
-  conta, non a ogni passo.
-- **Livello basso:** sceglie la prossima azione, con un ritmo veloce, per
-  avvicinarsi allo scopo.
-- **Memoria del pensiero:** uno stato ricorrente che rientra in sé stesso: a che punto
-  sono, che cosa ho appena pensato.
-- **Entra:** ricordi da 5, memoria a breve, simulazioni da 4, bisogni, azione eseguita.
-- **Esce:** domanda verso 2, azione voluta verso 7, azioni immaginate verso 4.
+Il pensiero resta nella rete da un passo all'altro: non è un'informazione che passa ed
+esce, come in un transformer. Tre parti:
+
+| parte | compito | ritmo |
+|---|---|---|
+| **Valutazione** | "che cosa conviene adesso?": confronta bisogni, ricordi e situazione, e sceglie lo scopo | a eventi |
+| **Livello alto** | stato ricorrente: tiene lo scopo e il passo del piano | lento |
+| **Livello basso** | sceglie la prossima azione per arrivarci: l'intenzione verso 7 | veloce |
+
+- **Nessun cancello separato.** È la rete a decidere quanto aggiornare il proprio pensiero. Deve
+  imparare due cose: ignorare ciò che non conta quando gli ingressi cambiano ma lo scopo no, e
+  cambiare passo quando lo scopo è raggiunto ma gli ingressi sono uguali. Non è garantito:
+  i mondi di addestramento devono contenere distrazioni e compiti lunghi, e lo si misura.
+- **I bisogni guidano la ricerca.** Con la fame la valutazione chiede a 5 che cosa dà energia e
+  a 2 di cercarlo; da sazio smette di chiedere. Il valore di un ricordo dipende quindi dal
+  bisogno di adesso: è ciò che permette la rivalutazione senza riprovare. Da 5 arriva anche che
+  cosa fa male. Smette di cercare, non di vedere: un pericolo vicino passa comunque (2).
+- **Esito: atteso contro accaduto.** Nessuno etichetta "fatto" o "fallito". Fatto: ciò che si
+  voleva coincide con ciò che si sente (il bisogno è calato) o si vede (l'oggetto è preso).
+  Fallito: ci si aspettava piacere e arriva dolore, lo scopo non si vede più, o lo si insegue
+  senza avvicinarsi. Vengono da bisogni, percezione ed errore di 4.
+- **Più avanti:** interrompere un piano per un pericolo e riprenderlo dopo. Serve con i compiti
+  a più passi.
+- **Entra:** ricordi da 5, memoria a breve, simulazioni da 4, errore di 4, bisogni, azione
+  eseguita.
+- **Esce:** domande verso 2 e 5, azione voluta verso 7, azioni immaginate verso 4.
 - **Non prevede.** Propone e valuta: la previsione è tutta in 4 (vedi "Come 6 usa 4").
 - **Esplorare:** quando l'incertezza è alta conviene scoprire. Il livello alto lo
   riceve dall'errore di 4 e dai bisogni.
@@ -360,6 +423,17 @@ come "se succede A, faccio X, prevedo B".
 - **Scorciatoie:** riflessi e guida verso l'oggetto passeranno da qui, senza attendere il
   ragionamento. Non ci sono ancora.
 
+### M. Mappa
+
+- **Fa:** tiene un'idea dello spazio: dove sono io, dove sono le cose, anche fuori dalla vista.
+- **Non è 4:** 4 risponde a "che cosa succede se faccio questo?", a eventi; la mappa a "dove
+  sono le cose?", a ogni passo.
+- **Entra:** il movimento sentito (dove sono io) e angolo e distanza da 1 (dove sono gli oggetti).
+- **Esce:** gli oggetti con la loro posizione, verso 4 e 6: "vai lì" vale anche per ciò che non
+  è inquadrato.
+- **Prima versione:** geometria, senza rete. L'errore si accumula col movimento: su un robot vero
+  andrà corretta con ciò che si vede.
+
 ### B. Bisogni
 
 - **Fa:** dice che cosa manca al corpo.
@@ -371,7 +445,10 @@ come "se succede A, faccio X, prevedo B".
 ## L'azione: dove va
 
 Esiste una copia dell'azione, come nel cervello vero (la copia efferente). La copia
-giusta è l'azione **eseguita**, in uscita da 7: un riflesso può aver cambiato quella voluta.
+giusta è l'azione **eseguita**, perché un riflesso può aver cambiato quella voluta. Non sono mai
+i comandi ai motori, che cambiano col corpo: sono ciò che il corpo sente di aver fatto
+(velocità, rotazione, bocca), nello stesso spazio dell'intenzione, e a livello di evento
+"mi avvicino", "mordo", "ignoro". Cambiando corpo si ritara solo 7.
 
 | sezione | riceve l'azione? | perché |
 |---|---|---|
@@ -442,32 +519,33 @@ resta il riferimento: nell'arena 3D lo si collega con il detector finto.
 
 ## Fasi di lavoro
 
-Si costruisce dalla fine, come prima, perché il rischio maggiore è in 4 e 6, non nella vista.
-Ma il rischio di 6 si misura **subito**, prima di costruire le sezioni che dovrebbe usare.
+Si costruiscono prima le sezioni che 6 dovrà usare, e 6 per ultima: così i suoi sottomoduli
+si progettano sulle uscite vere, non su versioni perfette che non daranno mai gli stessi errori.
+Le sezioni 3, 4 e 5 hanno esami propri e restano utili con qualunque ragionamento.
 
 | fase | lavoro | misura per passare alla fase dopo |
 |---|---|---|
 | 0 | mondo 3D: **fatti** MuJoCo, arena delle pile, agenti di controllo, interfaccia grafica di base; **mancano** arena delle casse, mondi casuali, immagini su più processi | stessa vita con lo stesso seme identica (**verificato** su questa macchina); velocità nota, con almeno 100 esseri (**5,5 volte il tempo reale, senza immagini**) |
 | 1 | 7, con l'infanzia al posto dell'imitazione (**fatta**) | tutti i corpi di prova imparati da zero tra i muri, e ritaratura da sola |
-| 2 | **prova di 6:** una 6 semplice con 3, 4 e 5 **perfette**, lette dal simulatore; anello esterno | rivalutazione superata in mondi mai visti. Il gradiente regge, con un costo accettabile. **Se fallisce ci si ferma e si ripensa 6** |
-| 3 | 3 e 4 | superano l'esame; al posto di quelle perfette la rivalutazione regge |
-| 4 | 5 | supera l'esame; ritorno rapido a un regime già vissuto |
-| 5 | 2 | supera l'esame; 6 la usa per trovare ciò che cerca |
-| 6 | 6 basso, con la catena dell'immaginazione | sequenze di sotto-scopi che reggono ai distrattori |
-| 7 | 6 alto | rivalutazione alla prima prova; togliendo la catena, peggiora |
-| 8 | ritocco finale di tutto insieme | tutti gli esami ripetuti e superati |
-| 9 | 1: detector vero sulla telecamera (**anticipata e fatta**, con due reti da confrontare), poi ritocco | i risultati restano vicini a quelli col detector finto |
-| 10 | evoluzione sopra il gradiente | tara le costanti e si misura che cosa cambia |
+| 2 | 1: percezione dalla telecamera (**fatta**, con due reti da confrontare) | trova gli oggetti con l'interfaccia del detector finto |
+| 3 | mondo a eventi, 3 e 4 (**livelli 1 e 2 fatti**, mancano ritardi e sequenze, e il pannello) | superano l'esame |
+| 4 | M: mappa | dopo aver girato indica dov'erano gli oggetti; il vedente trova più pile al minuto |
+| 5 | 5 | supera l'esame; ritorno rapido a un regime già vissuto |
+| 6 | **ragionatore finto**, scritto a mano: propone, chiede a 4, cerca in 5, sceglie | rivalutazione superata in mondi mai visti. **Se fallisce si correggono 3, 4 e 5 prima di costruire 6** |
+| 7 | 2 | supera l'esame; il ragionatore la usa per trovare ciò che cerca |
+| 8 | 6 basso, con la catena dell'immaginazione | sequenze di sotto-scopi che reggono ai distrattori |
+| 9 | 6 alto | rivalutazione alla prima prova; togliendo la catena, peggiora |
+| 10 | ritocco finale di tutto insieme, percezione compresa | tutti gli esami ripetuti e superati |
+| 11 | evoluzione sopra il gradiente | tara le costanti e si misura che cosa cambia |
 
-La fase 2 è la più importante: se 6 non ragiona nemmeno con sezioni perfette, inutile
-costruire quelle vere. Se la supera, ogni fase dopo sostituisce un pezzo perfetto con uno vero
-e misura quanto si perde.
+La fase 6 dice se le sezioni danno a 6 ciò che le serve, a un costo piccolo. Non dice se una 6
+addestrata imparerà a usarle: quel rischio resta fino alle fasi 8 e 9, ed è accettato.
 
 ## Criticità
 
 - **Come passa il gradiente in una vita.** Una vita di 400 s sono 8000 passi: il gradiente
   su tutta la vita è costoso e instabile. Addestrando le sezioni una alla volta il problema
-  resta quasi solo per 6, che lavora a eventi con il resto bloccato. Si misura in fase 2.
+  resta quasi solo per 6, che lavora a eventi con il resto bloccato. Si misura nelle fasi 8 e 9.
 - **Potenza di calcolo.** Molte vite per ogni aggiornamento, e ogni immagine costa. Su questo
   portatile bastano poche centinaia di esseri. Il detector finto evita gran parte del
   costo, e la versione batch di MuJoCo per GPU, da verificare, richiederebbe altra macchina.
@@ -479,8 +557,8 @@ e misura quanto si perde.
 - **La catena di immaginazione moltiplica il costo.** Ogni tentativo aggiunge passi interni
   attraverso cui passa il gradiente. Gli errori di 4 si sommano a ogni anello: la catena
   sarà utile solo per pochi eventi.
-- **6 arriva per ultima.** Se non impara a usare le altre sezioni lo si scopre tardi. Per
-  questo la fase 2 la prova in anticipo.
+- **6 arriva per ultima.** Se non impara a usare le altre sezioni lo si scopre tardi. Il
+  ragionatore finto della fase 6 riduce il rischio: controlla che le sezioni bastino, non che 6 impari.
 - **Mondi troppo simili.** Il cervello impara i mondi di addestramento, non a imparare. La
   loro varietà è una scelta di progetto importante quanto l'architettura.
 - **Il principio "si fissa la struttura".** Va riletto: si fissano le sezioni e chi parla con
@@ -516,11 +594,11 @@ Nel codice: `evonets/arenas/mondo3d/`, `evonets/brains/mondo3d/` (controlli),
 
 ## Decisioni aperte
 
-1. **Memoria a breve:** gruppo ricorrente con cancelli, o una fila di posti?
-2. **In vita cambiano solo le attività, o anche sinapsi plastiche?** Solo attività è più
-   semplice. Le sinapsi durano di più e servono alla memoria a lungo termine.
-3. **Che cosa cambia tra una vita e l'altra:** quali regole del mondo sono da scoprire?
-4. **Tempo:** passi fissi o eventi?
+1. **Memoria a breve:** si confrontano GRU e sinapsi plastiche. Una fila di posti, solo se falliscono.
+2. **In vita cambiano solo le attività, o anche sinapsi plastiche?** Si decide con quel confronto.
+3. **Che cosa cambia tra una vita e l'altra:** deciso: i quattro livelli del mondo a eventi.
+4. **Tempo:** deciso: a eventi per 3, 4, 5 e 6, a passi per 1, M e 7.
 5. **Evoluzione:** resta sopra il gradiente fin dall'inizio, o entra solo alla fine?
-6. **Valore:** una sezione a parte, o è parte di 4 e 6?
+6. **Valore:** deciso in parte. La scelta sta nella Valutazione di 6, ma che cosa ricevere da 4 e
+   5 è ancora da definire.
 7. **Immaginazione:** quanti tentativi per evento, e quanto lunga la catena?

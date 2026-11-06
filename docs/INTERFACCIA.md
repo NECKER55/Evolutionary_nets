@@ -10,7 +10,10 @@ ripartire, e una riga in basso dice a che generazione è arrivata.
 
 ## Il menu
 
-Si sceglie la corsa e la si lancia con Invio (o il pulsante).
+Si sceglie la corsa e la si lancia con Invio (o il pulsante). Le opzioni stanno in pagine a sinistra
+(Mondo, Rete o Agente, Popolazione, Durata e caso, Salvataggi), diverse per ogni tipo di mondo. Accanto a ogni riga
+si legge che cosa vuol dire il valore scelto (`evonets/viz/options.py`) e che cos'è la riga. In fondo c'è che cosa
+partirà. F1 mostra i tasti; PagSu e PagGiù cambiano pagina.
 
 | Riga | Significato |
 |---|---|

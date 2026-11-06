@@ -121,6 +121,8 @@ evonets/
       vision.py          sezione 1: detector finto e rete nostra (train_vision.py, exam_vision.py)
       ready.py           sezione 1 con SlimSAM e DINOv2, memoria degli oggetti (exam_identity.py)
       seeing.py          comandante finto che ha solo gli occhi
+      events.py          il mondo a eventi: vite di righe con una regola nascosta
+      memory.py          sezioni 3 e 4, world model a eventi (train_memory.py, exam_memory.py)
   viz/                 interfaccia (l'unica parte che usa la grafica)
     app.py launcher.py   finestra; menu
     render.py inspector.py widgets.py   arena e rete dal vivo; reti e genomi; controlli
