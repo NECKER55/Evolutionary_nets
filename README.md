@@ -98,7 +98,7 @@ evonets/
       world.py run.py gpu.py         il mondo; prove e misure; la GPU
       saves.py bench.py              salvataggi; banco di prova fisso
     mondo3d/             le stesse regole delle pile, con corpi e telecamere MuJoCo
-      world.py run.py    il mondo; prove e misure
+      world.py bodies.py run.py   il mondo; i cablaggi dei corpi; prove e misure
   brains/              una cartella per famiglia di cervelli
     freeform/            reti a forma libera, evolvono (arene generational e continuous)
       rate.py spiking.py   i due tipi di rete: continua e a impulsi
@@ -116,13 +116,15 @@ evonets/
       gpu.py             gli stessi agenti con JAX
     mondo3d/             agenti di controllo del mondo 3D, non cervelli
       base.py perfect.py   vede solo la profondità; legge la verità dal simulatore
+    ragionante/          il cervello nuovo, staccato da quello a sezioni: per ora il motore
+      motor.py brain.py  sezione 7, con neuroni nascosti e taratura; il cervello attorno a lei
   viz/                 interfaccia (l'unica parte che usa la grafica)
     app.py launcher.py   finestra; menu
     render.py inspector.py widgets.py   arena e rete dal vivo; reti e genomi; controlli
     generational/        corsa, panoramica, banco di prova
     continuous/          vista del mondo e schede
     pile/                recinto e cervello a sezioni
-    mondo3d/             vista da fuori, immagine e profondità dell'essere
+    mondo3d/             vista da fuori, immagine, profondità e sezione 7 (motor_panel.py)
 main.py              avvio: interfaccia, terminale, benchmark
 tests/               un file di test per ciascun gruppo
 ```

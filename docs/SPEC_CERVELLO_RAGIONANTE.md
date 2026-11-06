@@ -1,7 +1,7 @@
 # Cervello ragionante (progetto)
 
-Stato: progetto. Del codice esistono il mondo 3D con le pile e i due agenti di
-controllo; il cervello no. Un **nuovo tipo di cervello**, accanto a quelli di oggi: il cervello a sezioni (docs/SPEC_CERVELLO_SEZIONI.md) resta il riferimento da
+Stato: progetto. Del codice esistono il mondo 3D con le pile, i due agenti di
+controllo e, del cervello, la sezione 7 (`evonets/brains/ragionante/`); il resto no. Un **nuovo tipo di cervello**, accanto a quelli di oggi: il cervello a sezioni (docs/SPEC_CERVELLO_SEZIONI.md) resta il riferimento da
 battere. Il nome è provvisorio. Sostituisce la proposta di
 docs/SPEC_PIANIFICAZIONE.md, di cui tiene il criterio della rivalutazione e
 l'arena delle casse. I numeri di neuroni sono ordini di grandezza da tarare.
@@ -101,7 +101,8 @@ meta-apprendimento per rinforzo: secondo Wang e colleghi (2018) la corteccia
 prefrontale funziona così.
 
 Rispetto alla regola di docs/SPEC_ARENA_PILE.md ("gradiente solo come diagnosi, mai per
-addestrare gli esseri"), resta vero che nessun essere usa il gradiente mentre vive.
+addestrare gli esseri"), resta vero che nessun essere impara il mondo col gradiente mentre
+vive. L'eccezione è il motore (sezione 7), che così impara soltanto il proprio corpo.
 Cambia che il suo cervello di nascita è prodotto anche dal gradiente.
 
 ## Addestrare una sezione alla volta
@@ -112,7 +113,7 @@ si blocca. La sezione dopo impara con quelle prima già bloccate.
 
 | sezione | esame, sempre in mondi mai visti | compagni |
 |---|---|---|
-| 7 | raggiunge l'oggetto indicato e lo morde | nessuno |
+| 7 | si tara da sola in corpi sconosciuti, raggiunge l'oggetto indicato e lo morde (**superato**) | comandante finto |
 | 3 e 4 | dopo pochi eventi prevede il prossimo evento e il suo esito | in coppia: che cosa ricordare dipende da che cosa serve prevedere |
 | 5 | richiama l'esito giusto dopo molti eventi diversi, anche partendo dall'esito; regge ai cambi di regime | sequenze generate da noi |
 | 2 | con una domanda data da noi sceglie l'oggetto giusto; un pericolo vicino passa comunque | domande date da noi |
@@ -124,8 +125,13 @@ Regole:
 
 - **Imparare, non memorizzare.** L'esame di 3, 4 e 5 è "impara in fretta un mondo mai visto",
   non "conosci questo mondo". Ogni sezione si allena su molti mondi casuali, con i due anelli.
-- **Dati che seguono il cervello.** Un essere che si muove a caso apre poche casse e mangia
-  ancora meno. Si alternano raccolta col cervello attuale e riaddestramento.
+- **Chi agisce mentre 4 impara.** A 4 non servono azioni giuste, servono azioni varie con il
+  loro esito vero. Agiscono gli agenti di controllo, con errori aggiunti apposta: un agente
+  che non morde mai una pila cattiva non insegnerebbe il dolore, uno che vaga a caso non
+  aprirebbe mai una cassa. Quando esiste un cervello, si alterna la raccolta con lui.
+- **Che cosa spinge a prevedere.** Il mondo dà la risposta un istante dopo, senza maestro: si
+  misura l'errore tra previsione e realtà lungo tutta la vita, e il gradiente dell'anello
+  esterno lo riduce. La catena si allena rimettendo in 4 le sue stesse previsioni.
 - **Ritocco finale.** Una sezione bloccata può aver scartato un dettaglio che serviva più
   avanti. Alla fine si addestra tutto insieme, a passo piccolo, e si **ripetono tutti gli
   esami**: una sezione che non li supera più ha perso il suo significato.
@@ -149,7 +155,7 @@ Il morso resta una regola nostra: MuJoCo dice solo che due oggetti si toccano.
 oggetti. Non chiamano mai MuJoCo direttamente, così il motore si può sostituire.
 
 **Primo mondo.** L'arena delle pile in 3D (fatta): 5 m di lato, pile cilindriche che un urto
-sposta. Corpo su due ruote con telecamera a 120°, immagine 264×264 più profondità in cm. Il
+sposta, che nascono lontane dagli esseri e compaiono e spariscono in 0,6 s. Corpo su due ruote con telecamera a 120°, immagine 264×264 più profondità in cm. Il
 telaio si inclina al massimo di 6° perché ribaltandosi resterebbe bloccato. Poi l'arena
 delle casse, con casse e interruttori come forme colorate. Le zampe, se serviranno, arrivano dopo.
 
@@ -161,7 +167,9 @@ delle casse, con casse e interruttori come forme colorate. Le zampe, se serviran
 | **base** (pavimento) | solo la profondità: vaga e morde ciò che ha davanti | 0,06 | 0,06 | 0,50 |
 
 Misure con 1 essere per recinto: perfetto su 4 recinti per 20 minuti, base su 4 recinti per 12
-minuti (solo 6 pile: la scelta è indicativa). Il perfetto ha la scelta perfetta, ma la strada
+minuti (solo 6 pile: la scelta è indicativa). Il cervello ragionante con la sola sezione 7, 3 recinti per 5
+minuti compreso il minuto di taratura, fa in media 9,25 pile buone al minuto sui 6 corpi di
+prova, con 3 semi (minimo 8,1, massimo 10,6). Il perfetto ha la scelta perfetta, ma la strada
 è avida: non è il massimo teorico di pile al minuto. Il guidato dell'arena 2D, con le
 stesse regole, fa 9,0 pile al minuto, di cui il 96% buone.
 
@@ -177,6 +185,9 @@ non basta, perché mostra il mondo ma non la rete. Sullo schermo:
 - il mondo, da una telecamera esterna;
 - ciò che vede l'essere, con oggetti trovati e attenzione;
 - attività delle sezioni, memorie e catena dell'immaginazione.
+
+Col cervello ragionante la schermata mostra anche la sezione 7: neuroni, sinapsi, cablaggio
+nascosto e sensi, con i pulsanti "Tara i sensi" e "Cambia corpo".
 
 Sullo schermo la profondità ha una scala logaritmica a colori, perché più dell'80% dei pixel
 che non sono cielo è pavimento a meno di 50 cm: la telecamera è bassa (11 cm) e larga. La
@@ -287,12 +298,32 @@ come "se succede A, faccio X, prevedo B".
 - **Esplorare:** quando l'incertezza è alta conviene scoprire. Il livello alto lo
   riceve dall'errore di 4 e dai bisogni.
 
-### 7. Motore
+### 7. Motore (fatta)
 
-- **Fa:** traduce l'azione voluta in comandi.
-- **Scorciatoie:** riflessi e guida verso l'oggetto passano direttamente da qui,
-  senza attendere il ragionamento.
-- **Esce:** comandi al corpo e **azione eseguita**.
+- **Fa:** traduce un'intenzione in comandi per un corpo che non conosce.
+- **Entra:** tre intenzioni, sempre uguali qualunque sia il corpo: velocità, rotazione, bocca.
+  Più i sensi del corpo, gli stessi tre: che cosa ha fatto davvero.
+- **Esce:** K uscite, tante quante ne ha il corpo. Tra ingressi e uscite ci sono 8 neuroni
+  nascosti (tanh).
+- **Infanzia:** alla nascita la rete non sa niente e si tara per 60 s. Impara col gradiente,
+  mentre vive: è l'unica eccezione alla regola "nessun gradiente mentre si vive", perché
+  questa sezione impara solo il corpo, non il mondo. Ingresso il movimento sentito, bersaglio
+  il comando dato. Nella prima metà i comandi sono a caso, nella seconda prova direzioni a
+  caso, perché col solo caso certi corpi non raggiungono i loro estremi. Negli urti non
+  impara. Il resto del cervello non interviene.
+- **Separazione:** il cervello sopra produce solo intenzioni e non sa niente del corpo.
+  Cambiare corpo o tarare tocca soltanto questa sezione.
+- **Ritaratura:** si può fare in ogni momento, col pulsante "Tara i sensi". Parte anche da
+  sola per 30 s, senza che nessuno lo avverta, se in 5 s la velocità sentita è meno del 30%
+  di quella chiesta, se la rotazione va al contrario, o se per 1 s vuole mordere e la bocca
+  non si apre. Gli
+  esempi del corpo di prima si buttano, la rete resta.
+- **Ancora scritto a mano:** il "quando mordere" e "vai lì" stanno nel comandante finto
+  (per ora la logica del perfetto), che tiene il posto delle sezioni mancanti.
+- **Limite:** la rete traduce un'intenzione nel comando di adesso, senza memoria. Zampe o
+  braccia, che richiedono sequenze di movimenti, avranno bisogno di più.
+- **Scorciatoie:** riflessi e guida verso l'oggetto passeranno da qui, senza attendere il
+  ragionamento. Non ci sono ancora.
 
 ### B. Bisogni
 
@@ -382,7 +413,7 @@ Ma il rischio di 6 si misura **subito**, prima di costruire le sezioni che dovre
 | fase | lavoro | misura per passare alla fase dopo |
 |---|---|---|
 | 0 | mondo 3D: **fatti** MuJoCo, arena delle pile, agenti di controllo, interfaccia grafica di base; **mancano** arena delle casse, mondi casuali, immagini su più processi | stessa vita con lo stesso seme identica (**verificato** su questa macchina); velocità nota, con almeno 100 esseri (**5,5 volte il tempo reale, senza immagini**) |
-| 1 | 7 | supera l'esame in scene nuove |
+| 1 | 7, con l'infanzia al posto dell'imitazione (**fatta**) | tutti i corpi di prova imparati da zero tra i muri, e ritaratura da sola |
 | 2 | **prova di 6:** una 6 semplice con 3, 4 e 5 **perfette**, lette dal simulatore; anello esterno | rivalutazione superata in mondi mai visti. Il gradiente regge, con un costo accettabile. **Se fallisce ci si ferma e si ripensa 6** |
 | 3 | 3 e 4 | superano l'esame; al posto di quelle perfette la rivalutazione regge |
 | 4 | 5 | supera l'esame; ritorno rapido a un regime già vissuto |
@@ -427,7 +458,7 @@ e misura quanto si perde.
 | di oggi | diventa |
 |---|---|
 | idea di `objects_of` | detector finto, letto dal simulatore 3D |
-| motore F e riflessi | idee per la sezione 7, da rifare per il corpo 3D |
+| logica del perfetto | comandante finto sopra la sezione 7, finché mancano le altre |
 | idea di O (fame sul valore) | bisogni e valore in 4 e 6 |
 | idea di K (cassetti) | contesti di 5 |
 | JAX | anello esterno |
@@ -435,7 +466,8 @@ e misura quanto si perde.
 | banco di prova e lesioni | stessa metodologia |
 
 Nel codice: `evonets/arenas/mondo3d/`, `evonets/brains/mondo3d/` (controlli),
-`evonets/viz/mondo3d/`; il cervello andrà in `evonets/brains/ragionante/`. Il cervello a sezioni e l'arena delle pile non cambiano.
+`evonets/brains/ragionante/` (il cervello, che non importa niente da quello a sezioni),
+`evonets/viz/mondo3d/`. Il cervello a sezioni e l'arena delle pile non cambiano.
 
 ## Riferimenti da tenere presenti
 
