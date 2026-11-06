@@ -191,11 +191,9 @@ delle casse, con casse e interruttori come forme colorate. Le zampe, se serviran
 "labirinto" 25 stanze in 13 m, unite da porte, con la pianta decisa dal seme. Ogni stanza ha muri di un
 colore, e due stanze possono averlo uguale. Le pile stanno in una delle quattro stanze d'angolo.
 Niente arancio dentro: da lontano, oltre una porta, sembrava una pila.
-Il perfetto, che conosce la strada, fa 10,9 pile al minuto con le stanze. Il vedente, che non ha
-memoria dello spazio, ne fa da 0 a 0,25 e muore di fame: è la misura che M deve migliorare. La rete
-visiva è riaddestrata anche sulle stanze: 0,08 pile fantasma per immagine, 0,03 nel labirinto.
-Nell'arena aperta fa 8,1 pile al minuto contro 8,9 dei pesi di prima, su 3 semi da 6 a 11: una
-differenza dentro il rumore, ma non è provato che non costi nulla.
+Il perfetto, che conosce la strada, fa 10,9 pile al minuto con le stanze. Il vedente con la nostra
+rete (poi tolta), che non ha memoria dello spazio, ne faceva da 0 a 0,25 e moriva di fame: è la misura
+che M deve migliorare, da rifare con il vedente con le reti pronte.
 
 **Agenti di controllo** (`evonets/brains/mondo3d/`), non cervelli: un cervello si misura tra i due.
 
@@ -207,8 +205,8 @@ differenza dentro il rumore, ma non è provato che non costi nulla.
 Misure con 1 essere per recinto: perfetto su 4 recinti per 20 minuti, base su 4 recinti per 12
 minuti (solo 6 pile: la scelta è indicativa). Il cervello ragionante con la sola sezione C, 3 recinti per 5
 minuti compreso il minuto di taratura, fa in media 9,25 pile buone al minuto sui 6 corpi di
-prova, con 3 semi (minimo 8,1, massimo 10,6). Il vedente, con la percezione vera dalla
-telecamera, fa circa 8 pile al minuto su 3 recinti per 4 minuti, senza morti. Il perfetto ha la scelta perfetta, ma la strada
+prova, con 3 semi (minimo 8,1, massimo 10,6). Il vedente con le reti pronte (FastSAM, 1280×720)
+fa 8,0 e 9,0 pile al minuto su 2 semi, 1 essere per 4 minuti, senza morsi sbagliati. Il perfetto ha la scelta perfetta, ma la strada
 è avida: non è il massimo teorico di pile al minuto. Il guidato dell'arena 2D, con le
 stesse regole, fa 9,0 pile al minuto, di cui il 96% buone.
 
@@ -303,22 +301,22 @@ regole di colore: non provano la generalizzazione nel 3D.
 - **Fa:** separa gli oggetti e li descrive.
 - **Entra:** immagine della telecamera. **Esce:** un embedding per oggetto, fino a un massimo fisso.
 - **Anello esterno:** impara a vedere. **Anello interno:** non cambia, o molto poco.
-- **Interfaccia:** `Percept` (`vision.py`), uguale per tutti: che cos'è, angolo, distanza,
-  larghezza, embedding. Nessun detector sa quali oggetti siano buoni.
-- **Detector finto:** legge il simulatore. Costa niente, ma vede attraverso i muri: serve
-  ad allenare le altre sezioni, non a misurare.
-- **Rete nostra** (`Detector`): piccola rete convoluzionale, 18 KB, addestrata sulle etichette
-  del simulatore. Dice che cosa c'è in ogni pixel; le macchie sono gli oggetti, la profondità
-  dice dove sono. Conosce solo i tipi su cui è stata addestrata.
-- **Reti pronte, oggi** (`ReadyDetector`, opzionali, gruppo `percezione`): una regola sulla
-  profondità indica che cosa sporge dal pavimento, **SlimSAM** ne fa la maschera, **DINOv2 small**
-  più il colore fanno il vettore, `ObjectMemory` lo conserva anche su disco e dice se l'oggetto è già noto. Il
+- **Interfaccia:** `Percept` (`vision.py`), uguale per tutti: dove sta ogni cosa e com'è fatta.
+  Nessun detector sa quali oggetti siano buoni.
+- **Detector finto** (`FakeDetector`): legge il simulatore. Costa niente, ma vede attraverso i
+  muri e non ha il vettore: serve a provare le altre sezioni, non a misurare.
+- **Rete nostra, tolta:** una piccola rete convoluzionale (18 KB) addestrata sulle etichette del
+  simulatore, che diceva che cosa c'è in ogni pixel. Conosceva solo i tipi su cui era addestrata e
+  non dava un vettore: non serve al flusso scelto. I suoi numeri restano nella tabella qui sotto.
+- **Reti pronte, prima** (`ReadyDetector` fino al flusso qui sotto): una regola sulla
+  profondità indicava che cosa sporge dal pavimento, **SlimSAM** ne faceva la maschera, **DINOv2 small**
+  più il colore facevano il vettore, `ObjectMemory` lo conserva anche su disco e dice se l'oggetto è già noto. Il
   `Tracker` lo segue tra un'immagine e l'altra. Niente etichette: per i nomi bastano 5 esempi
   per tipo. Un oggetto mai visto si riconosce la volta dopo senza riaddestrare nulla.
 - **Da solo DINOv2 vede quasi solo la forma:** un cubo blu e uno arancione avevano somiglianza
   0,91. Per questo il colore si aggiunge al vettore.
 
-| esame in mondi mai visti | rete nostra | reti pronte |
+| esame in mondi mai visti | rete nostra (tolta) | reti pronte, con SlimSAM (prima) |
 |---|---|---|
 | pile trovate, guidando | 88% | 96% |
 | rilevamenti giusti, guidando | 97% | 97% |
@@ -337,12 +335,12 @@ con soglia 0,8. Un oggetto che cambia colore sotto gli occhi resta lo stesso gra
 tracker; fuori dalla vista diventa un oggetto nuovo. Due oggetti che si toccano si separano se
 sono diversi. **Due oggetti uguali, anche uno dietro l'altro, restano uno solo.**
 
-**Il limite di oggi:** il vettore resta dentro P. Serve solo a dare un nome tra tre (pila rossa,
+**Il limite di allora:** il vettore restava dentro P. Serve solo a dare un nome tra tre (pila rossa,
 pila gialla, essere: il più simile di 15 esempi, senza soglia, quindi anche ciò che non somiglia a
-niente riceve un nome) e l'identità. Fuori da P escono solo nome, angolo e distanza: per il resto
-del cervello reti pronte e detector finto sono quasi uguali.
+niente riceveva un nome) e l'identità. Fuori da P uscivano solo nome, angolo e distanza: per il resto
+del cervello reti pronte e detector finto erano quasi uguali.
 
-#### Il flusso scelto (da costruire)
+#### Il flusso scelto (costruito, `ready.py`)
 
 Niente nomi: P dice com'è fatto ogni oggetto, e che due oggetti simili stanno insieme lo
 impareranno le sezioni dopo, dalle conseguenze.
@@ -351,9 +349,9 @@ impareranno le sezioni dopo, dalle conseguenze.
 2. **FastSAM-s** (YOLOv8 da segmentazione, circa 11 milioni di pesi, licenza AGPL) trova in un
    colpo solo tutte le cose dell'immagine, senza nomi: una maschera per cosa. Nessuna regola
    sull'altezza, quindi anche oggetti alti, bassi o vicini al muro.
-3. **Filtro** delle maschere che sono sfondo: pezzi di muro, pavimento e cielo, circa 12 per
-   immagine. Da decidere e misurare: un filtro generale su area e profondità, oppure lasciarle
-   passare e far imparare all'attenzione a ignorarle.
+3. **Lo sfondo passa:** pezzi di muro, pavimento e cielo, circa 12 per immagine (16 cose in tutto,
+   fino a 27). Si tengono le 32 più vicine (`MAX_OBJECTS`). Da decidere più avanti: un filtro
+   generale su area e profondità, oppure far imparare all'attenzione a ignorarle.
 4. **Profondità sulla maschera:** la mediana dei suoi pixel è la distanza z. Da z e dalla posizione
    nell'immagine vengono angolo, distanza dal centro dell'essere e larghezza vera in cm.
 5. **Ritaglio a scala fissa:** un quadrato di 40 cm veri attorno all'oggetto (a z cm sono
@@ -362,9 +360,39 @@ impareranno le sezioni dopo, dalle conseguenze.
 6. **DINOv2 small** porta il quadrato a 224×224, lo divide in 16×16 pezzi da 14 pixel e restituisce
    il riassunto: 384 numeri. Più 3 numeri di colore, pesati 1,5: 387.
 7. **Riduzione** a 64 numeri con la PCA della banca: un calcolo fisso, non una rete.
-8. **Esce, per ogni oggetto** (al massimo 12, dal più vicino): vettore 64, larghezza in cm, angolo
-   (seno e coseno), vicinanza, "c'è". Va all'attenzione A, che sceglie; L e M ricevono lo stesso
-   vettore, non una traduzione.
+8. **Esce, per ogni cosa** (al massimo 32, dalla più vicina; `Percept.features`, 69 numeri): vettore
+   64, larghezza in m, angolo (seno e coseno), vicinanza, "c'è". Va all'attenzione A, che sceglie; L e
+   M ricevono lo stesso vettore, non una traduzione.
+
+**Il nome**, solo per il comandante finto che tiene il posto di A e D (`Bank.name`): il tipo della
+riga più simile della banca, se è una cosa del mondo (cilindro rosso o giallo, essere) e somiglia
+almeno 0,5. Misurato su 2.877 cose trovate da FastSAM nelle 180 scene: le cose vere somigliano
+alla banca 0,96–1,00, lo sfondo si divide tra cielo e pavimento (circa 0,2) e muri (0,88–0,99, simili
+a scatole). Con la soglia 0,5:
+
+| cose | con il nome giusto |
+|---|---|
+| pile | 94% chiamate pila |
+| pile alte 30 cm | 95% chiamate pila |
+| forme e colori nuovi | 1% con un nome (giusto: non sono cose del mondo) |
+| esseri | **39%** chiamati essere: 23% sembrano un cilindro verde, 12% una pila |
+| sfondo | 5% con un nome |
+
+Alzare la soglia non serve: lo sfondo con un nome somiglia quanto le cose vere. Il corpo verde
+degli esseri è vicino ai cilindri verdi della banca. Pezzi di pavimento vicini, larghi 45 cm,
+possono essere chiamati pila: il comandante finto può puntarli. Sono limiti del nome, che P non passa.
+
+**Il tracking** dà un numero a ogni cosa, che oggi non esce da P (serve allo schermo):
+- `Tracker`, breve termine: da uno sguardo al successivo (0,5 s), un riquadro che copre almeno il 30%
+  di uno di prima è la stessa cosa. Due pile identiche restano due, se non si scambiano di posto.
+- `ObjectMemory`, lungo termine: altrimenti si confrontano i 64 numeri con le viste ricordate; da 0,8
+  in su è una cosa già vista. Sui 387 numeri grezzi non funziona: con la scala fissa il grigio attorno
+  rende simili tutti i ritagli. Due cose della stessa immagine non possono mai avere lo stesso numero.
+- Nel cervello, "è la stessa cosa di un attimo fa" sta vicino alla vista, mentre "l'ho già vista giorni
+  fa" è memoria a lungo termine: `ObjectMemory` andrà in R.
+
+**Lo schermo** (tasto O, `eye_page.py`): l'ultimo sguardo con le maschere colorate per numero, ciò che
+esce da P per ognuna, gli oggetti veri non visti in rosso e il ritaglio che legge DINOv2.
 
 **Segmentatori a confronto** (180 scene del 3D, 771 oggetti veri: pile, pile alte 30 cm, forme e
 colori mai visti, esseri; trovato = una maschera lo copre almeno a metà; CPU, 12 core):
@@ -749,8 +777,9 @@ La PCA tiene il 99,2% della varianza. Il vicino più simile ha lo stesso colore 
 stessa forma nel 99,4%, ma la stessa grandezza solo nel 68%. Due cause: il ritaglio si ridimensiona,
 e le sfere piccole e grandi erano identiche (errore, corretto in `bank.py`).
 
-**Da rifare** con il flusso scelto di P: ritaglio a scala fissa, telecamera 1280×720, sfere corrette,
-e la larghezza in cm salvata in ogni riga.
+**Rifatta** con il flusso scelto di P: telecamera 1280×720, ritaglio a scala fissa, sfere corrette e
+larghezza misurata in ogni riga. Varianza tenuta 99,8%; il vicino più simile ha lo stesso tipo esatto
+nel 96,2% dei casi (prima 67,8%), lo stesso colore nel 100%, la stessa grandezza nel 96,2% (prima 68%).
 
 1. Si registrano nel 3D gli oggetti, da molti punti di vista, distanze e luci: pile rosse e gialle,
    piccole e grandi, esseri, più forme e colori che le pile non hanno, come il blu.

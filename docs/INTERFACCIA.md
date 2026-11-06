@@ -389,7 +389,7 @@ nessuno viene eliminato, si osserva soltanto.
 
 ## Il cervello del mondo 3D
 
-Con gli agenti "ragionante" e "vedente", il tasto **N** apre lo schema delle sezioni a tutto schermo,
+Con gli agenti "ragionante" e "vedente" (reti pronte o finto), il tasto **N** apre lo schema delle sezioni a tutto schermo,
 mentre la prova continua a girare. N torna al mondo. Il colore del bordo dice che cos'è ogni blocco:
 
 | colore | significato |
@@ -403,3 +403,11 @@ P mostra l'immagine con gli oggetti trovati, A quale oggetto viene scelto, D l'i
 neuroni e tutte le sinapsi. L mostra i suoi 64 neuroni, W i suoi due strati con le sinapsi più forti
 e che cosa si aspetta dalle pile in vista. Sotto: che cosa sta facendo l'essere e gli ultimi morsi, con
 la previsione fatta prima di mordere. Passando il mouse su un blocco o su un neurone si legge che cos'è.
+
+Con il "vedente, reti pronte" il tasto **O** apre l'occhio a tutto schermo: l'ultimo sguardo, ogni
+0,5 s di mondo. Ogni cosa trovata da FastSAM è colorata, con il riquadro e il suo numero; il colore resta
+lo stesso finché il tracker la segue da uno sguardo all'altro. A destra, che cosa esce da P per ogni
+cosa: nome per il comandante finto ("—" se non somiglia a niente della banca, come i pezzi di muro),
+somiglianza, distanza e larghezza. Sotto, gli oggetti veri del simulatore: quelli che nessuna maschera
+copre almeno a metà sono segnati in rosso tratteggiato, "non visto". Passando il mouse su una cosa si
+vede il ritaglio a scala fissa, 40 cm veri, che legge DINOv2. Conviene la telecamera 1280×720.

@@ -119,8 +119,8 @@ evonets/
       base.py perfect.py   vede solo la profondità; legge la verità dal simulatore
     ragionante/          il cervello nuovo, staccato da quello a sezioni: per ora il motore
       motor.py brain.py  sezione C, con neuroni nascosti e taratura; il cervello attorno a lei
-      vision.py          sezione P: detector finto e rete nostra (train_vision.py, exam_vision.py)
-      ready.py           sezione P con SlimSAM e DINOv2, memoria degli oggetti (exam_identity.py)
+      vision.py          sezione P: l'interfaccia Percept, il detector finto e la geometria da maschera e profondità
+      ready.py           sezione P con FastSAM e DINOv2, ritaglio a scala fissa, memoria degli oggetti (exam_identity.py)
       seeing.py          comandante finto che ha solo gli occhi
       events.py          il mondo a eventi: vite di righe con una regola nascosta
       memory.py          sezioni L e W, world model a eventi (train_memory.py, exam_memory.py)
@@ -134,6 +134,7 @@ evonets/
     pile/                recinto e cervello a sezioni
     mondo3d/             vista da fuori, immagine, profondità e sezione C (motor_panel.py)
       brain_page.py      il cervello a tutto schermo mentre la prova gira (tasto N)
+      eye_page.py        l'ultimo sguardo delle reti pronte, con ciò che vedono e non vedono (tasto O)
 main.py              avvio: interfaccia, terminale, benchmark
 tests/               un file di test per ciascun gruppo
 ```
