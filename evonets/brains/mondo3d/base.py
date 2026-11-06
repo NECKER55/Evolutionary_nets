@@ -3,7 +3,7 @@
 import numpy as np
 
 SAFE = 45.0  # cm: sotto questa profondità c'è qualcosa davanti
-BITE = 7.0  # cm dalla telecamera: una pila è a portata di morso, qualunque cosa sia
+BITE = 10.0  # cm dalla telecamera: una pila è a portata di morso, qualunque cosa sia
 
 
 class Base:

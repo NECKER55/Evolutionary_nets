@@ -31,7 +31,7 @@ os.environ.setdefault("MUJOCO_GL", "egl")  # disegna senza finestre; va deciso p
 import mujoco
 import numpy as np
 
-from ..pile.world import SECTORS, PileConfig, PileWorld, _wrap
+from ..pile.world import RED, SECTORS, PileConfig, PileWorld, _wrap
 from .bodies import BODIES
 
 SCALE = 0.01  # metri per unità del mondo
@@ -56,6 +56,7 @@ class Mondo3DConfig(PileConfig):
     pile_height: float = 12.0
     pile_small: float = 0.6  # raggio di una pila piccola rispetto a una grande
     camera_height: float = 11.0
+    camera_ahead: float = 8.0  # dal centro verso il muso: dentro il corpo, o a contatto finirebbe dentro ciò che tocca
     pile_clear: float = 60.0  # una pila nuova nasce almeno così lontana dagli esseri: altrimenti è morsa appena nata
     pile_fade: float = 0.6  # s per comparire e per sparire: una pila non scatta dal nulla
     gap: float = 300.0  # spazio tra un recinto e l'altro
@@ -82,7 +83,7 @@ def _xml(cfg: Mondo3DConfig, B: int) -> str:
         bodies.append(f'<geom name="floor{b}" type="box" class="ground" pos="{ox + h} {h} -0.05" '
                       f'size="{h} {h} 0.05" material="floor"/>')
         for k in range(cfg.batteries):
-            bodies.append(f'''<body name="pile{b}_{k}" pos="{ox} 0 {m(cfg.pile_height) / 2}">
+            bodies.append(f'''<body name="pile{b}_{k}" pos="0 0 {m(cfg.pile_height) / 2}">
   <joint name="pile{b}_{k}x" type="slide" axis="1 0 0" damping="4"/><joint name="pile{b}_{k}y" type="slide" axis="0 1 0" damping="4"/>
   <geom name="pile{b}_{k}" class="solid" type="cylinder" size="{m(cfg.battery_radius)} {m(cfg.pile_height) / 2}" mass="0.3"/>
 </body>''')
@@ -94,10 +95,10 @@ def _xml(cfg: Mondo3DConfig, B: int) -> str:
   <joint name="being{n}yaw" type="hinge" axis="0 0 1"/>
   <joint name="being{n}pitch" type="hinge" axis="0 1 0" range="-6 6" limited="true"/><joint name="being{n}roll" type="hinge" axis="1 0 0" range="-6 6" limited="true"/>
   <geom class="solid" type="cylinder" pos="0 0 {r * 0.45}" size="{r} {r * 0.5}" mass="1.5" rgba="{_rgba(BODY_RGB)}"/>
-  <geom class="solid" type="box" pos="{r * 0.85} 0 {r}" size="{r * 0.2} {r * 0.5} {r * 0.15}" mass="0.01" rgba="{_rgba(MUZZLE_RGB)}"/>
+  <geom class="solid" type="box" pos="{r * 0.55} 0 {r}" size="{r * 0.2} {r * 0.5} {r * 0.15}" mass="0.01" rgba="{_rgba(MUZZLE_RGB)}"/>
   <geom class="slip" type="sphere" pos="{r * 0.75} 0 {-wheel + 0.01}" size="0.01"/>
   <geom class="slip" type="sphere" pos="{-r * 0.75} 0 {-wheel + 0.01}" size="0.01"/>
-  <camera name="eye{n}" pos="{r + 0.012} 0 {m(cfg.camera_height) - wheel}" xyaxes="0 -1 0 0 0 1" fovy="{np.degrees(SECTORS[-1]) * 2.0}"/>
+  <camera name="eye{n}" pos="{m(cfg.camera_ahead)} 0 {m(cfg.camera_height) - wheel}" xyaxes="0 -1 0 0 0 1" fovy="{np.degrees(SECTORS[-1]) * 2.0}"/>
   <body name="left{n}" pos="0 {track} 0"><joint name="left{n}" type="hinge" axis="0 1 0" damping="0.001" armature="0.002"/><geom class="tyre" type="sphere" size="{wheel}" mass="0.1"/></body>
   <body name="right{n}" pos="0 {-track} 0"><joint name="right{n}" type="hinge" axis="0 1 0" damping="0.001" armature="0.002"/><geom class="tyre" type="sphere" size="{wheel}" mass="0.1"/></body>
 </body>''')
@@ -156,6 +157,8 @@ class Mondo3D(PileWorld):
     """`enclosures` recinti con `cfg.beings` esseri ciascuno: stessa interfaccia
     di `PileWorld`, più `view` (ciò che vede un essere) e `overview`."""
 
+    KINDS = ("pila rossa", "pila gialla", "essere")  # ciò che c'è nelle immagini, oltre allo sfondo
+
     def __init__(self, cfg: Mondo3DConfig, enclosures: int = 1, seed: int = 0):
         super().__init__(cfg, enclosures, seed)
         self.substeps = max(1, round(cfg.dt / cfg.physics_dt))
@@ -171,6 +174,8 @@ class Mondo3D(PileWorld):
         self.pvx, self.pvy = idx(lambda b, k: vel(f"pile{b}_{k}x")), idx(lambda b, k: vel(f"pile{b}_{k}y"))
         self.pgeom = idx(lambda b, k: name(mujoco.mjtObj.mjOBJ_GEOM, f"pile{b}_{k}"))
         each = lambda f: np.array([[f(f"{b}_{i}") for i in range(n)] for b in range(B)])
+        owner = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) for b in m.geom_bodyid]
+        self.being_geoms = np.array([g for g, o in enumerate(owner) if o.startswith(("being", "left", "right"))])
         self.qadr = each(lambda s: adr(f"being{s}x"))  # x, y, z, rotta, beccheggio, rollio: consecutivi
         self.vadr = each(lambda s: vel(f"being{s}x"))
         self.left = each(lambda s: name(mujoco.mjtObj.mjOBJ_ACTUATOR, f"left{s}"))
@@ -315,6 +320,31 @@ class Mondo3D(PileWorld):
             me = weakref.ref(self)  # registrato dopo MuJoCo, quindi all'uscita chiude prima di lui
             atexit.register(lambda: me() and me().close())
         return self._renderers[h, w]
+
+    def labels(self, b: int, i: int) -> np.ndarray:
+        """La verità dell'immagine di `view`, per addestrare ed esaminare la
+        percezione: (H, W) di byte, 0 niente, poi vedi `Mondo3D.KINDS`."""
+        return self._gl.call(self._labels, b, i)
+
+    def segments(self, b: int, i: int) -> np.ndarray:
+        """Quale geometria c'è in ogni pixel di `view`: (H, W), -1 niente."""
+        return self._gl.call(self._segments, b, i)
+
+    def _segments(self, b, i) -> np.ndarray:
+        r = self._renderer(self.cfg.image, self.cfg.image)
+        r.update_scene(self.data, camera=int(self.cam[b, i]))
+        r.enable_segmentation_rendering()
+        seg = r.render()[..., 0].copy()
+        r.disable_segmentation_rendering()
+        return seg
+
+    def _labels(self, b, i) -> np.ndarray:
+        seg = self._segments(b, i)
+        names = np.zeros(self.model.ngeom + 1, dtype=np.uint8)  # l'ultimo è il vuoto (-1): niente
+        names[self.being_geoms] = self.KINDS.index("essere") + 1
+        names[self.pgeom[b]] = np.where(self.bcolor[b] == RED, self.KINDS.index("pila rossa"),
+                                        self.KINDS.index("pila gialla")) + 1
+        return names[seg]
 
     def _view(self, b, i, rgb, depth) -> dict:
         r = self._renderer(self.cfg.image, self.cfg.image)
