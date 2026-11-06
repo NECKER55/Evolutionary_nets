@@ -31,10 +31,10 @@ GOOD_C, BAD_C = (90, 220, 120), (240, 90, 80)
 RED_C, YELLOW_C = (235, 80, 70), (240, 210, 60)
 FLASH = 4.0  # s veri per cui si annuncia uno scambio
 HELP = "Spazio pausa   +/- velocità   T turbo   Tab o frecce </> essere   frecce su/giù recinto   V da dietro   Esc menu"
-NO_NET = "La rete si vede solo con gli agenti 'cervello ragionante' e 'vedente': questo non ha neuroni. Esc per tornare al menu."
+NO_NET = "La rete si vede solo con gli agenti 'ragionante' e 'vedente': questo non ha neuroni. Esc per tornare al menu."
 KIND_C = ((235, 80, 70), (240, 210, 60), (120, 170, 255))  # i riquadri degli oggetti trovati, come in `vision.KINDS`
 MESSAGE = 3.0  # s veri per cui resta un avviso
-BRAIN_HELP = "   R tara   C cambia corpo   N cervello"
+BRAIN_HELP = "   R tara   C cambia corpo   N cervello   O occhio (reti pronte)"
 
 
 def surface(rgb: np.ndarray) -> pygame.Surface:
@@ -167,7 +167,19 @@ class Mondo3DScreen(Screen):
         elif k == pygame.K_c and self.brain:
             self._next_body()
         elif k == pygame.K_n and self.brain:
-            self.page = None if self.page else BrainPage()
+            self.page = None if isinstance(self.page, BrainPage) else BrainPage()
+        elif k == pygame.K_o and self.brain:
+            self._eye()
+
+    def _eye(self) -> None:
+        """L'ultimo sguardo delle reti pronte a tutto schermo; gli altri occhi non hanno sguardi da mostrare."""
+        from .eye_page import EyePage
+
+        eyes = getattr(self.brain.boss, "eyes", None)
+        if not hasattr(eyes, "looks"):
+            self._say("l'occhio a tutto schermo c'è solo per il vedente con le reti pronte")
+        else:
+            self.page = None if isinstance(self.page, EyePage) else EyePage(eyes)
 
     def close(self) -> None:
         self.run.close()

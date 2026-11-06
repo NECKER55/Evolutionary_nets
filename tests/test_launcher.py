@@ -156,7 +156,7 @@ def test_every_agent_with_a_motor_can_choose_a_body_and_who_sees_only_knows_colo
     m.m_agent.select("perfetto")
     m.draw(s)
     assert not m.m_body.enabled and m.p_good.enabled and m.p_good.value == "grandezza"
-    m.m_agent.select("vedente")
+    m.m_agent.select("vedente pronto")
     m.draw(s)
     assert m.m_body.enabled and not m.p_good.enabled and m.p_good.value == "colore"
 

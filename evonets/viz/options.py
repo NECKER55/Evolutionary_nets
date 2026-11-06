@@ -90,19 +90,19 @@ DETAILS = {
                   "visibile": "Un compagno vero, che si mangia davvero le pile buone."},
     "m_agent": {"ragionante": "Il motore (sezione C) con sopra un comandante finto che legge la verità. Per vedere la rete e la "
                               "taratura.",
-                "vedente": "Motore più rete nostra: 19 ms per vista. Conosce solo le pile rosse, gialle e gli esseri. "
-                           "Il comandante è finto ma sa solo ciò che vede.",
+                "vedente pronto": "Motore più FastSAM, profondità e DINOv2: trova ogni cosa e la descrive senza nomi, "
+                                  "circa 1 s per sguardo su CPU, uno ogni 0,5 s di mondo: il mondo lo aspetta. Il comandante "
+                                  "è finto ma sa solo ciò che vede. Tasto O: l'occhio. Meglio con la telecamera 1280×720. "
+                                  "Richiede: uv run --group percezione main.py",
                 "vedente finto": "Come il vedente, ma legge gli oggetti dal simulatore e vede attraverso i muri. "
                                  "Serve a provare il resto, non a misurare.",
-                "vedente pronto": "Motore più SlimSAM e DINOv2: riconosce oggetti mai visti, 3 s per vista. Il mondo lo aspetta. "
-                                  "Richiede: uv run --group percezione main.py",
                 "perfetto": "Regole a mano che leggono la verità, anche dietro le spalle. Il soffitto: nessun cervello, "
                             "non usa la telecamera.",
                 "base": "Vaga guardando solo la profondità e morde ciò che ha davanti. Il pavimento."},
     "m_map": {"aperta": "Una stanza sola di 5 m, tutta visibile da quasi ogni punto.",
               "stanze": "12 m di lato, 9 stanze con una porta o due, colorate. Le pile stanno in una stanza d'angolo.",
               "labirinto": "13 m di lato, 25 stanze piccole e una sola strada tra due punti."},
-    "m_camera": {"264×264": "Quadrata e piccola: una pila piccola a 3 m è 2-3 pixel. Quella con cui è addestrata la rete nostra.",
+    "m_camera": {"264×264": "Quadrata e piccola: una pila piccola a 3 m è 2-3 pixel.",
                  "640×480": "Come molte telecamere dei robot: la stessa pila è circa 6 pixel.",
                  "1280×720": "Come una telecamera normale: la stessa pila è circa 12 pixel, ma è 13 volte più lenta da disegnare."},
     "m_body": {"spinta, sterzo, morso": "Ogni uscita fa una cosa sola: il corpo più semplice.",

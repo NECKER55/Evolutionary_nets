@@ -361,12 +361,12 @@ class Launcher(Screen):
         self.p_encl = Number("Recinti", 200, step=50, low=1)
         self.p_beings = Number("Esseri per recinto", 6, step=1, low=1)
         # Il mondo 3D (docs/SPEC_CERVELLO_RAGIONANTE.md).
-        self.m_agent = Choice("Agente", [("ragionante", "ragionante"), ("vedente", "vedente, rete nostra"),
-                                         ("vedente finto", "vedente finto"), ("vedente pronto", "vedente, reti pronte"),
+        self.m_agent = Choice("Agente", [("ragionante", "ragionante"), ("vedente pronto", "vedente, reti pronte"),
+                                         ("vedente finto", "vedente finto"),
                                          ("perfetto", "perfetto"), ("base", "base")])
         self.m_body = Choice("Corpo", [(k, k) for k in BODIES])
         self.m_map = Choice("Mappa", [(k, k) for k in PLANS])
-        self.m_camera = Choice("Telecamera", [(k, k) for k in CAMERAS])
+        self.m_camera = Choice("Telecamera", [(k, k) for k in CAMERAS], index=2)  # quella per cui è fatta la percezione
         self.m_encl = Number("Recinti", 1, step=1, low=1)
         self.m_beings = Number("Esseri per recinto", 3, step=1, low=1)
         load = defaults.get("load")
