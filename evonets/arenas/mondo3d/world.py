@@ -198,6 +198,8 @@ class Mondo3D(PileWorld):
         each = lambda f: np.array([[f(f"{b}_{i}") for i in range(n)] for b in range(B)])
         owner = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) for b in m.geom_bodyid]
         self.being_geoms = np.array([g for g, o in enumerate(owner) if o.startswith(("being", "left", "right"))])
+        self.body_of = [[np.array([g for g, o in enumerate(owner) if o in (f"being{b}_{i}", f"left{b}_{i}", f"right{b}_{i}")])
+                         for i in range(n)] for b in range(B)]  # le geometrie di ogni essere
         self.qadr = each(lambda s: adr(f"being{s}x"))  # x, y, z, rotta, beccheggio, rollio: consecutivi
         self.vadr = each(lambda s: vel(f"being{s}x"))
         self.left = each(lambda s: name(mujoco.mjtObj.mjOBJ_ACTUATOR, f"left{s}"))
