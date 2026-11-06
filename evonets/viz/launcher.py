@@ -13,6 +13,7 @@ import numpy as np
 import pygame
 
 from ..arenas.generational.evolution import Evolution
+from ..arenas.mondo3d.bodies import BODIES
 from ..brains.freeform.anatomy import KIND_NAMES
 from ..config import Config
 from .render import BG, BORDER, DIM, IDLE, PLAYER, TARGET, TEXT
@@ -382,11 +383,14 @@ class Launcher(Screen):
                              help="Recinti che girano insieme (GPU); se ne guarda uno alla volta.")
         self.p_beings = Number("Esseri per recinto", 6, step=1, low=1, help="Quanti esseri in ogni recinto.")
         # Il mondo 3D (docs/SPEC_CERVELLO_RAGIONANTE.md): per ora solo gli agenti di controllo.
-        self.m_agent = Choice("Agente", [("perfetto", "perfetto: legge la verità dal simulatore (soffitto)"),
+        self.m_agent = Choice("Agente", [("ragionante", "cervello ragionante: per ora solo il motore (sezione 7)"),
+                                         ("perfetto", "perfetto: legge la verità dal simulatore (soffitto)"),
                                          ("base", "base: vaga guardando solo la profondità (pavimento)")],
-                              help="Agenti di controllo, non cervelli: un cervello si misurerà tra i due.")
+                              help="Il cervello nuovo, e i due controlli tra cui si misura. Non usa il cervello a sezioni.")
+        self.m_body = Choice("Corpo", [(k, k) for k in BODIES],
+                             help="Come le uscite del cervello muovono il corpo: il cervello non lo sa e deve tararsi.")
         self.m_encl = Number("Recinti", 1, step=1, low=1, help="Recinti nello stesso mondo; se ne guarda uno alla volta.")
-        self.m_beings = Number("Esseri per recinto", 1, step=1, low=1, help="Quanti esseri in ogni recinto.")
+        self.m_beings = Number("Esseri per recinto", 3, step=1, low=1, help="Quanti esseri in ogni recinto.")
         load = defaults.get("load")
         self.extra = [load] if load and Path(load).exists() and Path(load).parent.resolve() != RUNS.resolve() else []
         self.picker: SavePicker | None = None
@@ -404,8 +408,8 @@ class Launcher(Screen):
         self.pile_fields = [self.task, self.p_agent, self.p_phase, self.p_lesion, self.p_good, self.p_teacher, self.p_encl,
                             self.p_beings,
                             self.chance, self.seed, self.gens, self.load, self.save]
-        self.world3d_fields = [self.task, self.m_agent, self.p_good, self.m_encl, self.m_beings, self.chance, self.seed,
-                               self.gens]
+        self.world3d_fields = [self.task, self.m_agent, self.m_body, self.p_good, self.m_encl, self.m_beings, self.chance,
+                               self.seed, self.gens]
         self.focus = 0
         self.start_btn = Button("Avvia la corsa  [Invio]", self.start, primary=True)
         self.inspect_btn = Button("Esplora reti e genomi del salvataggio", self.explore)
@@ -599,7 +603,7 @@ class Launcher(Screen):
 
         if self.chance.value == "random":
             self.seed.value = secrets.randbelow(2**31)
-        cfg = Mondo3DConfig(beings=self.m_beings.fixed(), good_by=self.p_good.value)
+        cfg = Mondo3DConfig(beings=self.m_beings.fixed(), good_by=self.p_good.value, body=self.m_body.value)
         try:
             run = Run3D(cfg, self.m_agent.value, self.m_encl.fixed(), self.seed.fixed())
         except Exception as err:
@@ -719,6 +723,7 @@ class Launcher(Screen):
         pile = fields is not self.fields
         self.gens.label = "Minuti di mondo" if pile else self.gens.label
         self.p_lesion.enabled = self.p_agent.value == "sezioni"
+        self.m_body.enabled = self.m_agent.value == "ragionante"
         for k, f in enumerate(fields):
             f.draw(s, app.font, 60, y, 175, 540, k == self.focus)
             y += ROW_H  # righe fitte: con il tetto dell'arena sono 15
