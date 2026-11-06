@@ -30,7 +30,8 @@ GOOD_C, BAD_C = (90, 220, 120), (240, 90, 80)
 RED_C, YELLOW_C = (235, 80, 70), (240, 210, 60)
 FLASH = 4.0  # s veri per cui si annuncia uno scambio
 HELP = "Spazio pausa   +/- velocità   T turbo   Tab o frecce </> essere   frecce su/giù recinto   V da dietro   Esc menu"
-NO_NET = "La rete si vede solo con l'agente 'cervello ragionante': questo agente non ha neuroni. Esc per tornare al menu."
+NO_NET = "La rete si vede solo con gli agenti 'cervello ragionante' e 'vedente': questo non ha neuroni. Esc per tornare al menu."
+KIND_C = ((235, 80, 70), (240, 210, 60), (120, 170, 255))  # i riquadri degli oggetti trovati, come in `vision.KINDS`
 MESSAGE = 3.0  # s veri per cui resta un avviso
 BRAIN_HELP = "   R tara   C cambia corpo"
 
@@ -188,6 +189,7 @@ class Mondo3DScreen(Screen):
             pygame.draw.rect(s, BORDER, box, 1)
             self.boxes.append(box)
         if self.brain:
+            self._found(s, self.boxes[0], x, y - 18, eye)
             self._depth_reading(s, x, y + eye + 4, view["depth"])
             self._swaps(s, left.right + 24, 44)
             self._state(s, 1010, 44)
@@ -201,6 +203,25 @@ class Mondo3DScreen(Screen):
             s.blit(app.small.render(NO_NET, True, TEXT), (16, left.bottom + 30))
         if time.perf_counter() < self.note_until:
             s.blit(app.font.render(self.note, True, PLAYER), (left.x + 8, left.y + 8))
+
+    def _found(self, s, box, x, y, width) -> None:
+        """La sezione 1: gli oggetti trovati, sopra l'immagine, con la loro distanza."""
+        seen = getattr(self.brain.boss, "seen", None)
+        if seen is None:
+            return
+        on = np.flatnonzero(seen.on[self.encl, self.follow])
+        for m in on:
+            left, top, right, down = seen.box[self.encl, self.follow, m]
+            if right <= left:  # il detector finto non ha riquadri
+                continue
+            kind = seen.kind[self.encl, self.follow, m]
+            rect = pygame.Rect(box.x + left * box.w - 1, box.y + top * box.h - 1,
+                               (right - left) * box.w + 2, (down - top) * box.h + 2)
+            pygame.draw.rect(s, KIND_C[kind], rect, 1)
+            label = f"{seen.dist[self.encl, self.follow, m]:.0f}"
+            s.blit(self.app.small.render(label, True, KIND_C[kind]), (rect.x, max(box.y, rect.y - 13)))
+        text = f"vede {len(on)} oggetti"
+        s.blit(self.app.small.render(text, True, TEXT), (box.x + 6, box.y + 4))
 
     def _motor(self, s, x, y) -> None:
         """La sezione 7 dell'essere seguito e i suoi pulsanti."""

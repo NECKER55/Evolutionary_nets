@@ -384,6 +384,9 @@ class Launcher(Screen):
         self.p_beings = Number("Esseri per recinto", 6, step=1, low=1, help="Quanti esseri in ogni recinto.")
         # Il mondo 3D (docs/SPEC_CERVELLO_RAGIONANTE.md): per ora solo gli agenti di controllo.
         self.m_agent = Choice("Agente", [("ragionante", "cervello ragionante: per ora solo il motore (sezione 7)"),
+                                         ("vedente", "vedente: motore più percezione vera dalla telecamera (sezione 1)"),
+                                         ("vedente finto", "vedente finto: come il vedente, ma gli oggetti li legge dal simulatore"),
+                                         ("vedente pronto", "vedente pronto: SlimSAM e DINOv2, richiede --group percezione (lento)"),
                                          ("perfetto", "perfetto: legge la verità dal simulatore (soffitto)"),
                                          ("base", "base: vaga guardando solo la profondità (pavimento)")],
                               help="Il cervello nuovo, e i due controlli tra cui si misura. Non usa il cervello a sezioni.")
